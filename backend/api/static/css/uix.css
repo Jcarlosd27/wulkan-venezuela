@@ -47,46 +47,20 @@ body {
   box-shadow: 10px 0 30px rgba(17, 24, 39, 0.025);
 }
 
-.sidebar-scroll-rail {
-  position: absolute;
-  top: 88px;
-  right: 5px;
-  bottom: 14px;
-  width: 5px;
-  border-radius: 999px;
-  background: #eef4ff;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease;
-}
-
-.sidebar.has-sidebar-scroll .sidebar-scroll-rail {
-  opacity: 1;
-}
-
-.sidebar-scroll-rail span {
-  display: block;
-  min-height: 36px;
-  width: 100%;
-  border-radius: inherit;
-  background: var(--wulkan-orange);
-  box-shadow: 0 0 0 2px #eef4ff;
-}
-
 .sidebar-nav {
   flex: 1 1 auto;
   flex-wrap: nowrap;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: scroll;
-  padding-right: 8px;
+  padding-right: 5px;
   scrollbar-color: rgba(13, 110, 253, 0.72) #eef4ff;
   scrollbar-gutter: stable;
   scrollbar-width: auto;
 }
 
 .sidebar-nav::-webkit-scrollbar {
-  width: 10px;
+  width: 9px;
 }
 
 .sidebar-nav::-webkit-scrollbar-track {

@@ -6,7 +6,7 @@
     <title>{{ title or "Wulkan Admin Flask" }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/uix.css') }}?v=20260608-audit-sidebar-3" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/uix.css') }}?v=20260608-sidebar-single-scroll-1" rel="stylesheet">
   </head>
   <body>
     <div class="app-shell">
@@ -75,7 +75,6 @@
           </a>
           {% endif %}
         </nav>
-        <div class="sidebar-scroll-rail" aria-hidden="true"><span></span></div>
       </aside>
       <main class="content">
         <header class="topbar app-topbar">
@@ -109,35 +108,10 @@
       document.addEventListener("DOMContentLoaded", () => {
         const nav = document.querySelector(".sidebar-nav");
         const active = document.querySelector(".sidebar-nav .nav-link.active");
-        const sidebar = document.querySelector(".sidebar");
-        const rail = document.querySelector(".sidebar-scroll-rail");
-        const thumb = document.querySelector(".sidebar-scroll-rail span");
         if (nav && active) {
           nav.scrollTop = active.offsetTop - (nav.clientHeight / 2) + (active.clientHeight / 2);
           nav.scrollLeft = 0;
         }
-        const updateSidebarScroll = () => {
-          if (!nav || !sidebar || !rail || !thumb) {
-            return;
-          }
-          const scrollable = nav.scrollHeight > nav.clientHeight + 1;
-          sidebar.classList.toggle("has-sidebar-scroll", scrollable);
-          if (!scrollable) {
-            thumb.style.height = "0px";
-            thumb.style.transform = "translateY(0)";
-            return;
-          }
-          const railHeight = rail.clientHeight;
-          const thumbHeight = Math.max(36, railHeight * (nav.clientHeight / nav.scrollHeight));
-          const maxThumbTop = railHeight - thumbHeight;
-          const maxScrollTop = nav.scrollHeight - nav.clientHeight;
-          const thumbTop = maxScrollTop > 0 ? maxThumbTop * (nav.scrollTop / maxScrollTop) : 0;
-          thumb.style.height = `${thumbHeight}px`;
-          thumb.style.transform = `translateY(${thumbTop}px)`;
-        };
-        nav?.addEventListener("scroll", updateSidebarScroll);
-        window.addEventListener("resize", updateSidebarScroll);
-        updateSidebarScroll();
       });
     </script>
     {% block scripts %}{% endblock %}
