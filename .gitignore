@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.npm-cache/
+
+# Builds
+.next/
+.next-logs/
+out/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+*.log
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+local.properties
+
+# Environment
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Local database files
+backend/api/data/*.db
+
+# Local tooling and generated archives
+.config/
+.sixth/
+android-commandline-tools-temp/
+commandlinetools-win-latest.zip
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

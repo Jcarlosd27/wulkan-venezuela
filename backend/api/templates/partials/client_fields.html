@@ -1,0 +1,72 @@
+<div class="row g-3">
+  <div class="col-12 col-md-7">
+    <label class="form-label fw-semibold">Nombre comercial</label>
+    <input class="form-control" name="businessName" required value="{{ client.businessName if client is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-5">
+    <label class="form-label fw-semibold">RIF / Cedula</label>
+    <input class="form-control" name="taxId" value="{{ client.taxId if client is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-6">
+    <label class="form-label fw-semibold">Responsable</label>
+    <input class="form-control" name="contactName" value="{{ client.contactName if client is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-6">
+    <label class="form-label fw-semibold">Telefono</label>
+    <input class="form-control" name="phone" value="{{ client.phone if client is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-7">
+    <label class="form-label fw-semibold">Email / usuario movil</label>
+    <input class="form-control" name="email" type="email" required value="{{ client.email if client is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-5">
+    <label class="form-label fw-semibold">Contrasena</label>
+    <input class="form-control" name="password" type="password" placeholder="{{ 'Dejar vacia para conservar' if client is defined else 'ferretero2026' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Tipo</label>
+    {% set selected_type = client.clientType if client is defined else 'ferretero' %}
+    <select class="form-select" name="clientType">
+      <option value="ferretero" {% if selected_type == 'ferretero' %}selected{% endif %}>Ferretero</option>
+      <option value="distribuidor" {% if selected_type == 'distribuidor' %}selected{% endif %}>Distribuidor</option>
+      <option value="cliente_especial" {% if selected_type == 'cliente_especial' %}selected{% endif %}>Cliente especial</option>
+    </select>
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Estado</label>
+    {% set selected_status = client.status if client is defined else 'active' %}
+    <select class="form-select" name="status">
+      <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Activo</option>
+      <option value="suspended" {% if selected_status == 'suspended' %}selected{% endif %}>Suspendido</option>
+      <option value="blocked" {% if selected_status == 'blocked' %}selected{% endif %}>Bloqueado</option>
+    </select>
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Dias de credito</label>
+    <input class="form-control" name="paymentTermsDays" inputmode="numeric" value="{{ client.paymentTermsDays if client is defined else 0 }}">
+  </div>
+  <div class="col-12">
+    <div class="product-checks">
+      <label class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="creditEnabled" {% if client is defined and client.creditEnabled %}checked{% endif %}>
+        <span class="form-check-label">Credito habilitado</span>
+      </label>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Limite credito USD</label>
+    <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Credito usado USD</label>
+    <input class="form-control" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Disponible calculado</label>
+    <input class="form-control" readonly value="{{ money_usd(client.creditAvailableUsd) if client is defined else money_usd(0) }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Notas internas</label>
+    <textarea class="form-control" name="notes" rows="3">{{ client.notes if client is defined else '' }}</textarea>
+  </div>
+</div>

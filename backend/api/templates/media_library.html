@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% set heading = "Biblioteca tecnica" %}
+{% set description = "Gestion profesional de imagenes, fichas PDF y recursos asociados a productos." %}
+
+{% block top_action %}
+<button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#assetModal">
+  <i class="bi bi-cloud-arrow-up"></i> Subir recurso
+</button>
+{% endblock %}
+
+{% block content %}
+{% set image_count = assets | selectattr("assetType", "equalto", "image") | list | length %}
+{% set pdf_count = assets | selectattr("assetType", "equalto", "pdf") | list | length %}
+
+<section class="row g-3 media-summary">
+  <div class="col-12 col-md-4">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-collection"></i></div>
+      <em>Biblioteca</em>
+      <span>Recursos</span>
+      <strong>{{ assets | length }}</strong>
+    </article>
+  </div>
+  <div class="col-12 col-md-4">
+    <article class="metric-card metric-stock">
+      <div class="metric-icon"><i class="bi bi-image"></i></div>
+      <em>Imagenes</em>
+      <span>Galeria producto</span>
+      <strong>{{ image_count }}</strong>
+    </article>
+  </div>
+  <div class="col-12 col-md-4">
+    <article class="metric-card metric-sales">
+      <div class="metric-icon"><i class="bi bi-file-earmark-pdf"></i></div>
+      <em>PDF</em>
+      <span>Fichas tecnicas</span>
+      <strong>{{ pdf_count }}</strong>
+    </article>
+  </div>
+</section>
+
+<section class="panel media-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Recursos cargados</h2>
+      <span>Material visible para catalogo, detalle de producto y soporte comercial.</span>
+    </div>
+    <span>{{ assets | length }} activos</span>
+  </div>
+  <div class="media-toolbar">
+    <div class="media-filter active"><i class="bi bi-check2"></i> Todos</div>
+    <div class="media-filter"><i class="bi bi-image"></i> Imagenes</div>
+    <div class="media-filter"><i class="bi bi-file-earmark-pdf"></i> Fichas PDF</div>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle media-table">
+      <thead>
+        <tr>
+          <th>Recurso</th>
+          <th>Tipo</th>
+          <th>Producto asociado</th>
+          <th>Origen</th>
+          <th>Fecha</th>
+          <th class="text-end">Accion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for asset in assets %}
+        <tr>
+          <td>
+            <div class="media-resource">
+              <div class="media-preview">
+                {% if asset.assetType == "image" %}
+                <img src="{{ asset.url }}" alt="{{ asset.title }}">
+                {% else %}
+                <i class="bi bi-file-earmark-pdf"></i>
+                {% endif %}
+              </div>
+              <div>
+                <strong>{{ asset.title }}</strong>
+                <small>{{ asset.url }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            {% if asset.assetType == "pdf" %}
+            <span class="badge rounded-pill text-bg-dark">PDF tecnico</span>
+            {% else %}
+            <span class="badge rounded-pill text-bg-warning">Imagen</span>
+            {% endif %}
+          </td>
+          <td>
+            <strong class="d-block">{{ asset.productTitle }}</strong>
+            <small class="text-secondary">{{ asset.productSku or "Sin SKU" }}</small>
+          </td>
+          <td>{{ "Archivo / URL" if asset.url else "Pendiente" }}</td>
+          <td>{{ asset.createdAt }}</td>
+          <td class="text-end">
+            {% if asset.url %}
+            <a class="btn btn-sm btn-light" href="{{ asset.url }}" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Abrir</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">
+            <div class="empty-state">
+              <div class="empty-icon"><i class="bi bi-folder-plus"></i></div>
+              <strong>Sin recursos cargados todavia</strong>
+              <span>Sube imagenes de producto o fichas PDF para enriquecer el catalogo movil.</span>
+              <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#assetModal">
+                <i class="bi bi-cloud-arrow-up"></i> Subir primer recurso
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="modal fade" id="assetModal" tabindex="-1" aria-labelledby="assetModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" enctype="multipart/form-data">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title fs-5" id="assetModalLabel">Subir recurso tecnico</h2>
+          <p class="mb-0 text-secondary">Asocia imagenes o PDF a un producto del ecommerce.</p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Titulo interno</label>
+          <input class="form-control" name="title" placeholder="Ficha tecnica motosierra 45cc">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Producto asociado</label>
+          <select class="form-select" name="productId">
+            <option value="">Sin asociar</option>
+            {% for product in products %}
+            <option value="{{ product.id }}">{{ product.sku }} - {{ product.title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="row g-3">
+          <div class="col-12 col-md-5">
+            <label class="form-label fw-semibold">Tipo</label>
+            <select class="form-select" name="assetType">
+              <option value="image">Imagen de producto</option>
+              <option value="pdf">PDF tecnico</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-7">
+            <label class="form-label fw-semibold">Archivo</label>
+            <input class="form-control" name="assetFile" type="file" accept="image/*,application/pdf">
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="form-label fw-semibold">URL externa</label>
+          <input class="form-control" name="assetUrl" placeholder="https://...">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-save2"></i> Guardar recurso</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

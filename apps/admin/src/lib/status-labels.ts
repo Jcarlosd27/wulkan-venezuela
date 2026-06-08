@@ -1,0 +1,41 @@
+export const statusLabels: Record<string, string> = {
+  active: "Activo",
+  inactive: "Inactivo",
+  pending: "Pendiente",
+  suspended: "Suspendido",
+  archived: "Archivado",
+  draft: "Borrador",
+  pending_payment: "Pago pendiente",
+  payment_under_review: "Pago en revision",
+  paid: "Pagada",
+  preparing: "Preparando",
+  ready_for_pickup: "Lista para retiro",
+  shipped: "Despachada",
+  delivered: "Entregada",
+  cancelled: "Cancelada",
+  refunded: "Reembolsada",
+  submitted: "Enviada",
+  under_wulkan_review: "Revision Wulkan",
+  approved: "Aprobada",
+  modified: "Modificada",
+  rejected: "Rechazada",
+  closed: "Cerrada",
+  received: "Recibida",
+  diagnosed: "Diagnosticada",
+  waiting_approval: "Esperando aprobacion",
+  waiting_part: "Esperando repuesto",
+  in_repair: "En reparacion",
+  repaired: "Reparada",
+  warranty_rejected: "Garantia rechazada",
+  under_review: "En revision",
+  confirmed: "Confirmado",
+  requested: "Solicitada",
+  answered: "Respondida",
+  accepted: "Aceptada",
+  expired: "Vencida",
+  converted: "Convertida"
+};
+
+export function getStatusLabel(status: string): string {
+  return statusLabels[status] ?? status;
+}

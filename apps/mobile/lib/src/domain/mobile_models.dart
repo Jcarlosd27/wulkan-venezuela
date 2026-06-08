@@ -1,0 +1,277 @@
+class MobileCategory {
+  const MobileCategory({
+    required this.id,
+    required this.name,
+    required this.description,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+}
+
+class MobileProduct {
+  const MobileProduct({
+    required this.id,
+    required this.sku,
+    required this.name,
+    required this.verticalName,
+    required this.description,
+    required this.publicPriceUsd,
+    required this.b2bPriceUsd,
+    required this.availableStock,
+    required this.badge,
+    required this.requiresQuote,
+    required this.requiresTechnicalValidation,
+    required this.compatibilityNotes,
+    this.productType = "machine",
+    this.imageUrls = const [],
+    this.discountPercent = 0,
+    this.originalPriceUsd,
+    this.variants = const [],
+    this.specifications = const {},
+    this.imageUrl,
+    this.sourceUrl,
+    this.originalPriceClp,
+    this.importExchangeRateClpUsd,
+  });
+
+  final String id;
+  final String sku;
+  final String name;
+  final String verticalName;
+  final String description;
+  final double publicPriceUsd;
+  final double b2bPriceUsd;
+  final int availableStock;
+  final String badge;
+  final bool requiresQuote;
+  final bool requiresTechnicalValidation;
+  final List<String> compatibilityNotes;
+  final String productType;
+  final List<String> imageUrls;
+  final double discountPercent;
+  final double? originalPriceUsd;
+  final List<String> variants;
+  final Map<String, String> specifications;
+  final String? imageUrl;
+  final String? sourceUrl;
+  final double? originalPriceClp;
+  final double? importExchangeRateClpUsd;
+
+  String get categoryName => verticalName;
+  bool get hasDiscount =>
+      discountPercent > 0 || (originalPriceUsd ?? 0) > publicPriceUsd;
+  String? get primaryImageUrl {
+    if (imageUrl != null && imageUrl!.isNotEmpty) {
+      return imageUrl;
+    }
+    return imageUrls.isNotEmpty ? imageUrls.first : null;
+  }
+}
+
+class MobileProductQuery {
+  const MobileProductQuery({
+    this.text = "",
+    this.verticalName,
+    this.categoryId,
+    this.sellerId,
+    this.onlyAvailable = false,
+    this.onlyNeedsValidation = false,
+    this.limit = 24,
+    this.cursor,
+  });
+
+  final String text;
+  final String? verticalName;
+  final String? categoryId;
+  final String? sellerId;
+  final bool onlyAvailable;
+  final bool onlyNeedsValidation;
+  final int limit;
+  final String? cursor;
+
+  MobileProductQuery copyWith({
+    String? text,
+    String? verticalName,
+    String? categoryId,
+    String? sellerId,
+    bool? onlyAvailable,
+    bool? onlyNeedsValidation,
+    int? limit,
+    String? cursor,
+  }) {
+    return MobileProductQuery(
+      text: text ?? this.text,
+      verticalName: verticalName ?? this.verticalName,
+      categoryId: categoryId ?? this.categoryId,
+      sellerId: sellerId ?? this.sellerId,
+      onlyAvailable: onlyAvailable ?? this.onlyAvailable,
+      onlyNeedsValidation: onlyNeedsValidation ?? this.onlyNeedsValidation,
+      limit: limit ?? this.limit,
+      cursor: cursor,
+    );
+  }
+}
+
+class MobileProductPage {
+  const MobileProductPage({
+    required this.products,
+    required this.hasMore,
+    this.nextCursor,
+  });
+
+  final List<MobileProduct> products;
+  final bool hasMore;
+  final String? nextCursor;
+}
+
+class MobileLocation {
+  const MobileLocation({
+    required this.id,
+    required this.name,
+    required this.subtitle,
+  });
+
+  final String id;
+  final String name;
+  final String subtitle;
+}
+
+class MobileAnnouncement {
+  const MobileAnnouncement({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.placement,
+    required this.priority,
+    required this.startsAt,
+    required this.status,
+    this.ctaLabel,
+    this.ctaUrl,
+    this.imageUrl,
+    this.endsAt,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String placement;
+  final int priority;
+  final DateTime startsAt;
+  final String status;
+  final String? ctaLabel;
+  final String? ctaUrl;
+  final String? imageUrl;
+  final DateTime? endsAt;
+
+  bool get isActive {
+    final now = DateTime.now();
+    return status == "active" &&
+        !startsAt.isAfter(now) &&
+        (endsAt == null || endsAt!.isAfter(now));
+  }
+}
+
+class MobileCartItem {
+  const MobileCartItem({
+    required this.productId,
+    required this.sku,
+    required this.title,
+    required this.quantity,
+    required this.unitPriceUsd,
+    required this.requiresQuote,
+    required this.requiresTechnicalValidation,
+    this.imageUrl,
+  });
+
+  final String productId;
+  final String sku;
+  final String title;
+  final int quantity;
+  final double unitPriceUsd;
+  final bool requiresQuote;
+  final bool requiresTechnicalValidation;
+  final String? imageUrl;
+
+  MobileCartItem copyWith({
+    int? quantity,
+  }) {
+    return MobileCartItem(
+      productId: productId,
+      sku: sku,
+      title: title,
+      quantity: quantity ?? this.quantity,
+      unitPriceUsd: unitPriceUsd,
+      requiresQuote: requiresQuote,
+      requiresTechnicalValidation: requiresTechnicalValidation,
+      imageUrl: imageUrl,
+    );
+  }
+}
+
+class MobileCheckoutPreview {
+  const MobileCheckoutPreview({
+    required this.subtotalUsd,
+    required this.totalUsd,
+    required this.totalVes,
+    required this.exchangeRateUsdVes,
+    required this.requiresOperatorReview,
+    required this.blockingReasons,
+  });
+
+  final double subtotalUsd;
+  final double totalUsd;
+  final double totalVes;
+  final double exchangeRateUsdVes;
+  final bool requiresOperatorReview;
+  final List<String> blockingReasons;
+}
+
+class MobileCreditSnapshot {
+  const MobileCreditSnapshot({
+    required this.customerId,
+    required this.creditEnabled,
+    required this.creditLimitUsd,
+    required this.creditUsedUsd,
+    required this.creditOrdersUsd,
+    required this.creditExposureUsd,
+    required this.creditAvailableUsd,
+    required this.paymentTermsDays,
+    required this.status,
+  });
+
+  final String customerId;
+  final bool creditEnabled;
+  final double creditLimitUsd;
+  final double creditUsedUsd;
+  final double creditOrdersUsd;
+  final double creditExposureUsd;
+  final double creditAvailableUsd;
+  final int paymentTermsDays;
+  final String status;
+}
+
+class MobileOrderSummary {
+  const MobileOrderSummary({
+    required this.id,
+    required this.status,
+    required this.totalUsd,
+    required this.paidUsd,
+    required this.balanceUsd,
+    required this.itemsCount,
+    required this.createdAt,
+    required this.paymentStatus,
+    required this.stockStatus,
+  });
+
+  final String id;
+  final String status;
+  final double totalUsd;
+  final double paidUsd;
+  final double balanceUsd;
+  final int itemsCount;
+  final DateTime createdAt;
+  final String paymentStatus;
+  final String stockStatus;
+}

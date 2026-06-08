@@ -1,0 +1,53 @@
+<div class="row g-3">
+  <div class="col-12 col-md-7">
+    <label class="form-label fw-semibold">Titulo</label>
+    <input class="form-control" name="title" required value="{{ announcement.title if announcement is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-5">
+    <label class="form-label fw-semibold">Ubicacion</label>
+    {% set selected_placement = announcement.placement if announcement is defined else 'home' %}
+    <select class="form-select" name="placement">
+      <option value="home" {% if selected_placement == 'home' %}selected{% endif %}>Home</option>
+      <option value="catalog" {% if selected_placement == 'catalog' %}selected{% endif %}>Catalogo</option>
+      <option value="checkout" {% if selected_placement == 'checkout' %}selected{% endif %}>Checkout</option>
+    </select>
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Mensaje</label>
+    <textarea class="form-control" name="body" rows="3" required>{{ announcement.body if announcement is defined else '' }}</textarea>
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Prioridad</label>
+    <input class="form-control" name="priority" value="{{ announcement.priority if announcement is defined else 50 }}" inputmode="numeric">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Inicio</label>
+    <input class="form-control" name="startsAt" type="datetime-local" value="{{ announcement.startsAt if announcement is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Cierre</label>
+    <input class="form-control" name="endsAt" type="datetime-local" value="{{ announcement.endsAt if announcement is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-5">
+    <label class="form-label fw-semibold">Boton</label>
+    <input class="form-control" name="ctaLabel" placeholder="Ver catalogo" value="{{ announcement.ctaLabel if announcement is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-7">
+    <label class="form-label fw-semibold">Accion</label>
+    <input class="form-control" name="ctaUrl" placeholder="wulkan://catalog" value="{{ announcement.ctaUrl if announcement is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-8">
+    <label class="form-label fw-semibold">Imagen para carrusel</label>
+    <input class="form-control" name="imageUrl" placeholder="https://..." value="{{ announcement.imageUrl if announcement is defined else '' }}">
+    <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Estado</label>
+    {% set selected_status = announcement.status if announcement is defined else 'active' %}
+    <select class="form-select" name="status">
+      <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Activo</option>
+      <option value="pending" {% if selected_status == 'pending' %}selected{% endif %}>Pendiente</option>
+      <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactivo</option>
+    </select>
+  </div>
+</div>

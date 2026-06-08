@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% set heading = mode ~ " producto" %}
+{% set description = "Producto ecommerce con SKU, precio USD/VES, stock, media y ficha tecnica." %}
+
+{% block top_action %}
+<a class="btn btn-light" href="{{ url_for('products') }}"><i class="bi bi-arrow-left"></i> Volver</a>
+{% endblock %}
+
+{% block content %}
+<form class="product-form" method="post" enctype="multipart/form-data">
+  {% if error %}
+  <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong>{{ error }}</strong>
+  </div>
+  {% endif %}
+
+  <section class="row g-3">
+    <div class="col-12 col-xl-7">
+      <article class="panel product-form-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Identificacion del producto</h2>
+            <span>Datos principales visibles en el catalogo movil.</span>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">SKU</label>
+            <input class="form-control text-uppercase" name="sku" required autofocus placeholder="WUL-MOT-45CC" value="{{ product.sku if product else '' }}">
+            <small class="text-secondary">Codigo unico para stock y ordenes.</small>
+          </div>
+          <div class="col-12 col-md-8">
+            <label class="form-label fw-semibold">Nombre comercial</label>
+            <input class="form-control" name="title" required placeholder="Motosierra Wulkan 45cc" value="{{ product.title if product else '' }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Categoria</label>
+            <select class="form-select" name="categoryId">
+              {% for category in categories %}
+              <option value="{{ category.id }}" {% if product and product.categoryId == category.id %}selected{% endif %}>{{ category.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Tipo</label>
+            <select class="form-select" name="productType">
+              {% set selected_type = product.productType if product else 'machine' %}
+              <option value="machine" {% if selected_type == 'machine' %}selected{% endif %}>Maquina</option>
+              <option value="spare_part" {% if selected_type == 'spare_part' %}selected{% endif %}>Repuesto</option>
+              <option value="accessory" {% if selected_type == 'accessory' %}selected{% endif %}>Accesorio</option>
+              <option value="service" {% if selected_type == 'service' %}selected{% endif %}>Servicio</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Descripcion para ecommerce</label>
+            <textarea class="form-control" name="description" rows="4" placeholder="Uso recomendado, beneficios, contenido de caja, garantia...">{{ product.description if product else '' }}</textarea>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <article class="panel product-form-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Precio y disponibilidad</h2>
+            <span>Valores comerciales y control de publicacion.</span>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Precio publico USD</label>
+            <input class="form-control" name="publicPriceUsd" inputmode="decimal" required value="{{ product.publicPriceUsd if product else '' }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Precio anterior USD</label>
+            <input class="form-control" name="originalPriceUsd" inputmode="decimal" value="{{ product.originalPriceUsd if product else '' }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Descuento %</label>
+            <input class="form-control" name="discountPercent" inputmode="decimal" value="{{ product.discountPercent if product else 0 }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Precio B2B USD</label>
+            <input class="form-control" name="b2bPriceUsd" inputmode="decimal" value="{{ product.b2bPriceUsd if product else '' }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Tasa USD/VES</label>
+            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ product.exchangeRateUsdVes if product else rate }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Stock inicial</label>
+            <input class="form-control" name="stock" inputmode="numeric" value="{{ product.stock if product else 0 }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Estado</label>
+            <select class="form-select" name="status">
+              {% set selected_status = product.status if product else 'active' %}
+              <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Activo</option>
+              <option value="pending" {% if selected_status == 'pending' %}selected{% endif %}>Pendiente</option>
+              <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactivo</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <div class="product-checks">
+              <label class="form-check">
+                <input class="form-check-input" type="checkbox" name="requiresQuote" {% if product and product.requiresQuote %}checked{% endif %}>
+                <span class="form-check-label">Requiere cotizacion</span>
+              </label>
+              <label class="form-check">
+                <input class="form-check-input" type="checkbox" name="requiresTechnicalValidation" {% if product and product.requiresTechnicalValidation %}checked{% endif %}>
+                <span class="form-check-label">Validacion tecnica</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="row g-3 mt-1">
+    <div class="col-12 col-xl-6">
+      <article class="panel product-form-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Imagenes y documentos</h2>
+            <span>Media usada por la app movil y detalle de producto.</span>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label fw-semibold">Imagen principal</label>
+            <input class="form-control" name="imageUrl" placeholder="https://..." value="{{ product.imageUrl if product else '' }}">
+            <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Galeria de imagenes</label>
+            <textarea class="form-control" name="imageUrls" rows="3" placeholder="Una URL por linea">{{ (product.imageUrls | join('\n')) if product else '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">PDFs tecnicos</label>
+            <textarea class="form-control" name="pdfUrls" rows="2" placeholder="Ficha tecnica PDF por URL">{{ (product.pdfUrls | join('\n')) if product else '' }}</textarea>
+            <input class="form-control mt-2" name="pdfFile" type="file" accept="application/pdf">
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <div class="col-12 col-xl-6">
+      <article class="panel product-form-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Opciones tecnicas</h2>
+            <span>Variantes y especificaciones para venta asistida.</span>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Variantes, tallas u opciones</label>
+            <textarea class="form-control" name="variants" rows="6" placeholder="18 pulgadas&#10;20 pulgadas&#10;Kit completo">{{ (product.variants | join('\n')) if product else '' }}</textarea>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Especificaciones</label>
+            <textarea class="form-control" name="specifications" rows="6" placeholder="Motor: 45cc&#10;Combustible: Gasolina&#10;Garantia: 6 meses">{% if product %}{% for key, value in product.specifications.items() %}{{ key }}: {{ value }}
+{% endfor %}{% endif %}</textarea>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <div class="product-form-actions">
+    <a class="btn btn-outline-secondary" href="{{ url_for('products') }}">Cancelar</a>
+    <button class="btn btn-primary" type="submit">{{ mode }} producto</button>
+  </div>
+</form>
+{% endblock %}

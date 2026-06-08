@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% set heading = "Productos" %}
+{% set description = "Catalogo ecommerce para venta directa, B2B y sincronizacion con Android." %}
+
+{% block top_action %}
+<a class="btn btn-primary" href="{{ url_for('product_new') }}"><i class="bi bi-plus-lg"></i> Crear producto</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <h2>Catalogo Wulkan</h2>
+      <span>Productos publicados para Android y venta final</span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      {% if query %}
+      <a class="badge rounded-pill text-bg-light text-decoration-none" href="{{ url_for('products') }}">
+        <i class="bi bi-x-lg"></i> {{ query }}
+      </a>
+      {% endif %}
+      <span class="badge text-bg-primary">{{ products | length }} registros</span>
+    </div>
+  </div>
+  <form class="module-search" method="get">
+    <i class="bi bi-search"></i>
+    <input name="q" value="{{ query }}" placeholder="Buscar producto o SKU">
+    <button class="btn btn-sm btn-outline-primary" type="submit">Filtrar</button>
+    {% if query %}
+    <a class="btn btn-sm btn-light" href="{{ url_for('products') }}"><i class="bi bi-x-lg"></i></a>
+    {% endif %}
+  </form>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Categoria</th>
+          <th>Precio</th>
+          <th>Descuento</th>
+          <th>Bolivares</th>
+          <th>Stock</th>
+          <th>Estado</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for product in products %}
+        <tr>
+          <td>
+            <div class="catalog-product">
+              <span class="sku-badge">{{ product.sku }}</span>
+              <div>
+                <strong>{{ product.title }}</strong>
+                <small>{{ product.description }}</small>
+              </div>
+            </div>
+          </td>
+          <td>{{ product.categoryName }}</td>
+          <td>
+            <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
+            <small class="d-block text-secondary">
+              {% if product.hasDiscount %}<span class="text-decoration-line-through">{{ money_usd(product.originalPriceUsd) }}</span> / {% endif %}
+              B2B {{ money_usd(product.b2bPriceUsd) }}
+            </small>
+          </td>
+          <td>
+            {% if product.discountPercent > 0 %}
+            <span class="badge text-bg-danger">{{ product.discountPercent }}%</span>
+            {% else %}
+            <span class="text-secondary">Sin oferta</span>
+            {% endif %}
+          </td>
+          <td>{{ usd_to_ves(product.publicPriceUsd, product.exchangeRateUsdVes) }}</td>
+          <td>
+            <span class="badge {% if product.availableStock <= 0 %}text-bg-danger{% elif product.availableStock <= 5 %}text-bg-warning{% else %}text-bg-success{% endif %}">
+              {{ product.availableStock }} disp.
+            </span>
+            {% if product.committedStock %}
+            <small class="d-block text-secondary">{{ product.committedStock }} comprometidas</small>
+            {% endif %}
+          </td>
+          <td><span class="badge {{ product.status | badge_class }}">{{ product.status }}</span></td>
+          <td class="text-end">
+            <div class="d-flex justify-content-end gap-2">
+              <a class="btn btn-sm btn-outline-dark" href="{{ url_for('product_edit', product_id=product.id) }}">
+                <i class="bi bi-pencil"></i>
+              </a>
+              <form method="post" action="{{ url_for('product_delete', product_id=product.id) }}">
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-search"></i></div>
+              <strong>No hay productos para esta busqueda</strong>
+              <span>Prueba con otro nombre comercial o SKU dentro del filtro del catalogo.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

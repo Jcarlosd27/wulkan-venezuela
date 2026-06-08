@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% set heading = "Credito B2B" %}
+{% set description = "Controla limites, exposicion, saldo disponible y abonos externos de clientes ferreteros." %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-credit-card-2-front"></i></div>
+      <span>Linea otorgada</span>
+      <strong>{{ money_usd(metrics.limit) }}</strong>
+      <em>Total</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-activity"></i></div>
+      <span>Comprometido</span>
+      <strong>{{ money_usd(metrics.exposure) }}</strong>
+      <em>Ordenes</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
+      <span>Disponible</span>
+      <strong>{{ money_usd(metrics.available) }}</strong>
+      <em>Credito</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
+      <span>Abonos</span>
+      <strong>{{ money_usd(metrics.payments) }}</strong>
+      <em>Manual</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel category-panel mb-3">
+  <div class="panel-header">
+    <div>
+      <h2>Lineas de credito por cliente</h2>
+      <span>Credito otorgado, consumo por ordenes abiertas y disponibilidad real.</span>
+    </div>
+    <span>{{ clients | length }} clientes</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Cliente</th>
+          <th>Estado credito</th>
+          <th>Limite</th>
+          <th>Deuda manual</th>
+          <th>Ordenes abiertas</th>
+          <th>Disponible</th>
+          <th>Dias</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for client in clients %}
+        <tr>
+          <td>
+            <div class="category-cell">
+              <div class="category-thumb"><i class="bi bi-shop"></i></div>
+              <div>
+                <strong>{{ client.businessName }}</strong>
+                <small>{{ client.email }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <span class="badge {{ client.creditStatus | badge_class }}">{{ client.creditStatus }}</span>
+            <small class="d-block text-secondary">{{ client.status }}</small>
+          </td>
+          <td>{{ money_usd(client.creditLimitUsd) }}</td>
+          <td>{{ money_usd(client.creditUsedUsd) }}</td>
+          <td>
+            <strong>{{ money_usd(client.creditOrdersUsd) }}</strong>
+            <div class="credit-track mt-1">
+              {% set percent = (client.creditExposureUsd / client.creditLimitUsd * 100) if client.creditLimitUsd else 0 %}
+              <span style="width: {{ [percent, 100] | min }}%"></span>
+            </div>
+          </td>
+          <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
+          <td>{{ client.paymentTermsDays }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-secondary">Sin clientes ferreteros registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Historial de abonos externos</h2>
+      <span>Pagos manuales registrados por Wulkan, sin pasarela online.</span>
+    </div>
+    <span>{{ payments | length }} movimientos</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Orden</th>
+          <th>Cliente</th>
+          <th>Metodo</th>
+          <th>Referencia</th>
+          <th>Monto</th>
+          <th>Usuario</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for payment in payments %}
+        <tr>
+          <td>{{ payment.createdAt }}</td>
+          <td><strong>{{ payment.orderId }}</strong></td>
+          <td>
+            <strong>{{ payment.clientName }}</strong>
+            <small class="d-block text-secondary">{{ payment.clientId }}</small>
+          </td>
+          <td><span class="badge text-bg-light">{{ payment.method }}</span></td>
+          <td>{{ payment.reference or 'Sin referencia' }}</td>
+          <td>
+            <strong>{{ money_usd(payment.amountUsd) }}</strong>
+            <small class="d-block text-secondary">VES {{ payment.amountVes }}</small>
+          </td>
+          <td>{{ payment.createdBy }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-cash-coin"></i></div>
+              <strong>Sin abonos registrados</strong>
+              <span>Los pagos externos que registre el admin apareceran aqui.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

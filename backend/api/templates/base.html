@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "Wulkan Admin Flask" }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/uix.css') }}?v=20260608-phase4-credit-orders-1" rel="stylesheet">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="company-card">
+          <div class="company-avatar">W</div>
+          <div>
+            <small>Empresa activa</small>
+            <strong>Wulkan Venezuela</strong>
+          </div>
+        </div>
+        <nav class="nav flex-column gap-1">
+          <span class="nav-section">Operacion</span>
+          <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+            <i class="bi bi-grid-1x2"></i> Dashboard
+          </a>
+          <a class="nav-link {% if request.endpoint in ['clients', 'client_edit'] %}active{% endif %}" href="{{ url_for('clients') }}">
+            <i class="bi bi-shop"></i> Clientes
+          </a>
+          <a class="nav-link {% if request.endpoint == 'credit' %}active{% endif %}" href="{{ url_for('credit') }}">
+            <i class="bi bi-credit-card-2-front"></i> Credito B2B
+          </a>
+          <a class="nav-link {% if request.endpoint in ['orders', 'order_status_update', 'order_payment_create'] %}active{% endif %}" href="{{ url_for('orders') }}">
+            <i class="bi bi-receipt"></i> Ordenes
+          </a>
+          <a class="nav-link {% if request.endpoint in ['products', 'product_new'] %}active{% endif %}" href="{{ url_for('products') }}">
+            <i class="bi bi-box-seam"></i> Productos
+          </a>
+          <a class="nav-link {% if request.endpoint == 'media_library' %}active{% endif %}" href="{{ url_for('media_library') }}">
+            <i class="bi bi-folder2-open"></i> Biblioteca tecnica
+          </a>
+          <a class="nav-link {% if request.endpoint in ['categories', 'category_edit'] %}active{% endif %}" href="{{ url_for('categories') }}">
+            <i class="bi bi-tags"></i> Categorias
+          </a>
+          <a class="nav-link {% if request.endpoint == 'stock' %}active{% endif %}" href="{{ url_for('stock') }}">
+            <i class="bi bi-boxes"></i> Stock masivo
+          </a>
+          <a class="nav-link {% if request.endpoint == 'announcements' %}active{% endif %}" href="{{ url_for('announcements') }}">
+            <i class="bi bi-megaphone"></i> Anuncios app
+          </a>
+          <span class="nav-section mt-2">Sistema</span>
+          <a class="nav-link {% if request.endpoint in ['admin_users', 'admin_user_edit'] %}active{% endif %}" href="{{ url_for('admin_users') }}">
+            <i class="bi bi-people"></i> Usuarios admin
+          </a>
+        </nav>
+      </aside>
+      <main class="content">
+        <header class="topbar app-topbar">
+          <div>
+            <span>Panel del negocio</span>
+            <strong>Wulkan Venezuela</strong>
+          </div>
+          <div class="top-actions">
+            <a class="btn btn-light btn-sm" href="{{ url_for('announcements') }}"><i class="bi bi-megaphone"></i> Anuncios</a>
+            <a class="icon-btn" href="{{ url_for('stock') }}" aria-label="Stock"><i class="bi bi-bell"></i></a>
+            <div class="user-pill">
+              <span>{{ session.get('admin_name', 'Admin') }}</span>
+              <i class="bi bi-person-circle"></i>
+            </div>
+            <a class="icon-btn" href="{{ url_for('logout') }}" aria-label="Cerrar sesion"><i class="bi bi-box-arrow-right"></i></a>
+          </div>
+        </header>
+        <div class="page-heading">
+          <div>
+            <h1>{{ heading }}</h1>
+            <p>{{ description }}</p>
+          </div>
+          {% block top_action %}{% endblock %}
+        </div>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+    <script src="{{ url_for('static', filename='js/graphify.js') }}"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

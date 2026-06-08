@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% set heading = "Categorias" %}
+{% set description = "Administra familias del catalogo, imagenes y visibilidad para la app movil." %}
+
+{% block top_action %}
+<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
+  <i class="bi bi-plus-lg"></i> Nueva categoria
+</button>
+{% endblock %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-tags"></i></div>
+      <span>Total categorias</span>
+      <strong>{{ categories | length }}</strong>
+      <em>Catalogo</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Activas</span>
+      <strong>{{ categories | selectattr('status', 'equalto', 'active') | list | length }}</strong>
+      <em>App</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-image"></i></div>
+      <span>Con imagen</span>
+      <strong>{{ categories | selectattr('imageUrl') | list | length }}</strong>
+      <em>Media</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Categorias del ecommerce</h2>
+      <span>Imagen, descripcion y estado visible en Android</span>
+    </div>
+    <span>{{ categories | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Categoria</th>
+          <th>Descripcion</th>
+          <th>Imagen</th>
+          <th>Estado</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for category in categories %}
+        <tr>
+          <td>
+            <div class="category-cell">
+              <div class="category-thumb">
+                {% if category.imageUrl %}
+                <img src="{{ category.imageUrl }}" alt="{{ category.name }}">
+                {% else %}
+                <i class="bi bi-image"></i>
+                {% endif %}
+              </div>
+              <div>
+                <strong>{{ category.name }}</strong>
+                <small>{{ category.id }}</small>
+              </div>
+            </div>
+          </td>
+          <td class="text-secondary">{{ category.description }}</td>
+          <td>
+            {% if category.imageUrl %}
+            <a href="{{ category.imageUrl }}" target="_blank" class="btn btn-sm btn-light"><i class="bi bi-box-arrow-up-right"></i> Ver</a>
+            {% else %}
+            <span class="text-secondary">Pendiente</span>
+            {% endif %}
+          </td>
+          <td><span class="badge {{ category.status | badge_class }}">{{ category.status }}</span></td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editCategory{{ loop.index }}">
+              <i class="bi bi-pencil"></i> Editar
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="modal fade" id="newCategoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" enctype="multipart/form-data">
+      <div class="modal-header">
+        <h2 class="modal-title h5">Nueva categoria</h2>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Nombre</label>
+          <input class="form-control" name="name" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Descripcion</label>
+          <textarea class="form-control" name="description" rows="3"></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Imagen de categoria</label>
+          <input class="form-control" name="imageUrl" placeholder="https://...">
+          <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
+        </div>
+        <label class="form-label fw-semibold">Estado</label>
+        <select class="form-select" name="status">
+          <option value="active">Activa</option>
+          <option value="inactive">Inactiva</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Crear categoria</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% for category in categories %}
+<div class="modal fade" id="editCategory{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" enctype="multipart/form-data" action="{{ url_for('category_edit', category_id=category.id) }}">
+        <div class="modal-header">
+          <h2 class="modal-title h5">Editar {{ category.name }}</h2>
+          <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Nombre</label>
+            <input class="form-control" name="name" value="{{ category.name }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Descripcion</label>
+            <textarea class="form-control" name="description" rows="3">{{ category.description }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Imagen de categoria</label>
+            <input class="form-control" name="imageUrl" value="{{ category.imageUrl }}">
+            <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
+          </div>
+          <label class="form-label fw-semibold">Estado</label>
+          <select class="form-select" name="status">
+            <option value="active" {% if category.status == 'active' %}selected{% endif %}>Activa</option>
+            <option value="inactive" {% if category.status == 'inactive' %}selected{% endif %}>Inactiva</option>
+          </select>
+        </div>
+        <div class="modal-footer justify-content-between">
+          <button class="btn btn-primary" type="submit">Guardar cambios</button>
+        </div>
+      </form>
+      <form class="px-3 pb-3 text-end" method="post" action="{{ url_for('category_delete', category_id=category.id) }}">
+        <button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Eliminar categoria</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

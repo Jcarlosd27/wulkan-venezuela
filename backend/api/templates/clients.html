@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% set heading = "Clientes ferreteros" %}
+{% set description = "Administra acceso B2B, linea de credito y estado comercial de cada cliente." %}
+
+{% block top_action %}
+<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newClientModal">
+  <i class="bi bi-plus-lg"></i> Nuevo cliente
+</button>
+{% endblock %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-shop"></i></div>
+      <span>Clientes</span>
+      <strong>{{ metrics.clients }}</strong>
+      <em>B2B</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Activos</span>
+      <strong>{{ metrics.active }}</strong>
+      <em>App</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-credit-card"></i></div>
+      <span>Con credito</span>
+      <strong>{{ metrics.credit_enabled }}</strong>
+      <em>USD</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
+      <span>Credito disponible</span>
+      <strong>{{ money_usd(metrics.credit_available) }}</strong>
+      <em>Total</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Cartera de ferreteros</h2>
+      <span>Acceso movil, credito asignado y disponibilidad comercial.</span>
+    </div>
+    <span>{{ clients | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Cliente</th>
+          <th>Contacto</th>
+          <th>Credito</th>
+          <th>Comprometido</th>
+          <th>Disponible</th>
+          <th>Estado</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for client in clients %}
+        <tr>
+          <td>
+            <div class="category-cell">
+              <div class="category-thumb"><i class="bi bi-shop"></i></div>
+              <div>
+                <strong>{{ client.businessName }}</strong>
+                <small>{{ client.taxId or client.id }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong class="d-block">{{ client.contactName or 'Sin responsable' }}</strong>
+            <small class="text-secondary">{{ client.email }}</small>
+          </td>
+          <td>
+            {% if client.creditEnabled %}
+            <span class="badge text-bg-primary">{{ money_usd(client.creditLimitUsd) }}</span>
+            {% else %}
+            <span class="badge text-bg-secondary">Sin credito</span>
+            {% endif %}
+          </td>
+          <td>
+            <strong>{{ money_usd(client.creditExposureUsd) }}</strong>
+            <small class="d-block text-secondary">Ordenes {{ money_usd(client.creditOrdersUsd) }}</small>
+          </td>
+          <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
+          <td><span class="badge {{ client.status | badge_class }}">{{ client.status }}</span></td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}">
+              <i class="bi bi-pencil"></i> Editar
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="modal fade" id="newClientModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <form class="modal-content" method="post">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Nuevo cliente ferretero</h2>
+          <p class="mb-0 text-secondary">Crea acceso movil y linea de credito B2B.</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        {% include "partials/client_fields.html" %}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Crear cliente</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% for client in clients %}
+<div class="modal fade" id="editClient{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <form class="modal-content" method="post" action="{{ url_for('client_edit', client_id=client.id) }}">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Editar {{ client.businessName }}</h2>
+          <p class="mb-0 text-secondary">Actualiza acceso, estado y linea de credito.</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        {% include "partials/client_fields.html" %}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

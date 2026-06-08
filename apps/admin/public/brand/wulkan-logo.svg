@@ -1,0 +1,12 @@
+<svg width="420" height="126" viewBox="0 0 420 126" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Wulkan</title>
+  <desc id="desc">Logotipo horizontal de Wulkan en naranja y gris.</desc>
+  <path d="M36 13h37l22 25 18-25h37l-39 55 43 45h-39L94 90l-18 23H39l36-49L36 13Z" fill="#FF4B00"/>
+  <path d="M151 13h32v58c0 13 8 21 21 21s21-8 21-21V13h32v60c0 30-21 51-53 51-32 0-53-21-53-51V13Z" fill="#FF4B00"/>
+  <path d="M279 13h32v40l38-40h40l-47 48 50 52h-42l-39-42v42h-32V13Z" fill="#FF4B00"/>
+  <path d="M22 76c18-9 37-13 58-11 22 2 40 10 61 11 19 1 33-6 51-7 20-2 36 8 55 8 18 0 31-10 50-11 23-1 41 10 61 11 15 1 27-3 40-8v44H22V76Z" fill="#747878"/>
+  <path d="M72 73h23l17 40H89l-5-13H66l-5 13H39l33-40Zm7 13-8 20h17l-9-20Z" fill="#747878"/>
+  <path d="M159 73h23v40h-23V73Z" fill="#747878"/>
+  <path d="M215 73h23l27 40h-26l-12-19-12 19h-26l26-40Z" fill="#747878"/>
+  <path d="M289 73h23l29 40h-26l-15-23v23h-23V73h12Z" fill="#747878"/>
+</svg>

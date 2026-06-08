@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% set heading = "Dashboard B2B" %}
+{% set description = "Operacion Wulkan para ferreteros, credito comercial, stock y ordenes moviles." %}
+
+{% block content %}
+<section class="row g-3 dashboard-metrics">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-products">
+      <div class="metric-icon"><i class="bi bi-box-seam"></i></div>
+      <span>Productos</span>
+      <strong>{{ metrics.products }}</strong>
+      <em>Catalogo</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-shop"></i></div>
+      <span>Clientes</span>
+      <strong>{{ metrics.clients }}</strong>
+      <em>B2B</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-stock">
+      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <span>Stock bajo</span>
+      <strong>{{ metrics.low_stock }}</strong>
+      <em>Reposicion</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-orders">
+      <div class="metric-icon"><i class="bi bi-receipt"></i></div>
+      <span>Ordenes</span>
+      <strong>{{ metrics.orders }}</strong>
+      <em>Movil</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-sales">
+      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+      <span>Ventas</span>
+      <strong>{{ money_usd(metrics.gross_revenue) }}</strong>
+      <em>USD</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-ads">
+      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
+      <span>Credito disp.</span>
+      <strong>{{ money_usd(metrics.credit_available) }}</strong>
+      <em>B2B</em>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3 mt-0">
+  <div class="col-12 col-xl-8">
+    <article class="panel">
+      <div class="panel-header">
+        <h2>Rotacion de productos</h2>
+        <span>Graphify</span>
+      </div>
+      <div
+        class="graphify-bars"
+        data-labels='{{ rotation_chart["labels"] | tojson }}'
+        data-values='{{ rotation_chart["values"] | tojson }}'
+      ></div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel">
+      <div class="panel-header">
+        <h2>Salud de inventario</h2>
+      </div>
+      <dl class="detail-list">
+        <div><dt>Disponible</dt><dd>{{ stock_health.available }}</dd></div>
+        <div><dt>Bajo</dt><dd>{{ stock_health.low }}</dd></div>
+        <div><dt>Agotado</dt><dd>{{ stock_health.out }}</dd></div>
+      </dl>
+    </article>
+  </div>
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-header">
+    <h2>Ordenes recientes de ferreteros</h2>
+    <span>{{ recent_orders | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Orden</th>
+          <th>Cliente</th>
+          <th>Total USD</th>
+          <th>Saldo</th>
+          <th>Total VES</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in recent_orders %}
+        <tr>
+          <td>{{ order.orderId }}</td>
+          <td>{{ order.customerName }}</td>
+          <td>{{ money_usd(order["totalUsd"]) }}</td>
+          <td>{{ money_usd(order.balanceUsd) }}</td>
+          <td>{{ order["totalVes"] }}</td>
+          <td><span class="badge {{ order["status"] | badge_class }}">{{ order["status"] }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-secondary">Sin ordenes moviles todavia.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
