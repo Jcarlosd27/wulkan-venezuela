@@ -34,9 +34,12 @@ local.properties
 .env.*
 !.env.example
 !**/.env.example
+!infra/docker/.env.production.example
 
 # Local database files
 backend/api/data/*.db
+backups/
+backend/api/backups/
 
 # Local tooling and generated archives
 .config/

@@ -26,6 +26,13 @@ class Config:
     LOGIN_MAX_ATTEMPTS = int(os.environ.get("WULKAN_LOGIN_MAX_ATTEMPTS", "5"))
     LOGIN_WINDOW_SECONDS = int(os.environ.get("WULKAN_LOGIN_WINDOW_SECONDS", "300"))
     UPLOAD_FOLDER = str(UPLOAD_DIR)
+    STORAGE_BACKEND = os.environ.get("WULKAN_STORAGE_BACKEND", "local")
+    STORAGE_PUBLIC_BASE_URL = os.environ.get("WULKAN_STORAGE_PUBLIC_BASE_URL", "")
+    S3_BUCKET = os.environ.get("WULKAN_S3_BUCKET", "")
+    S3_REGION = os.environ.get("WULKAN_S3_REGION", "us-east-1")
+    S3_ENDPOINT_URL = os.environ.get("WULKAN_S3_ENDPOINT_URL", "")
+    S3_PREFIX = os.environ.get("WULKAN_S3_PREFIX", "wulkan")
+    S3_ACL = os.environ.get("WULKAN_S3_ACL", "")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
@@ -45,6 +52,7 @@ class StagingConfig(Config):
 class ProductionConfig(Config):
     ENV = "production"
     DATA_BACKEND = os.environ.get("WULKAN_DATA_BACKEND", "sql")
+    STORAGE_BACKEND = os.environ.get("WULKAN_STORAGE_BACKEND", "s3")
     REQUIRE_MOBILE_TOKEN = True
     SQL_FALLBACK_TO_JSON = env_bool("WULKAN_SQL_FALLBACK_TO_JSON", False)
     SESSION_COOKIE_SECURE = True

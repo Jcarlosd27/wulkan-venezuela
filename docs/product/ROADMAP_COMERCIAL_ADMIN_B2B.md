@@ -26,10 +26,10 @@ Ya existe:
 
 Todavia falta para venderlo como produccion final:
 
-- Despliegue HTTPS.
-- PostgreSQL administrado.
-- Backups automaticos y prueba de restauracion.
-- Storage externo para imagenes y PDFs.
+- Activar despliegue HTTPS con dominio real.
+- Configurar PostgreSQL administrado o el compose productivo.
+- Programar backups automaticos y probar restauracion.
+- Configurar credenciales de storage externo para imagenes y PDFs.
 - QA end-to-end con backend real y telefono fisico.
 - Recuperacion segura de contrasenas.
 - Rate limit persistente para login.

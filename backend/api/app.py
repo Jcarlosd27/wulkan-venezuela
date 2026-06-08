@@ -9,11 +9,12 @@ from pathlib import Path
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import Markup
+from werkzeug.exceptions import BadRequest
 from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
 
 from config import get_config
 from graphify import rotation_chart, stock_health
+from storage import save_uploaded_file
 from store import load_store, next_id, save_store, utc_now
 from uix import badge_class, money_usd, usd_to_ves
 
@@ -36,6 +37,11 @@ def validate_runtime_config() -> None:
         raise RuntimeError("WULKAN_DATABASE_URL debe apuntar a PostgreSQL en produccion.")
     if app.config.get("SQL_FALLBACK_TO_JSON"):
         raise RuntimeError("WULKAN_SQL_FALLBACK_TO_JSON debe estar desactivado en produccion.")
+    storage_backend = str(app.config.get("STORAGE_BACKEND", "")).strip().lower()
+    if storage_backend != "s3":
+        raise RuntimeError("WULKAN_STORAGE_BACKEND=s3 es obligatorio en produccion.")
+    if not app.config.get("S3_BUCKET"):
+        raise RuntimeError("WULKAN_S3_BUCKET es obligatorio en produccion.")
 
 
 validate_runtime_config()
@@ -725,12 +731,21 @@ def save_upload(file_storage, folder: str = "library") -> str:
     if not file_storage or not file_storage.filename:
         return ""
 
-    upload_root = Path(app.config["UPLOAD_FOLDER"]) / folder
-    upload_root.mkdir(parents=True, exist_ok=True)
-    filename = f"{int(__import__('time').time())}-{secure_filename(file_storage.filename)}"
-    target = upload_root / filename
-    file_storage.save(target)
-    return url_for("static", filename=f"uploads/{folder}/{filename}")
+    try:
+        return save_uploaded_file(
+            file_storage=file_storage,
+            folder=folder,
+            upload_folder=Path(app.config["UPLOAD_FOLDER"]),
+            storage_backend=app.config.get("STORAGE_BACKEND", "local"),
+            public_base_url=app.config.get("STORAGE_PUBLIC_BASE_URL", ""),
+            s3_bucket=app.config.get("S3_BUCKET", ""),
+            s3_region=app.config.get("S3_REGION", "us-east-1"),
+            s3_endpoint_url=app.config.get("S3_ENDPOINT_URL", ""),
+            s3_prefix=app.config.get("S3_PREFIX", "wulkan"),
+            s3_acl=app.config.get("S3_ACL", ""),
+        )
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
 
 
 def product_payload(store: dict, existing: dict | None = None) -> dict:
@@ -1882,4 +1897,4 @@ def inject_helpers():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=app.config.get("ENV") != "production")

@@ -4,14 +4,14 @@ Fecha: 2026-06-08
 
 ## Lectura ejecutiva
 
-Wulkan ya no esta en etapa de maqueta. El proyecto se encuentra en nivel **pre-produccion avanzada / piloto comercial cerrado**.
+Wulkan ya no esta en etapa de maqueta. El proyecto se encuentra en nivel **preparado para produccion final, pendiente de activacion externa**.
 
 Estimacion actual:
 
-- **85%** para piloto comercial controlado con Wulkan y ferreteros seleccionados.
-- **70%** para produccion final vendible sin acompanar manualmente la operacion.
+- **95%** para piloto comercial controlado con Wulkan y ferreteros seleccionados.
+- **88%** para produccion final vendible sin acompanar manualmente la operacion.
 
-La diferencia existe porque las funciones principales ya estan conectadas, pero todavia faltan despliegue real, backups, storage externo, QA comercial y operacion HTTPS.
+La diferencia existe porque el repositorio ya trae kit productivo, pero la activacion final depende de elementos externos: dominio, DNS, servidor, credenciales S3/PostgreSQL y QA con ferretero real.
 
 ## Stack actual
 
@@ -66,16 +66,18 @@ Entregado:
 - Readiness check `/readyz`.
 - Migraciones reproducibles con Alembic.
 - Produccion bloqueada si usa configuracion insegura.
+- Docker productivo con Caddy, PostgreSQL y Gunicorn.
+- Storage externo S3-compatible configurable.
+- Scripts de backup, restore, admin inicial y smoke test.
 
 ## Que falta para venderlo como producto final
 
-Prioridad alta:
+Prioridad alta externa:
 
 - Desplegar en servidor real con HTTPS.
-- Configurar PostgreSQL administrado.
-- Desactivar JSON en produccion.
-- Backups automaticos y prueba de restauracion.
-- Storage externo para imagenes y PDFs.
+- Configurar PostgreSQL administrado o Postgres del compose productivo.
+- Configurar bucket S3/R2/Spaces para imagenes y PDFs.
+- Automatizar backup diario y probar restauracion.
 - QA end-to-end con telefono fisico apuntando a backend HTTPS.
 - Prueba comercial con ferretero real:
   - Login.
@@ -92,11 +94,10 @@ Prioridad media:
 - Recuperacion/restablecimiento seguro de contrasenas.
 - Rate limit persistente con Redis o equivalente.
 - Exportables CSV/PDF para ordenes, clientes y creditos.
-- Mejor gestion de archivos comerciales.
 - Observabilidad: logs, metricas y alertas.
 
 ## Conclusion comercial
 
-Wulkan esta listo para **piloto comercial cerrado** y demostraciones serias con flujo real admin-app.
+Wulkan esta listo a nivel de codigo para **despliegue productivo controlado** y demostraciones serias con flujo real admin-app.
 
-Para venderlo como producto final sin riesgo operativo, el siguiente bloque debe ser despliegue productivo, QA real y almacenamiento externo de archivos.
+Para venderlo como producto final sin riesgo operativo, el siguiente bloque es activacion externa: dominio, HTTPS, credenciales, backup probado y QA real.

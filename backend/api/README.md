@@ -9,6 +9,8 @@ Admin panel y API movil para Wulkan Venezuela.
 - UIX local en `static/css/uix.css`
 - Graphify local en `graphify.py` y `static/js/graphify.js`
 - SQLAlchemy y Alembic para base productiva
+- Gunicorn para runtime WSGI productivo
+- Storage local en desarrollo y S3-compatible en produccion
 
 ## Ejecutar
 
@@ -102,9 +104,43 @@ WULKAN_DATABASE_URL=postgresql+psycopg://user:password@host:5432/wulkan
 WULKAN_LOGIN_MAX_ATTEMPTS=5
 WULKAN_LOGIN_WINDOW_SECONDS=300
 WULKAN_MAX_UPLOAD_MB=16
+WULKAN_STORAGE_BACKEND=s3
+WULKAN_STORAGE_PUBLIC_BASE_URL=https://cdn.example.com
+WULKAN_S3_BUCKET=wulkan-assets
+WULKAN_S3_REGION=us-east-1
+WULKAN_S3_ENDPOINT_URL=
+WULKAN_S3_PREFIX=production
 ```
 
-En `production`, Flask falla al arrancar si intenta usar secreto de desarrollo, backend JSON, SQLite o fallback a JSON.
+En `production`, Flask falla al arrancar si intenta usar secreto de desarrollo, backend JSON, SQLite, fallback a JSON o storage local.
+
+## Produccion con Docker
+
+Desde `infra/docker`:
+
+```bash
+cp .env.production.example .env.production
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
+```
+
+Crear admin inicial:
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production exec api \
+  python scripts/create_admin.py --email admin@wulkan.com --name "Admin Wulkan" --role super_admin
+```
+
+Smoke test:
+
+```bash
+python scripts/smoke_production.py --base-url https://wulkan.example.com
+```
+
+Backup:
+
+```bash
+python scripts/backup_database.py --output-dir backups
+```
 
 ## Seguridad admin
 

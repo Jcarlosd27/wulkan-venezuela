@@ -23,6 +23,8 @@
     "mobile:run:api": "cd apps/mobile && flutter run --dart-define-from-file=dart_defines.example.json --dart-define=WULKAN_MOBILE_DATA_SOURCE=api --dart-define=WULKAN_ADMIN_API_URL=http://10.0.2.2:5000/api/mobile --dart-define=WULKAN_MOBILE_ORDER_API_URL=http://10.0.2.2:5000/api/mobile/orders",
     "mobile:run:firestore": "cd apps/mobile && flutter run --dart-define-from-file=dart_defines.example.json --dart-define=WULKAN_MOBILE_DATA_SOURCE=firestore",
     "mobile:build:apk": "cd apps/mobile && flutter build apk --debug --dart-define-from-file=dart_defines.example.json",
+    "mobile:build:apk:prod": "cd apps/mobile && flutter build apk --release --dart-define-from-file=dart_defines.production.example.json",
+    "prod:smoke": "cd backend/api && python scripts/smoke_production.py",
     "mobile:test": "cd apps/mobile && flutter test",
     "lint": "pnpm -r lint",
     "lint:npm": "npm run lint --workspaces --if-present",

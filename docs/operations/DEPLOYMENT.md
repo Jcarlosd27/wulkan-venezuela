@@ -1,151 +1,206 @@
-# Guia de despliegue inicial
+# Guia de despliegue productivo
 
-## Ambientes
+## Objetivo
 
-- `dev`: trabajo local y emuladores.
-- `staging`: validacion operativa interna.
-- `production`: operacion real Venezuela.
+Publicar Wulkan como plataforma comercial B2B real:
 
-Cada ambiente debe tener proyecto Firebase separado.
+- Admin Flask por HTTPS.
+- API movil por HTTPS.
+- PostgreSQL como base productiva.
+- Storage externo para imagenes y PDFs.
+- Backups reproducibles.
+- App Flutter apuntando al dominio productivo.
 
-## Admin web
+## Stack productivo
 
-1. Copiar `apps/admin/.env.example` a `.env.local`.
-2. Mantener `WULKAN_ADMIN_DATA_SOURCE=mock` para desarrollo local sin Firebase.
-3. Usar `WULKAN_ADMIN_DATA_SOURCE=firestore` cuando exista proyecto Firebase o emulador.
-4. Configurar `FIREBASE_PROJECT_ID`.
-5. Configurar `FIRESTORE_EMULATOR_HOST` para emulador o `FIRESTORE_REST_BEARER_TOKEN` para lectura REST contra proyecto real.
-6. Configurar variables `NEXT_PUBLIC_FIREBASE_*` para Auth/SDK web.
-7. Ejecutar `npm install`.
-8. Ejecutar `npm run typecheck:npm`.
-9. Ejecutar `npm run build:admin:npm`.
-10. Publicar a Firebase Hosting cuando el proyecto Firebase exista.
+- Flask + Gunicorn.
+- PostgreSQL.
+- SQLAlchemy + Alembic.
+- Caddy como reverse proxy con HTTPS automatico.
+- S3 compatible para media comercial.
+- Flutter Android en modo API.
 
-### Fuente de datos del admin
+## Variables obligatorias
 
-- `mock`: usa los datos locales en `apps/admin/src/lib/mvp-data.ts`.
-- `firestore`: usa `FirestoreRestAdminRepository` y lee colecciones reales por REST.
-- Si no se define `WULKAN_ADMIN_DATA_SOURCE`, el admin permanece en modo mock.
-
-Colecciones esperadas por el admin:
-
-- `users`
-- `companies`
-- `business_verticals`
-- `products`
-- `product_variants`
-- `product_prices`
-- `product_stock`
-- `product_compatibilities`
-- `orders`
-- `purchase_orders`
-- `replenishment_requests`
-- `service_cases`
-- `service_case_events`
-- `quotes`
-- `payments`
-- `locations`
-- `technical_projects`
-- `company_performance_reports`
-- `marketplace_applications`
-- `product_approvals`
-- `seller_quality_scores`
-- `platform_charges`
-- `audit_logs`
-- `app_settings`
-
-## Cloud Functions
-
-1. Configurar Firebase CLI.
-2. Asociar proyecto con `firebase use`.
-3. Ejecutar build de functions.
-4. Desplegar solo funciones revisadas.
-
-## Pendiente para despliegue real
-
-- Crear proyectos Firebase.
-- Configurar credenciales.
-- Configurar custom claims.
-- Activar emuladores.
-- Definir proceso staging -> production.
-
-## Emuladores y seed local
-
-1. Copiar `.env.example` a `.env`.
-2. Definir `FIREBASE_PROJECT_ID=wulkan-dev`.
-3. Ejecutar `npm run emulators:firebase`.
-4. En otra terminal, ejecutar `npm run seed:firestore`.
-5. En `apps/admin/.env.local`, usar:
+Usar `infra/docker/.env.production.example` como base y crear:
 
 ```text
-WULKAN_ADMIN_DATA_SOURCE=firestore
-WULKAN_ADMIN_AUTH_MODE=mock
-FIREBASE_PROJECT_ID=wulkan-dev
-FIRESTORE_EMULATOR_HOST=127.0.0.1:8085
+infra/docker/.env.production
 ```
 
-El seed escribe datos MVP en Firestore usando REST y no requiere credenciales cuando apunta al emulador.
+Valores minimos:
 
-Nota local: Firestore Emulator quedo configurado en `127.0.0.1:8085` porque `8080` estaba ocupado/bloqueado en esta maquina.
+```bash
+WULKAN_DOMAIN=wulkan.example.com
+WULKAN_ENV=production
+WULKAN_SECRET_KEY=<secreto-real-largo>
+WULKAN_REQUIRE_MOBILE_TOKEN=1
+POSTGRES_DB=wulkan
+POSTGRES_USER=wulkan
+POSTGRES_PASSWORD=<password-fuerte>
+WULKAN_STORAGE_BACKEND=s3
+WULKAN_STORAGE_PUBLIC_BASE_URL=https://cdn.example.com
+WULKAN_S3_BUCKET=wulkan-assets
+WULKAN_S3_REGION=us-east-1
+WULKAN_S3_PREFIX=production
+```
 
-Requisitos locales comprobados:
+En produccion el backend no arranca si detecta:
 
-- `firebase-tools` instalado como dependencia dev.
-- JDK 21 instalado.
-- `npx firebase emulators:exec --only firestore --project wulkan-dev "node infra/scripts/seed-firestore.mjs"` ejecutado correctamente.
-- Seed validado: 17 documentos escritos.
+- `WULKAN_SECRET_KEY=wulkan-dev`.
+- `WULKAN_DATA_BACKEND=json`.
+- SQLite.
+- Fallback SQL a JSON.
+- Storage local.
 
-## Auth y custom claims
+## Despliegue con Docker
 
-El admin soporta dos modos:
+Desde `infra/docker`:
 
-- `WULKAN_ADMIN_AUTH_MODE=mock`: sesion local de desarrollo.
-- `WULKAN_ADMIN_AUTH_MODE=firebase`: frontera preparada para validar sesion Firebase real.
+```bash
+cp .env.production.example .env.production
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
+```
 
-La Cloud Function `setUserRoleClaims` queda preparada para que un `super_admin` o `wulkan_admin` asigne:
+El servicio `api` ejecuta:
 
-- `role`
-- `companyId`
-- `permissions`
+```bash
+python -m alembic upgrade head
+gunicorn --bind 0.0.0.0:5000 --workers 3 --timeout 60 wsgi:application
+```
 
-Tambien actualiza el documento `users/{uid}` y registra auditoria en `audit_logs`.
+Caddy publica el dominio definido en `WULKAN_DOMAIN` y solicita certificado HTTPS automaticamente. El DNS del dominio debe apuntar al servidor antes de levantar el stack.
 
-## Permisos del admin
+## Primer administrador
 
-La matriz de acceso vive en `apps/admin/src/lib/permissions.ts`.
+Crear o restablecer un admin inicial:
 
-Cada item de navegacion declara:
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production exec api \
+  python scripts/create_admin.py \
+  --email admin@wulkan.com \
+  --name "Admin Wulkan" \
+  --role super_admin
+```
 
-- Ruta.
-- Permisos requeridos.
-- Roles restringidos cuando aplica.
+El usuario queda con `mustChangePassword=true`, por lo que debera cambiar la clave al ingresar.
 
-El sidebar del admin ya filtra modulos segun la sesion actual. La pantalla `/usuarios/auth` muestra la matriz completa y si la sesion actual puede acceder a cada modulo.
+## Smoke test
 
-## CRUD persistente inicial
+Luego de levantar:
 
-El formulario `/verticales/nueva` usa una Server Action:
+```bash
+python backend/api/scripts/smoke_production.py --base-url https://wulkan.example.com
+```
 
-- En modo `mock`, valida y vuelve al listado sin escribir datos reales.
-- En modo `firestore`, escribe en `business_verticals/{slug}` por REST.
-- Despues de guardar, revalida `/verticales`.
+Tambien se puede ejecutar con npm desde la raiz para entorno local:
 
-La escritura reusable vive en `apps/admin/src/lib/firestore-writer.ts`.
+```bash
+npm run prod:smoke -- --base-url http://localhost:5000
+```
 
-El formulario `/productos/nuevo` tambien usa Server Action:
+Debe validar:
 
-- Escribe en `products/{productId}`.
-- Si hay precio publico, escribe `product_prices/{price-productId-public}`.
-- Si hay precio B2B, escribe `product_prices/{price-productId-b2b}`.
-- Siempre prepara `product_stock/{stock-productId-main}`.
-- En modo mock vuelve al listado sin crear datos reales.
+- `/healthz`.
+- `/readyz`.
+- `/api/mobile/products`.
+- `/api/mobile/categories`.
+- `/api/mobile/announcements`.
 
-Tambien quedan preparadas Server Actions para:
+## Backups
 
-- `/empresas/nueva`: crea `companies/{companyId}`.
-- `/ubicaciones/nueva`: crea `locations/{locationId}`.
-- `/servicios/nuevo`: crea `service_cases/{serviceCaseId}` y evento inicial.
-- `/b2b/nueva`: crea `purchase_orders/{purchaseOrderId}`.
-- `/proyectos/nuevo`: crea `technical_projects/{projectId}`.
-- `/pagos`: confirma o rechaza pagos manuales y registra auditoria.
-- `/cotizaciones`: responde, convierte o rechaza cotizaciones y registra auditoria.
+Crear backup:
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production exec api \
+  python scripts/backup_database.py --output-dir /app/backups
+```
+
+Restaurar backup:
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production exec api \
+  python scripts/restore_database.py /app/backups/wulkan-YYYYMMDD-HHMMSS.dump --yes
+```
+
+Recomendacion operativa:
+
+- Backup diario.
+- Retencion minima 30 dias.
+- Copiar backups fuera del servidor.
+- Probar restauracion en staging al menos una vez al mes.
+
+## Storage externo
+
+Produccion exige:
+
+```bash
+WULKAN_STORAGE_BACKEND=s3
+```
+
+Compatible con:
+
+- AWS S3.
+- Cloudflare R2.
+- DigitalOcean Spaces.
+- MinIO administrado.
+
+Si se usa R2/Spaces/MinIO, configurar `WULKAN_S3_ENDPOINT_URL`.
+
+Los uploads admitidos son:
+
+- `jpg`
+- `jpeg`
+- `png`
+- `webp`
+- `gif`
+- `pdf`
+
+## App movil en produccion
+
+Editar:
+
+```text
+apps/mobile/dart_defines.production.example.json
+```
+
+Configurar:
+
+```json
+{
+  "WULKAN_MOBILE_DATA_SOURCE": "api",
+  "WULKAN_MOBILE_AUTH_MODE": "api",
+  "WULKAN_ADMIN_API_URL": "https://wulkan.example.com/api/mobile",
+  "WULKAN_MOBILE_ORDER_API_URL": "https://wulkan.example.com/api/mobile/orders"
+}
+```
+
+Compilar APK:
+
+```bash
+npm run mobile:build:apk:prod
+```
+
+## Checklist de salida a produccion
+
+- Dominio apuntando al servidor.
+- HTTPS activo.
+- `WULKAN_ENV=production`.
+- `WULKAN_SECRET_KEY` real.
+- PostgreSQL activo.
+- Alembic en `head`.
+- Storage externo activo.
+- Admin inicial creado.
+- Login admin probado.
+- Cliente ferretero creado.
+- Login movil probado.
+- Cambio de contrasena temporal probado.
+- Producto publicado desde admin.
+- Producto visible en app.
+- Orden creada desde app.
+- Orden visible en admin.
+- Credito del ferretero recalculado.
+- Stock reservado/descontado segun estado.
+- Backup creado.
+- Restore probado en staging.
+- Smoke test pasando.

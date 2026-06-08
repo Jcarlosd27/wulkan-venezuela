@@ -1,0 +1,15 @@
+{$WULKAN_DOMAIN} {
+  encode gzip zstd
+
+  request_body {
+    max_size {$WULKAN_MAX_UPLOAD_MB:16}MB
+  }
+
+  header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+  }
+
+  reverse_proxy api:5000
+}
