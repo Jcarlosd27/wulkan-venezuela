@@ -23,34 +23,57 @@
           <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
             <i class="bi bi-grid-1x2"></i> Dashboard
           </a>
+          {% if can_access_module('clients') %}
           <a class="nav-link {% if request.endpoint in ['clients', 'client_edit'] %}active{% endif %}" href="{{ url_for('clients') }}">
             <i class="bi bi-shop"></i> Clientes
           </a>
+          {% endif %}
+          {% if can_access_module('credit') %}
           <a class="nav-link {% if request.endpoint == 'credit' %}active{% endif %}" href="{{ url_for('credit') }}">
             <i class="bi bi-credit-card-2-front"></i> Credito B2B
           </a>
+          {% endif %}
+          {% if can_access_module('orders') %}
           <a class="nav-link {% if request.endpoint in ['orders', 'order_status_update', 'order_payment_create'] %}active{% endif %}" href="{{ url_for('orders') }}">
             <i class="bi bi-receipt"></i> Ordenes
           </a>
+          {% endif %}
+          {% if can_access_module('products') %}
           <a class="nav-link {% if request.endpoint in ['products', 'product_new'] %}active{% endif %}" href="{{ url_for('products') }}">
             <i class="bi bi-box-seam"></i> Productos
           </a>
+          {% endif %}
+          {% if can_access_module('media_library') %}
           <a class="nav-link {% if request.endpoint == 'media_library' %}active{% endif %}" href="{{ url_for('media_library') }}">
             <i class="bi bi-folder2-open"></i> Biblioteca tecnica
           </a>
+          {% endif %}
+          {% if can_access_module('categories') %}
           <a class="nav-link {% if request.endpoint in ['categories', 'category_edit'] %}active{% endif %}" href="{{ url_for('categories') }}">
             <i class="bi bi-tags"></i> Categorias
           </a>
+          {% endif %}
+          {% if can_access_module('stock') %}
           <a class="nav-link {% if request.endpoint == 'stock' %}active{% endif %}" href="{{ url_for('stock') }}">
             <i class="bi bi-boxes"></i> Stock masivo
           </a>
+          {% endif %}
+          {% if can_access_module('announcements') %}
           <a class="nav-link {% if request.endpoint == 'announcements' %}active{% endif %}" href="{{ url_for('announcements') }}">
             <i class="bi bi-megaphone"></i> Anuncios app
           </a>
+          {% endif %}
           <span class="nav-section mt-2">Sistema</span>
+          {% if can_access_module('audit') %}
+          <a class="nav-link {% if request.endpoint == 'audit' %}active{% endif %}" href="{{ url_for('audit') }}">
+            <i class="bi bi-shield-check"></i> Auditoria
+          </a>
+          {% endif %}
+          {% if can_access_module('admin_users') %}
           <a class="nav-link {% if request.endpoint in ['admin_users', 'admin_user_edit'] %}active{% endif %}" href="{{ url_for('admin_users') }}">
             <i class="bi bi-people"></i> Usuarios admin
           </a>
+          {% endif %}
         </nav>
       </aside>
       <main class="content">

@@ -106,6 +106,7 @@
 <div class="modal fade" id="newAnnouncementModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <form class="modal-content" method="post" enctype="multipart/form-data">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Nuevo banner de app</h2>
@@ -129,6 +130,7 @@
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
       <form method="post" enctype="multipart/form-data" action="{{ url_for('announcement_edit', announcement_id=announcement.id) }}">
+        {{ csrf_field() }}
         <div class="modal-header">
           <div>
             <h2 class="modal-title h5">Editar {{ announcement.title }}</h2>
@@ -144,6 +146,7 @@
         </div>
       </form>
       <form class="px-3 pb-3 text-end" method="post" action="{{ url_for('announcement_delete', announcement_id=announcement.id) }}">
+        {{ csrf_field() }}
         <button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Eliminar banner</button>
       </form>
     </div>

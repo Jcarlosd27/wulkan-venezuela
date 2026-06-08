@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% set heading = "Auditoria" %}
+{% set description = "Trazabilidad de accesos, cambios comerciales y operaciones sensibles del admin." %}
+
+{% block content %}
+<section class="metrics-grid mb-4">
+  <article class="metric-card">
+    <div class="metric-icon bg-primary-subtle text-primary"><i class="bi bi-list-check"></i></div>
+    <span>Total eventos</span>
+    <strong>{{ metrics.total }}</strong>
+    <small>Ultimos 1000 registros</small>
+  </article>
+  <article class="metric-card">
+    <div class="metric-icon bg-success-subtle text-success"><i class="bi bi-person-check"></i></div>
+    <span>Actores</span>
+    <strong>{{ metrics.actors }}</strong>
+    <small>Usuarios con actividad</small>
+  </article>
+  <article class="metric-card">
+    <div class="metric-icon bg-warning-subtle text-warning"><i class="bi bi-pencil-square"></i></div>
+    <span>Cambios</span>
+    <strong>{{ metrics.writes }}</strong>
+    <small>Creacion, edicion o pagos</small>
+  </article>
+  <article class="metric-card">
+    <div class="metric-icon bg-info-subtle text-info"><i class="bi bi-diagram-3"></i></div>
+    <span>Graphify</span>
+    <strong>{{ graphify_summary }}</strong>
+    <small>Resumen operativo</small>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <h2>Registro operativo</h2>
+      <span>Eventos recientes ordenados por fecha.</span>
+    </div>
+    <span>{{ events | length }} eventos</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Actor</th>
+          <th>Accion</th>
+          <th>Entidad</th>
+          <th>Detalle</th>
+          <th>Origen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        <tr>
+          <td class="text-secondary">{{ event.createdAt }}</td>
+          <td>
+            <strong>{{ event.actorName }}</strong>
+            <small class="d-block text-secondary">{{ event.actorRole or 'sistema' }}</small>
+          </td>
+          <td><span class="badge text-bg-light">{{ event.action }}</span></td>
+          <td>
+            <strong>{{ event.entityType }}</strong>
+            <small class="d-block text-secondary">{{ event.entityId }}</small>
+          </td>
+          <td>{{ event.detail }}</td>
+          <td>
+            <small class="d-block text-secondary">{{ event.method }} {{ event.path }}</small>
+            <small class="d-block text-secondary">{{ event.ipAddress }}</small>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-secondary">No hay eventos de auditoria todavia.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

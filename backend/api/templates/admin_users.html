@@ -58,6 +58,7 @@
 <div class="modal fade" id="newAdminUserModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post">
+      {{ csrf_field() }}
       <div class="modal-header">
         <h2 class="modal-title h5">Nuevo usuario admin</h2>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -77,6 +78,7 @@
 <div class="modal fade" id="editAdminUser{{ loop.index }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post" action="{{ url_for('admin_user_edit', user_id=user.id) }}">
+      {{ csrf_field() }}
       <div class="modal-header">
         <h2 class="modal-title h5">Editar {{ user.name }}</h2>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>

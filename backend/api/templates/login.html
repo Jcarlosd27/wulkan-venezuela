@@ -32,6 +32,7 @@
           {% endif %}
 
           <form method="post" class="d-grid gap-3">
+            {{ csrf_field() }}
             <div>
               <label class="form-label fw-semibold">Correo</label>
               <div class="input-group">

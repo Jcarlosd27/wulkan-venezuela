@@ -7,6 +7,7 @@ from db import SessionLocal, init_database
 from models import (
     AdminUser,
     Announcement,
+    AuditEvent,
     Category,
     Client,
     CreditMovement,
@@ -270,6 +271,27 @@ def credit_movement_to_dict(row: CreditMovement) -> dict[str, Any]:
     return payload
 
 
+def audit_event_to_dict(row: AuditEvent) -> dict[str, Any]:
+    payload = copy_payload(row.payload)
+    payload.update(
+        {
+            "id": row.id,
+            "actorId": row.actor_id,
+            "actorName": row.actor_name,
+            "actorRole": row.actor_role,
+            "action": row.action,
+            "entityType": row.entity_type,
+            "entityId": row.entity_id,
+            "detail": row.detail,
+            "ipAddress": row.ip_address,
+            "path": row.path,
+            "method": row.method,
+            "createdAt": iso_dt(row.created_at),
+        }
+    )
+    return payload
+
+
 def load_sql_store() -> dict[str, list[dict[str, Any]]]:
     init_database()
     with SessionLocal() as session:
@@ -301,6 +323,10 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
             "stock_movements": [stock_movement_to_dict(row) for row in session.query(StockMovement).all()],
             "orders": [order_to_dict(row) for row in session.query(Order).all()],
             "credit_movements": [credit_movement_to_dict(row) for row in session.query(CreditMovement).all()],
+            "audit_events": [
+                audit_event_to_dict(row)
+                for row in session.query(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(1000).all()
+            ],
         }
 
 
@@ -316,6 +342,7 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
         sync_stock_movements(session, store)
         sync_orders(session, store)
         sync_credit_movements(session, store)
+        sync_audit_events(session, store)
         session.commit()
 
 
@@ -620,5 +647,30 @@ def sync_credit_movements(session, store: dict[str, Any]) -> None:
                 "created_by": movement.get("createdBy", ""),
                 "created_at": parse_dt(movement.get("createdAt")),
                 "payload": movement,
+            },
+        )
+
+
+def sync_audit_events(session, store: dict[str, Any]) -> None:
+    for event in store.get("audit_events", [])[-1000:]:
+        object_id = event["id"]
+        upsert(
+            session,
+            AuditEvent,
+            object_id,
+            {
+                "id": object_id,
+                "actor_id": event.get("actorId", ""),
+                "actor_name": event.get("actorName", ""),
+                "actor_role": event.get("actorRole", ""),
+                "action": event.get("action", ""),
+                "entity_type": event.get("entityType", ""),
+                "entity_id": event.get("entityId", ""),
+                "detail": event.get("detail", ""),
+                "ip_address": event.get("ipAddress", ""),
+                "path": event.get("path", ""),
+                "method": event.get("method", ""),
+                "created_at": parse_dt(event.get("createdAt")),
+                "payload": event,
             },
         )

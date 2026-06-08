@@ -109,6 +109,7 @@
 <div class="modal fade" id="newClientModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <form class="modal-content" method="post">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Nuevo cliente ferretero</h2>
@@ -131,6 +132,7 @@
 <div class="modal fade" id="editClient{{ loop.index }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <form class="modal-content" method="post" action="{{ url_for('client_edit', client_id=client.id) }}">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Editar {{ client.businessName }}</h2>

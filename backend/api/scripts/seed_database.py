@@ -18,6 +18,7 @@ from db import SessionLocal, drop_database, init_database
 from models import (
     AdminUser,
     Announcement,
+    AuditEvent,
     Category,
     Client,
     CreditMovement,
@@ -241,6 +242,26 @@ def seed_credit_movements(session, store: dict[str, Any]) -> None:
         upsert(session, CreditMovement, values["id"], values)
 
 
+def seed_audit_events(session, store: dict[str, Any]) -> None:
+    for event in store.get("audit_events", []):
+        values = {
+            "id": event["id"],
+            "actor_id": event.get("actorId", ""),
+            "actor_name": event.get("actorName", ""),
+            "actor_role": event.get("actorRole", ""),
+            "action": event.get("action", ""),
+            "entity_type": event.get("entityType", ""),
+            "entity_id": event.get("entityId", ""),
+            "detail": event.get("detail", ""),
+            "ip_address": event.get("ipAddress", ""),
+            "path": event.get("path", ""),
+            "method": event.get("method", ""),
+            "created_at": parse_dt(event.get("createdAt")),
+            "payload": event,
+        }
+        upsert(session, AuditEvent, values["id"], values)
+
+
 def seed_database(reset: bool = False) -> None:
     if reset:
         drop_database()
@@ -259,6 +280,7 @@ def seed_database(reset: bool = False) -> None:
         seed_stock_movements(session, store)
         seed_orders(session, store)
         seed_credit_movements(session, store)
+        seed_audit_events(session, store)
         session.commit()
 
 

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hmac
+import secrets
+from functools import wraps
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from markupsafe import Markup
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -35,6 +39,105 @@ PAYMENT_METHOD_OPTIONS = [
     ("mobile_payment", "Pago movil"),
     ("other", "Otro"),
 ]
+ALL_ADMIN_ROLES = {"super_admin", "operator", "sales", "inventory", "readonly"}
+WRITE_ROLES = {"super_admin", "operator"}
+SALES_ROLES = {"super_admin", "operator", "sales"}
+INVENTORY_ROLES = {"super_admin", "operator", "inventory"}
+ADMIN_ONLY_ROLES = {"super_admin"}
+MODULE_ACCESS = {
+    "admin_users": ADMIN_ONLY_ROLES,
+    "audit": ADMIN_ONLY_ROLES,
+    "clients": {"super_admin", "operator", "sales", "readonly"},
+    "credit": {"super_admin", "operator", "sales"},
+    "orders": {"super_admin", "operator", "sales", "readonly"},
+    "products": ALL_ADMIN_ROLES,
+    "media_library": ALL_ADMIN_ROLES,
+    "categories": ALL_ADMIN_ROLES,
+    "stock": ALL_ADMIN_ROLES,
+    "announcements": ALL_ADMIN_ROLES,
+}
+
+
+def csrf_token() -> str:
+    token = session.get("_csrf_token", "")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def csrf_field() -> Markup:
+    return Markup(f'<input type="hidden" name="_csrf_token" value="{csrf_token()}">')
+
+
+def current_admin_role() -> str:
+    return session.get("admin_role", "readonly")
+
+
+def role_allowed(roles: set[str]) -> bool:
+    return current_admin_role() in roles
+
+
+def can_access_module(module: str) -> bool:
+    return role_allowed(MODULE_ACCESS.get(module, ALL_ADMIN_ROLES))
+
+
+def forbidden_response():
+    return render_template(
+        "forbidden.html",
+        heading="Acceso restringido",
+        description="Tu rol actual no permite ejecutar esta accion.",
+    ), 403
+
+
+def require_roles(*roles: str):
+    allowed_roles = set(roles)
+
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not role_allowed(allowed_roles):
+                return forbidden_response()
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def require_write_roles(*roles: str) -> bool:
+    if request.method != "POST":
+        return True
+    return role_allowed(set(roles))
+
+
+@app.context_processor
+def security_context():
+    return {
+        "csrf_token": csrf_token,
+        "csrf_field": csrf_field,
+        "can_access_module": can_access_module,
+        "current_admin_role": current_admin_role,
+    }
+
+
+@app.before_request
+def protect_admin_csrf():
+    if request.method != "POST":
+        return None
+    if request.path.startswith("/api/mobile/"):
+        return None
+
+    stored_token = session.get("_csrf_token", "")
+    submitted_token = request.form.get("_csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+    if stored_token and submitted_token and hmac.compare_digest(stored_token, submitted_token):
+        return None
+
+    return render_template(
+        "forbidden.html",
+        heading="Sesion protegida",
+        description="El formulario no pudo validarse. Recarga la pagina e intentalo nuevamente.",
+    ), 400
 
 
 @app.before_request
@@ -73,6 +176,9 @@ def login():
             session["admin_user_id"] = admin_user["id"]
             session["admin_name"] = admin_user.get("name", "Admin Wulkan")
             session["admin_role"] = admin_user.get("role", "operator")
+            admin_user["lastLoginAt"] = utc_now()
+            record_audit_event(store, "login", "admin_user", admin_user["id"], "Inicio de sesion admin.")
+            save_store(store)
             return redirect(request.args.get("next") or url_for("dashboard"))
 
         error = "Credenciales invalidas."
@@ -162,6 +268,34 @@ def find_order(orders: list[dict], order_id: str) -> dict | None:
         ),
         None,
     )
+
+
+def record_audit_event(
+    store: dict,
+    action: str,
+    entity_type: str,
+    entity_id: str = "",
+    detail: str = "",
+    metadata: dict | None = None,
+) -> None:
+    actor_name = session.get("admin_name", "Sistema")
+    event = {
+        "id": next_id("audit", f"{action}-{entity_type}-{entity_id or actor_name}"),
+        "actorId": session.get("admin_user_id", ""),
+        "actorName": actor_name,
+        "actorRole": session.get("admin_role", ""),
+        "action": action,
+        "entityType": entity_type,
+        "entityId": entity_id,
+        "detail": detail,
+        "ipAddress": request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip(),
+        "path": request.path,
+        "method": request.method,
+        "createdAt": utc_now(),
+        "metadata": metadata or {},
+    }
+    store.setdefault("audit_events", []).append(event)
+    store["audit_events"] = store["audit_events"][-1000:]
 
 
 def order_payments(movements: list[dict] | None, order_id: str) -> list[dict]:
@@ -627,13 +761,16 @@ def dashboard():
 
 
 @app.route("/admin-users", methods=["GET", "POST"])
+@require_roles("super_admin")
 def admin_users():
     store = load_store()
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         existing_email = any(user.get("email", "").lower() == email for user in store["admin_users"])
         if email and not existing_email:
-            store["admin_users"].append(admin_user_payload())
+            user = admin_user_payload()
+            store["admin_users"].append(user)
+            record_audit_event(store, "create", "admin_user", user["id"], f"Usuario admin creado: {user['email']}.")
             save_store(store)
         return redirect(url_for("admin_users"))
 
@@ -644,24 +781,31 @@ def admin_users():
 
 
 @app.post("/admin-users/<user_id>/edit")
+@require_roles("super_admin")
 def admin_user_edit(user_id: str):
     store = load_store()
     user = find_by_id(store["admin_users"], user_id)
     if user:
         updated = admin_user_payload(user)
         store["admin_users"] = [updated if item["id"] == user_id else item for item in store["admin_users"]]
+        record_audit_event(store, "update", "admin_user", user_id, f"Usuario admin actualizado: {updated['email']}.")
         save_store(store)
     return redirect(url_for("admin_users"))
 
 
 @app.route("/clients", methods=["GET", "POST"])
+@require_roles("super_admin", "operator", "sales", "readonly")
 def clients():
     store = load_store()
     if request.method == "POST":
+        if not role_allowed(SALES_ROLES):
+            return forbidden_response()
         email = request.form.get("email", "").strip().lower()
         existing_email = any(client.get("email", "").lower() == email for client in store["clients"])
         if email and not existing_email:
-            store["clients"].append(client_payload())
+            client = client_payload()
+            store["clients"].append(client)
+            record_audit_event(store, "create", "client", client["id"], f"Cliente creado: {client['businessName']}.")
             save_store(store)
         return redirect(url_for("clients"))
 
@@ -681,12 +825,14 @@ def clients():
 
 
 @app.post("/clients/<client_id>/edit")
+@require_roles("super_admin", "operator", "sales")
 def client_edit(client_id: str):
     store = load_store()
     client = find_by_id(store["clients"], client_id)
     if client:
         updated = client_payload(client)
         store["clients"] = [updated if item["id"] == client_id else item for item in store["clients"]]
+        record_audit_event(store, "update", "client", client_id, f"Cliente actualizado: {updated['businessName']}.")
         save_store(store)
     return redirect(url_for("clients"))
 
@@ -706,6 +852,7 @@ def products():
 
 
 @app.route("/products/new", methods=["GET", "POST"])
+@require_roles("super_admin", "operator", "inventory")
 def product_new():
     store = load_store()
     if request.method == "POST":
@@ -720,7 +867,9 @@ def product_new():
                 error=error,
             )
 
-        store["products"].append(product_payload(store))
+        product = product_payload(store)
+        store["products"].append(product)
+        record_audit_event(store, "create", "product", product["id"], f"Producto creado: {product['sku']}.")
         save_store(store)
         return redirect(url_for("products"))
 
@@ -735,6 +884,7 @@ def product_new():
 
 
 @app.route("/products/<product_id>/edit", methods=["GET", "POST"])
+@require_roles("super_admin", "operator", "inventory")
 def product_edit(product_id: str):
     store = load_store()
     product = find_by_id(store["products"], product_id)
@@ -758,6 +908,7 @@ def product_edit(product_id: str):
 
         updated = product_payload(store, product)
         store["products"] = [updated if item["id"] == product_id else item for item in store["products"]]
+        record_audit_event(store, "update", "product", product_id, f"Producto actualizado: {updated['sku']}.")
         save_store(store)
         return redirect(url_for("products"))
 
@@ -772,9 +923,18 @@ def product_edit(product_id: str):
 
 
 @app.post("/products/<product_id>/delete")
+@require_roles("super_admin", "operator", "inventory")
 def product_delete(product_id: str):
     store = load_store()
+    product = find_by_id(store["products"], product_id)
     store["products"] = [product for product in store["products"] if product["id"] != product_id]
+    record_audit_event(
+        store,
+        "delete",
+        "product",
+        product_id,
+        f"Producto eliminado: {(product or {}).get('sku', product_id)}.",
+    )
     save_store(store)
     return redirect(url_for("products"))
 
@@ -783,6 +943,8 @@ def product_delete(product_id: str):
 def stock():
     store = load_store()
     if request.method == "POST":
+        if not role_allowed(INVENTORY_ROLES):
+            return forbidden_response()
         bulk_payload = request.form.get("bulkStock", "").strip()
         movement_type = request.form.get("type", "entry")
         reserved_by_product = stock_reserved_quantities(store.get("orders", []))
@@ -841,6 +1003,7 @@ def stock():
                         }
                     )
                     break
+        record_audit_event(store, "update", "stock", "", "Stock actualizado desde panel.")
         save_store(store)
         return redirect(url_for("stock"))
 
@@ -857,18 +1020,20 @@ def stock():
 def categories():
     store = load_store()
     if request.method == "POST":
+        if not role_allowed(INVENTORY_ROLES):
+            return forbidden_response()
         name = request.form.get("name", "").strip()
         image_url = request.form.get("imageUrl", "").strip() or save_upload(request.files.get("imageFile"), "categories")
-        store["categories"].append(
-            {
-                "id": next_id("cat", name),
-                "name": name,
-                "description": request.form.get("description", "").strip(),
-                "imageUrl": image_url,
-                "status": request.form.get("status", "active"),
-                "updatedAt": utc_now(),
-            }
-        )
+        category = {
+            "id": next_id("cat", name),
+            "name": name,
+            "description": request.form.get("description", "").strip(),
+            "imageUrl": image_url,
+            "status": request.form.get("status", "active"),
+            "updatedAt": utc_now(),
+        }
+        store["categories"].append(category)
+        record_audit_event(store, "create", "category", category["id"], f"Categoria creada: {category['name']}.")
         save_store(store)
         return redirect(url_for("categories"))
 
@@ -876,6 +1041,7 @@ def categories():
 
 
 @app.route("/categories/<category_id>/edit", methods=["POST"])
+@require_roles("super_admin", "operator", "inventory")
 def category_edit(category_id: str):
     store = load_store()
     category = find_by_id(store["categories"], category_id)
@@ -894,15 +1060,25 @@ def category_edit(category_id: str):
         for product in store["products"]:
             if product.get("categoryId") == category_id:
                 product["categoryName"] = category["name"]
+        record_audit_event(store, "update", "category", category_id, f"Categoria actualizada: {category['name']}.")
         save_store(store)
     return redirect(url_for("categories"))
 
 
 @app.post("/categories/<category_id>/delete")
+@require_roles("super_admin", "operator", "inventory")
 def category_delete(category_id: str):
     store = load_store()
     if not any(product.get("categoryId") == category_id for product in store["products"]):
+        category = find_by_id(store["categories"], category_id)
         store["categories"] = [category for category in store["categories"] if category["id"] != category_id]
+        record_audit_event(
+            store,
+            "delete",
+            "category",
+            category_id,
+            f"Categoria eliminada: {(category or {}).get('name', category_id)}.",
+        )
         save_store(store)
     return redirect(url_for("categories"))
 
@@ -911,6 +1087,8 @@ def category_delete(category_id: str):
 def media_library():
     store = load_store()
     if request.method == "POST":
+        if not role_allowed(INVENTORY_ROLES):
+            return forbidden_response()
         product_id = request.form.get("productId", "")
         asset_url = request.form.get("assetUrl", "").strip() or save_upload(request.files.get("assetFile"), "library")
         asset_type = request.form.get("assetType", "image")
@@ -933,6 +1111,7 @@ def media_library():
                     product.setdefault("imageUrls", []).append(asset_url)
                     if not product.get("imageUrl"):
                         product["imageUrl"] = asset_url
+            record_audit_event(store, "create", "media_asset", asset["id"], f"Recurso tecnico creado: {title}.")
         save_store(store)
         return redirect(url_for("media_library"))
 
@@ -954,6 +1133,7 @@ def media_library():
 
 
 @app.get("/credit")
+@require_roles("super_admin", "operator", "sales")
 def credit():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -984,7 +1164,28 @@ def credit():
     )
 
 
+@app.get("/audit")
+@require_roles("super_admin")
+def audit():
+    store = load_store()
+    events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)[:200]
+    write_actions = {"create", "update", "delete", "payment", "update_status"}
+    metrics = {
+        "total": len(store.get("audit_events", [])),
+        "actors": len({event.get("actorId") or event.get("actorName") for event in store.get("audit_events", [])}),
+        "writes": sum(1 for event in store.get("audit_events", []) if event.get("action") in write_actions),
+    }
+    graphify_summary = f"{metrics['writes']} cambios / {metrics['actors']} actores"
+    return render_template(
+        "audit.html",
+        events=events,
+        metrics=metrics,
+        graphify_summary=graphify_summary,
+    )
+
+
 @app.get("/orders")
+@require_roles("super_admin", "operator", "sales", "readonly")
 def orders():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -1008,6 +1209,7 @@ def orders():
 
 
 @app.post("/orders/<order_id>/status")
+@require_roles("super_admin", "operator", "sales")
 def order_status_update(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
@@ -1056,11 +1258,13 @@ def order_status_update(order_id: str):
     order["balanceUsd"] = order_balance_usd(order, movements)
     order["paidUsd"] = order_paid_usd(order, movements)
     append_order_history(order, target_status, note)
+    record_audit_event(store, "update_status", "order", order_id, f"Orden movida a {target_status}.")
     save_store(store)
     return redirect(url_for("orders"))
 
 
 @app.post("/orders/<order_id>/payments")
+@require_roles("super_admin", "operator", "sales")
 def order_payment_create(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
@@ -1103,6 +1307,7 @@ def order_payment_create(order_id: str):
     order["managedAt"] = utc_now()
     order["updatedAt"] = utc_now()
     append_order_history(order, order["status"], f"Abono externo registrado por {money_usd(amount_usd)}.")
+    record_audit_event(store, "payment", "order", order_id, f"Abono registrado por {money_usd(amount_usd)}.")
     save_store(store)
     return redirect(url_for("orders"))
 
@@ -1111,24 +1316,26 @@ def order_payment_create(order_id: str):
 def announcements():
     store = load_store()
     if request.method == "POST":
+        if not role_allowed(SALES_ROLES):
+            return forbidden_response()
         title = request.form.get("title", "").strip()
         image_url = request.form.get("imageUrl", "").strip() or save_upload(request.files.get("imageFile"), "announcements")
-        store["announcements"].append(
-            {
-                "id": next_id("ann", title),
-                "title": title,
-                "body": request.form.get("body", "").strip(),
-                "placement": request.form.get("placement", "home"),
-                "priority": int(request.form.get("priority") or 50),
-                "ctaLabel": request.form.get("ctaLabel", "").strip(),
-                "ctaUrl": request.form.get("ctaUrl", "").strip(),
-                "imageUrl": image_url,
-                "startsAt": request.form.get("startsAt") or utc_now(),
-                "endsAt": request.form.get("endsAt", "").strip(),
-                "status": request.form.get("status", "active"),
-                "updatedAt": utc_now(),
-            }
-        )
+        announcement = {
+            "id": next_id("ann", title),
+            "title": title,
+            "body": request.form.get("body", "").strip(),
+            "placement": request.form.get("placement", "home"),
+            "priority": int(request.form.get("priority") or 50),
+            "ctaLabel": request.form.get("ctaLabel", "").strip(),
+            "ctaUrl": request.form.get("ctaUrl", "").strip(),
+            "imageUrl": image_url,
+            "startsAt": request.form.get("startsAt") or utc_now(),
+            "endsAt": request.form.get("endsAt", "").strip(),
+            "status": request.form.get("status", "active"),
+            "updatedAt": utc_now(),
+        }
+        store["announcements"].append(announcement)
+        record_audit_event(store, "create", "announcement", announcement["id"], f"Anuncio creado: {title}.")
         save_store(store)
         return redirect(url_for("announcements"))
 
@@ -1139,6 +1346,7 @@ def announcements():
 
 
 @app.post("/announcements/<announcement_id>/edit")
+@require_roles("super_admin", "operator", "sales")
 def announcement_edit(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)
@@ -1162,16 +1370,26 @@ def announcement_edit(announcement_id: str):
                 "updatedAt": utc_now(),
             }
         )
+        record_audit_event(store, "update", "announcement", announcement_id, f"Anuncio actualizado: {announcement['title']}.")
         save_store(store)
     return redirect(url_for("announcements"))
 
 
 @app.post("/announcements/<announcement_id>/delete")
+@require_roles("super_admin", "operator", "sales")
 def announcement_delete(announcement_id: str):
     store = load_store()
+    announcement = find_by_id(store["announcements"], announcement_id)
     store["announcements"] = [
         announcement for announcement in store["announcements"] if announcement["id"] != announcement_id
     ]
+    record_audit_event(
+        store,
+        "delete",
+        "announcement",
+        announcement_id,
+        f"Anuncio eliminado: {(announcement or {}).get('title', announcement_id)}.",
+    )
     save_store(store)
     return redirect(url_for("announcements"))
 

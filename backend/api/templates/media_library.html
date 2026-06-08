@@ -123,6 +123,7 @@
 <div class="modal fade" id="assetModal" tabindex="-1" aria-labelledby="assetModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post" enctype="multipart/form-data">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title fs-5" id="assetModalLabel">Subir recurso tecnico</h2>

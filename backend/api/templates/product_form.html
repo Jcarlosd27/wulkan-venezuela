@@ -8,6 +8,7 @@
 
 {% block content %}
 <form class="product-form" method="post" enctype="multipart/form-data">
+  {{ csrf_field() }}
   {% if error %}
   <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
     <i class="bi bi-exclamation-triangle"></i>

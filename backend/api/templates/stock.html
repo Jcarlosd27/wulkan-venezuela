@@ -168,6 +168,7 @@
 <div class="modal fade" id="stockMoveModal" tabindex="-1" aria-labelledby="stockMoveModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title fs-5" id="stockMoveModalLabel">Nuevo movimiento</h2>
@@ -215,6 +216,7 @@
 <div class="modal fade" id="bulkStockModal" tabindex="-1" aria-labelledby="bulkStockModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title fs-5" id="bulkStockModalLabel">Carga masiva</h2>

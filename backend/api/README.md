@@ -81,3 +81,10 @@ cd backend/api
 python -m alembic upgrade head
 python scripts/seed_database.py
 ```
+
+## Seguridad admin
+
+- Los formularios del admin usan CSRF con `csrf_field()`.
+- La API movil queda fuera de CSRF y usa autenticacion JSON/token.
+- Roles disponibles: `super_admin`, `operator`, `sales`, `inventory`, `readonly`.
+- Auditoria disponible en `/audit` para `super_admin`.

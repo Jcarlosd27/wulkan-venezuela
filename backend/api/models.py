@@ -179,3 +179,21 @@ class CreditMovement(Base):
     created_by: Mapped[str] = mapped_column(String(160), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    actor_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(50), default="", nullable=False)
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    detail: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    ip_address: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    path: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    method: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% set heading = heading or "Acceso restringido" %}
+{% set description = description or "Tu sesion no tiene permiso para esta accion." %}
+
+{% block content %}
+<section class="panel text-center py-5">
+  <div class="mx-auto" style="max-width: 520px;">
+    <div class="metric-icon bg-danger-subtle text-danger mx-auto mb-3">
+      <i class="bi bi-shield-lock"></i>
+    </div>
+    <h2 class="h4 fw-bold">Operacion protegida</h2>
+    <p class="text-secondary mb-4">{{ description }}</p>
+    <a class="btn btn-primary" href="{{ url_for('dashboard') }}">
+      <i class="bi bi-arrow-left"></i> Volver al dashboard
+    </a>
+  </div>
+</section>
+{% endblock %}

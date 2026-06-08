@@ -180,6 +180,7 @@ DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
         }
     ],
     "credit_movements": [],
+    "audit_events": [],
     "media_assets": [],
     "stock_movements": [
         {
@@ -254,6 +255,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     store.setdefault("admin_users", deepcopy(DEFAULT_STORE["admin_users"]))
     store.setdefault("clients", deepcopy(DEFAULT_STORE["clients"]))
     store.setdefault("credit_movements", [])
+    store.setdefault("audit_events", [])
     for admin_user in store.get("admin_users", []):
         admin_user.setdefault("name", admin_user.get("email", "Usuario admin"))
         admin_user.setdefault("role", "operator")
@@ -310,6 +312,18 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         movement.setdefault("note", "")
         movement.setdefault("createdBy", "Admin")
         movement.setdefault("createdAt", utc_now())
+    for event in store.get("audit_events", []):
+        event.setdefault("actorId", "")
+        event.setdefault("actorName", "Sistema")
+        event.setdefault("actorRole", "")
+        event.setdefault("action", "")
+        event.setdefault("entityType", "")
+        event.setdefault("entityId", "")
+        event.setdefault("detail", "")
+        event.setdefault("ipAddress", "")
+        event.setdefault("path", "")
+        event.setdefault("method", "")
+        event.setdefault("createdAt", utc_now())
     for product in store.get("products", []):
         product.setdefault("productType", "machine")
         product.setdefault("originalPriceUsd", product.get("publicPriceUsd", 0))

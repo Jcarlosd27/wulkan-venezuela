@@ -121,6 +121,7 @@
 <div class="modal fade" id="statusModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post" action="{{ url_for('order_status_update', order_id=order.orderId) }}">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Actualizar estado</h2>
@@ -149,6 +150,7 @@
 <div class="modal fade" id="paymentModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post" action="{{ url_for('order_payment_create', order_id=order.orderId) }}">
+      {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Registrar abono externo</h2>

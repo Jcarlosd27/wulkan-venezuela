@@ -97,6 +97,7 @@
 <div class="modal fade" id="newCategoryModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post" enctype="multipart/form-data">
+      {{ csrf_field() }}
       <div class="modal-header">
         <h2 class="modal-title h5">Nueva categoria</h2>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -134,6 +135,7 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form method="post" enctype="multipart/form-data" action="{{ url_for('category_edit', category_id=category.id) }}">
+        {{ csrf_field() }}
         <div class="modal-header">
           <h2 class="modal-title h5">Editar {{ category.name }}</h2>
           <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -163,6 +165,7 @@
         </div>
       </form>
       <form class="px-3 pb-3 text-end" method="post" action="{{ url_for('category_delete', category_id=category.id) }}">
+        {{ csrf_field() }}
         <button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Eliminar categoria</button>
       </form>
     </div>
