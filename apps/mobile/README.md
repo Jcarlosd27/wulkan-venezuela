@@ -1,6 +1,6 @@
 # Wulkan Mobile
 
-App Android Flutter para clientes, ferreteros, servicios tecnicos e instaladores.
+App Android Flutter para clientes ferreteros Wulkan. La experiencia empieza con inicio de sesion, muestra catalogo/stock sincronizado desde el admin y permite crear ordenes bajo revision operativa, sin pagos online.
 
 ## Modulos previstos
 
@@ -84,6 +84,15 @@ La app queda conectada al backend Flask cuando:
 - `WULKAN_MOBILE_ORDER_API_URL` apunta a `/api/mobile/orders`.
 
 El cliente ferretero debe iniciar sesion con usuario y contrasena creados desde el admin. Si tiene contrasena temporal, la app muestra el panel de cambio de contrasena antes de permitir crear ordenes.
+
+## Experiencia actual
+
+- Pantalla inicial de login con correo y clave.
+- Home ecommerce con tarjeta de credito B2B, hero, carrusel de anuncios, categorias y destacados.
+- Catalogo con productos, SKU, stock, precios USD/VES y validacion tecnica.
+- Carrito asociado al cliente autenticado.
+- Perfil con linea de credito, ordenes, datos comerciales y cierre de sesion.
+- Ordenes enviadas al admin con `customer.id` y `customer.name` de la sesion activa.
 
 ## Validacion actual
 

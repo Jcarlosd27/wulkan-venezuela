@@ -39,15 +39,18 @@ abstract class MobileAuthRepository {
 }
 
 class MockMobileAuthRepository implements MobileAuthRepository {
+  MobileUserSession? _session;
+
   @override
   Future<MobileUserSession> getCurrentSession() async {
-    return const MobileUserSession(
-      id: "client-ferreteria-valencia",
-      name: "Ferreteria Demo Valencia",
-      email: "ferreteria@wulkan.local",
-      roleLabel: "Ferretero B2B",
-      isAuthenticated: true,
-    );
+    return _session ??
+        const MobileUserSession(
+          id: "anonymous",
+          name: "Invitado",
+          email: "",
+          roleLabel: "Sin sesion",
+          isAuthenticated: false,
+        );
   }
 
   @override
@@ -55,7 +58,20 @@ class MockMobileAuthRepository implements MobileAuthRepository {
     required String email,
     required String password,
   }) async {
-    return getCurrentSession();
+    if (email.trim().isEmpty || password.isEmpty) {
+      throw StateError("Ingresa correo y contrasena.");
+    }
+
+    _session = MobileUserSession(
+      id: "client-ferreteria-valencia",
+      name: email.trim().toLowerCase() == "ferreteria@wulkan.local"
+          ? "Ferreteria Demo Valencia"
+          : "Cliente Wulkan",
+      email: email.trim().toLowerCase(),
+      roleLabel: "Ferretero B2B",
+      isAuthenticated: true,
+    );
+    return _session!;
   }
 
   @override
@@ -65,11 +81,14 @@ class MockMobileAuthRepository implements MobileAuthRepository {
   }) async {}
 
   @override
-  Future<void> signOut() async {}
+  Future<void> signOut() async {
+    _session = null;
+  }
 }
 
 class ApiMobileAuthRepository implements MobileAuthRepository {
-  ApiMobileAuthRepository({required String baseUrl}) : _baseUri = Uri.parse(baseUrl);
+  ApiMobileAuthRepository({required String baseUrl})
+      : _baseUri = Uri.parse(baseUrl);
 
   final Uri _baseUri;
   MobileUserSession? _session;

@@ -2,9 +2,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wulkan_mobile/src/auth/mobile_auth.dart';
 
 void main() {
-  test('MockMobileAuthRepository returns active customer session', () async {
+  test('MockMobileAuthRepository requires sign in before active session',
+      () async {
     final repository = MockMobileAuthRepository();
-    final session = await repository.getCurrentSession();
+    final initialSession = await repository.getCurrentSession();
+
+    expect(initialSession.isAuthenticated, isFalse);
+
+    final session = await repository.signIn(
+      email: 'ferreteria@wulkan.local',
+      password: 'ferretero2026',
+    );
 
     expect(session.isAuthenticated, isTrue);
     expect(session.id, 'client-ferreteria-valencia');

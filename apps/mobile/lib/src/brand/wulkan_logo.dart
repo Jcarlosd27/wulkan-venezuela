@@ -84,11 +84,13 @@ class _WulkanMarkPainter extends CustomPainter {
     final h = size.height;
 
     if (compact) {
-      final background = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, 0, w, h),
-        Radius.circular(w * 0.08),
-      );
-      canvas.drawRRect(background, black);
+      if (!onDark) {
+        final background = RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, 0, w, h),
+          Radius.circular(w * 0.08),
+        );
+        canvas.drawRRect(background, black);
+      }
 
       final accent = Path()
         ..moveTo(w * 0.5, h * 0.1)

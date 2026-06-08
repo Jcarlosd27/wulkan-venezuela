@@ -64,7 +64,7 @@ class ApiMobileOrderService implements MobileOrderService {
       if (session.accessToken.isNotEmpty) {
         request.headers.set("Authorization", "Bearer ${session.accessToken}");
       }
-      request.write(jsonEncode(_toPayload(draft)));
+      request.write(jsonEncode(_toPayload(draft, session)));
 
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
@@ -89,12 +89,15 @@ class ApiMobileOrderService implements MobileOrderService {
     }
   }
 
-  Map<String, dynamic> _toPayload(MobileSecureOrderDraft draft) {
+  Map<String, dynamic> _toPayload(
+    MobileSecureOrderDraft draft,
+    MobileUserSession session,
+  ) {
     return {
       "source": "mobile_app",
       "customer": {
-        "id": "client-ferreteria-valencia",
-        "name": "Ferreteria Demo Valencia",
+        "id": session.id,
+        "name": session.name,
       },
       "items": [
         for (final item in draft.items)
