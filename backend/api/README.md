@@ -45,6 +45,19 @@ Archivo de variables sugerido:
 backend/api/.env.example
 ```
 
+Fuente de datos:
+
+```text
+WULKAN_DATA_BACKEND=json
+```
+
+Para operar contra SQL:
+
+```powershell
+$env:WULKAN_DATA_BACKEND="sql"
+$env:WULKAN_SQL_FALLBACK_TO_JSON="0"
+```
+
 Migrar base:
 
 ```bash

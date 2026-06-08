@@ -19,8 +19,10 @@ def env_bool(name: str, default: bool = False) -> bool:
 class Config:
     ENV = os.environ.get("WULKAN_ENV", "development")
     SECRET_KEY = os.environ.get("WULKAN_SECRET_KEY", "wulkan-dev")
+    DATA_BACKEND = os.environ.get("WULKAN_DATA_BACKEND", "json")
     DATABASE_URL = os.environ.get("WULKAN_DATABASE_URL", f"sqlite:///{DATA_DIR / 'wulkan.db'}")
     REQUIRE_MOBILE_TOKEN = env_bool("WULKAN_REQUIRE_MOBILE_TOKEN", False)
+    SQL_FALLBACK_TO_JSON = env_bool("WULKAN_SQL_FALLBACK_TO_JSON", True)
     UPLOAD_FOLDER = str(UPLOAD_DIR)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 

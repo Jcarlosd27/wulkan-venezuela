@@ -6,9 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from config import Config
+
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 STORE_PATH = DATA_DIR / "wulkan_store.json"
+SQL_BACKEND_NAMES = {"sql", "database", "db"}
 
 
 def utc_now() -> str:
@@ -210,10 +213,14 @@ DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
 def ensure_store() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not STORE_PATH.exists():
-        save_store(deepcopy(DEFAULT_STORE))
+        save_json_store(deepcopy(DEFAULT_STORE))
 
 
-def load_store() -> dict[str, list[dict[str, Any]]]:
+def use_sql_backend() -> bool:
+    return str(Config.DATA_BACKEND).strip().lower() in SQL_BACKEND_NAMES
+
+
+def load_json_store() -> dict[str, list[dict[str, Any]]]:
     ensure_store()
     with STORE_PATH.open("r", encoding="utf-8") as file:
         payload = json.load(file)
@@ -222,6 +229,24 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
     store.update(payload)
     normalize_store(store)
     return store
+
+
+def load_store() -> dict[str, list[dict[str, Any]]]:
+    if use_sql_backend():
+        try:
+            from sql_store import load_sql_store, sync_store_to_sql
+
+            store = load_sql_store()
+            if not store.get("admin_users") and not store.get("products"):
+                sync_store_to_sql(load_json_store())
+                store = load_sql_store()
+            normalize_store(store)
+            return store
+        except Exception:
+            if not Config.SQL_FALLBACK_TO_JSON:
+                raise
+
+    return load_json_store()
 
 
 def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
@@ -299,10 +324,25 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         category.setdefault("status", "active")
 
 
-def save_store(store: dict[str, list[dict[str, Any]]]) -> None:
+def save_json_store(store: dict[str, list[dict[str, Any]]]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with STORE_PATH.open("w", encoding="utf-8") as file:
         json.dump(store, file, ensure_ascii=True, indent=2)
+
+
+def save_store(store: dict[str, list[dict[str, Any]]]) -> None:
+    normalize_store(store)
+    if use_sql_backend():
+        try:
+            from sql_store import sync_store_to_sql
+
+            sync_store_to_sql(store)
+            return
+        except Exception:
+            if not Config.SQL_FALLBACK_TO_JSON:
+                raise
+
+    save_json_store(store)
 
 
 def slugify(value: str) -> str:
