@@ -3,67 +3,88 @@
 {% set description = "Trazabilidad de accesos, cambios comerciales y operaciones sensibles del admin." %}
 
 {% block content %}
-<section class="metrics-grid mb-4">
-  <article class="metric-card">
-    <div class="metric-icon bg-primary-subtle text-primary"><i class="bi bi-list-check"></i></div>
-    <span>Total eventos</span>
-    <strong>{{ metrics.total }}</strong>
-    <small>Ultimos 1000 registros</small>
-  </article>
-  <article class="metric-card">
-    <div class="metric-icon bg-success-subtle text-success"><i class="bi bi-person-check"></i></div>
-    <span>Actores</span>
-    <strong>{{ metrics.actors }}</strong>
-    <small>Usuarios con actividad</small>
-  </article>
-  <article class="metric-card">
-    <div class="metric-icon bg-warning-subtle text-warning"><i class="bi bi-pencil-square"></i></div>
-    <span>Cambios</span>
-    <strong>{{ metrics.writes }}</strong>
-    <small>Creacion, edicion o pagos</small>
-  </article>
-  <article class="metric-card">
-    <div class="metric-icon bg-info-subtle text-info"><i class="bi bi-diagram-3"></i></div>
-    <span>Graphify</span>
-    <strong>{{ graphify_summary }}</strong>
-    <small>Resumen operativo</small>
-  </article>
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-list-check"></i></div>
+      <span>Total eventos</span>
+      <strong>{{ metrics.total }}</strong>
+      <em>1000 max</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-person-check"></i></div>
+      <span>Actores</span>
+      <strong>{{ metrics.actors }}</strong>
+      <em>Actividad</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-pencil-square"></i></div>
+      <span>Cambios operativos</span>
+      <strong>{{ metrics.writes }}</strong>
+      <em>Escritura</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-diagram-3"></i></div>
+      <span>Graphify</span>
+      <strong class="audit-graphify-value">{{ graphify_summary }}</strong>
+      <em>Resumen</em>
+    </article>
+  </div>
 </section>
 
-<section class="panel">
+<section class="panel category-panel audit-panel">
   <div class="panel-header">
     <div>
       <h2>Registro operativo</h2>
-      <span>Eventos recientes ordenados por fecha.</span>
+      <span>Eventos recientes ordenados por fecha, actor y modulo afectado.</span>
     </div>
     <span>{{ events | length }} eventos</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table">
+    <table class="table align-middle category-table audit-table">
       <thead>
         <tr>
-          <th>Fecha</th>
+          <th>Evento</th>
           <th>Actor</th>
-          <th>Accion</th>
-          <th>Entidad</th>
+          <th>Modulo</th>
           <th>Detalle</th>
           <th>Origen</th>
         </tr>
       </thead>
       <tbody>
         {% for event in events %}
+        {% set action_class = 'text-bg-secondary' %}
+        {% if event.action in ['login'] %}
+          {% set action_class = 'text-bg-primary' %}
+        {% elif event.action in ['create'] %}
+          {% set action_class = 'text-bg-success' %}
+        {% elif event.action in ['update', 'update_status'] %}
+          {% set action_class = 'text-bg-warning' %}
+        {% elif event.action in ['delete'] %}
+          {% set action_class = 'text-bg-danger' %}
+        {% elif event.action in ['payment'] %}
+          {% set action_class = 'text-bg-info' %}
+        {% endif %}
         <tr>
-          <td class="text-secondary">{{ event.createdAt }}</td>
+          <td>
+            <span class="badge {{ action_class }}">{{ event.action }}</span>
+            <small class="d-block text-secondary mt-1">{{ event.createdAt }}</small>
+          </td>
           <td>
             <strong>{{ event.actorName }}</strong>
             <small class="d-block text-secondary">{{ event.actorRole or 'sistema' }}</small>
           </td>
-          <td><span class="badge text-bg-light">{{ event.action }}</span></td>
           <td>
             <strong>{{ event.entityType }}</strong>
             <small class="d-block text-secondary">{{ event.entityId }}</small>
           </td>
-          <td>{{ event.detail }}</td>
+          <td class="audit-detail">{{ event.detail }}</td>
           <td>
             <small class="d-block text-secondary">{{ event.method }} {{ event.path }}</small>
             <small class="d-block text-secondary">{{ event.ipAddress }}</small>
@@ -71,7 +92,13 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="6" class="text-secondary">No hay eventos de auditoria todavia.</td>
+          <td colspan="5">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-shield-check"></i></div>
+              <strong>No hay eventos de auditoria todavia</strong>
+              <span>Cuando el equipo inicie sesion, cree productos, cambie stock, gestione creditos u ordenes, quedara registrado aqui.</span>
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

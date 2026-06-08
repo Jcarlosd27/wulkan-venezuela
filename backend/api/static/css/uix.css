@@ -37,12 +37,71 @@ body {
   top: 0;
   display: flex;
   height: 100vh;
+  min-height: 0;
   flex-direction: column;
   gap: 11px;
   border-right: 1px solid var(--wulkan-line);
   background: var(--dash-sidebar);
+  overflow: hidden;
   padding: 14px 10px;
   box-shadow: 10px 0 30px rgba(17, 24, 39, 0.025);
+}
+
+.sidebar-scroll-rail {
+  position: absolute;
+  top: 88px;
+  right: 5px;
+  bottom: 14px;
+  width: 5px;
+  border-radius: 999px;
+  background: #eef4ff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.sidebar.has-sidebar-scroll .sidebar-scroll-rail {
+  opacity: 1;
+}
+
+.sidebar-scroll-rail span {
+  display: block;
+  min-height: 36px;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--wulkan-orange);
+  box-shadow: 0 0 0 2px #eef4ff;
+}
+
+.sidebar-nav {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  padding-right: 8px;
+  scrollbar-color: rgba(13, 110, 253, 0.72) #eef4ff;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 10px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: #eef4ff;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  border: 2px solid #eef4ff;
+  border-radius: 999px;
+  background: rgba(13, 110, 253, 0.78);
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: var(--wulkan-orange);
 }
 
 .brand-box,
@@ -123,11 +182,13 @@ body {
   font-size: 13px;
   font-weight: 750;
   padding: 9px 11px;
+  white-space: nowrap;
   transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
 .sidebar .nav-link i {
   width: 18px;
+  flex: 0 0 18px;
   color: #9aa2af;
   font-size: 15px;
 }
@@ -544,6 +605,34 @@ body {
 .announcement-thumb {
   width: 72px;
   border-radius: 12px;
+}
+
+.audit-panel {
+  padding: 16px;
+}
+
+.audit-table {
+  min-width: 960px;
+}
+
+.audit-table td:first-child {
+  width: 150px;
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(3) {
+  width: 190px;
+}
+
+.audit-detail {
+  max-width: 430px;
+  color: var(--wulkan-charcoal);
+  font-weight: 650;
+}
+
+.audit-graphify-value {
+  font-size: 17px !important;
+  white-space: nowrap;
 }
 
 .media-summary {
@@ -1128,6 +1217,10 @@ body {
   .sidebar {
     position: static;
     height: auto;
+  }
+
+  .sidebar-nav {
+    max-height: 260px;
   }
 
   .topbar.app-topbar,
