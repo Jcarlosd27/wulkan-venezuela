@@ -1611,8 +1611,12 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _emailController = TextEditingController(text: 'ferreteria@wulkan.local');
   final _passwordController = TextEditingController(text: 'ferretero2026');
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   late Future<MobileUserSession> _sessionFuture;
   bool _isSigningIn = false;
+  bool _isChangingPassword = false;
 
   @override
   void initState() {
@@ -1624,6 +1628,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -1665,6 +1672,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _sessionFuture = mobileAuthRepository.getCurrentSession());
   }
 
+  Future<void> _changePassword() async {
+    if (_isChangingPassword) {
+      return;
+    }
+    if (_newPasswordController.text != _confirmPasswordController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('La confirmacion no coincide.')),
+      );
+      return;
+    }
+
+    setState(() => _isChangingPassword = true);
+
+    try {
+      await mobileAuthRepository.changePassword(
+        currentPassword: _currentPasswordController.text,
+        newPassword: _newPasswordController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmPasswordController.clear();
+      setState(() {
+        _sessionFuture = mobileAuthRepository.getCurrentSession();
+        _isChangingPassword = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contrasena actualizada.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isChangingPassword = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<MobileUserSession>(
@@ -1697,6 +1746,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 passwordController: _passwordController,
                 isSigningIn: _isSigningIn,
                 onSubmit: _signIn,
+              ),
+            if (session?.isAuthenticated == true && session!.mustChangePassword)
+              _PasswordChangePanel(
+                currentPasswordController: _currentPasswordController,
+                newPasswordController: _newPasswordController,
+                confirmPasswordController: _confirmPasswordController,
+                isSaving: _isChangingPassword,
+                requiredChange: true,
+                onSubmit: _changePassword,
               ),
             const _InfoPanel(
               title: 'Datos de compra',
@@ -1794,6 +1852,104 @@ class _LoginPanel extends StatelessWidget {
                     )
                   : const Icon(Icons.login_outlined),
               label: Text(isSigningIn ? 'Ingresando' : 'Iniciar sesion'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PasswordChangePanel extends StatelessWidget {
+  const _PasswordChangePanel({
+    required this.currentPasswordController,
+    required this.newPasswordController,
+    required this.confirmPasswordController,
+    required this.isSaving,
+    required this.requiredChange,
+    required this.onSubmit,
+  });
+
+  final TextEditingController currentPasswordController;
+  final TextEditingController newPasswordController;
+  final TextEditingController confirmPasswordController;
+  final bool isSaving;
+  final bool requiredChange;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.security_outlined, color: _wulkanOrange),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    requiredChange
+                        ? 'Actualiza tu clave temporal'
+                        : 'Cambiar contrasena',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Usa una contrasena privada de al menos 10 caracteres con letras y numeros.',
+              style: TextStyle(color: _wulkanMuted),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: currentPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Contrasena actual',
+                prefixIcon: Icon(Icons.lock_outline),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: newPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Nueva contrasena',
+                prefixIcon: Icon(Icons.key_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: confirmPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Confirmar nueva contrasena',
+                prefixIcon: Icon(Icons.verified_user_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: isSaving ? null : onSubmit,
+              icon: isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.shield_outlined),
+              label: Text(isSaving ? 'Guardando' : 'Guardar contrasena'),
             ),
           ],
         ),

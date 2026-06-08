@@ -23,8 +23,14 @@ class Config:
     DATABASE_URL = os.environ.get("WULKAN_DATABASE_URL", f"sqlite:///{DATA_DIR / 'wulkan.db'}")
     REQUIRE_MOBILE_TOKEN = env_bool("WULKAN_REQUIRE_MOBILE_TOKEN", False)
     SQL_FALLBACK_TO_JSON = env_bool("WULKAN_SQL_FALLBACK_TO_JSON", True)
+    LOGIN_MAX_ATTEMPTS = int(os.environ.get("WULKAN_LOGIN_MAX_ATTEMPTS", "5"))
+    LOGIN_WINDOW_SECONDS = int(os.environ.get("WULKAN_LOGIN_WINDOW_SECONDS", "300"))
     UPLOAD_FOLDER = str(UPLOAD_DIR)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SECURE = False
+    MAX_CONTENT_LENGTH = int(os.environ.get("WULKAN_MAX_UPLOAD_MB", "16")) * 1024 * 1024
 
 
 class DevelopmentConfig(Config):
@@ -38,7 +44,10 @@ class StagingConfig(Config):
 
 class ProductionConfig(Config):
     ENV = "production"
+    DATA_BACKEND = os.environ.get("WULKAN_DATA_BACKEND", "sql")
     REQUIRE_MOBILE_TOKEN = True
+    SQL_FALLBACK_TO_JSON = env_bool("WULKAN_SQL_FALLBACK_TO_JSON", False)
+    SESSION_COOKIE_SECURE = True
 
 
 CONFIG_BY_ENV = {

@@ -13,6 +13,7 @@ class MobileUserSession {
     required this.roleLabel,
     required this.isAuthenticated,
     this.accessToken = "",
+    this.mustChangePassword = false,
   });
 
   final String id;
@@ -21,6 +22,7 @@ class MobileUserSession {
   final String roleLabel;
   final bool isAuthenticated;
   final String accessToken;
+  final bool mustChangePassword;
 }
 
 abstract class MobileAuthRepository {
@@ -28,6 +30,10 @@ abstract class MobileAuthRepository {
   Future<MobileUserSession> signIn({
     required String email,
     required String password,
+  });
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
   });
   Future<void> signOut();
 }
@@ -51,6 +57,12 @@ class MockMobileAuthRepository implements MobileAuthRepository {
   }) async {
     return getCurrentSession();
   }
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
 
   @override
   Future<void> signOut() async {}
@@ -109,8 +121,55 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         roleLabel: "Ferretero B2B",
         isAuthenticated: true,
         accessToken: token,
+        mustChangePassword: data["mustChangePassword"] == true,
       );
       return _session!;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final session = _session;
+    if (session == null || session.accessToken.isEmpty) {
+      throw StateError("Debes iniciar sesion para cambiar la contrasena.");
+    }
+
+    final uri = _baseUri.replace(path: "${_baseUri.path}/auth/change-password");
+    final client = HttpClient();
+
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      request.headers.set("Authorization", "Bearer ${session.accessToken}");
+      request.write(jsonEncode({
+        "currentPassword": currentPassword,
+        "newPassword": newPassword,
+      }));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final payload = body.isNotEmpty ? jsonDecode(body) : null;
+        final message = payload is Map<String, dynamic>
+            ? payload["error"]?.toString()
+            : null;
+        throw StateError(message ?? "No se pudo cambiar la contrasena.");
+      }
+
+      _session = MobileUserSession(
+        id: session.id,
+        name: session.name,
+        email: session.email,
+        roleLabel: session.roleLabel,
+        isAuthenticated: session.isAuthenticated,
+        accessToken: session.accessToken,
+        mustChangePassword: false,
+      );
     } finally {
       client.close(force: true);
     }
@@ -164,6 +223,14 @@ class FirebaseMobileAuthRepository implements MobileAuthRepository {
       password: password,
     );
     return getCurrentSession();
+  }
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) {
+    throw UnsupportedError("Cambio de contrasena disponible en modo API.");
   }
 
   @override

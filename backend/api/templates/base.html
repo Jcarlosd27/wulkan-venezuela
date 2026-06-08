@@ -89,6 +89,7 @@
               <span>{{ session.get('admin_name', 'Admin') }}</span>
               <i class="bi bi-person-circle"></i>
             </div>
+            <a class="icon-btn" href="{{ url_for('account_password') }}" aria-label="Cambiar contrasena"><i class="bi bi-key"></i></a>
             <a class="icon-btn" href="{{ url_for('logout') }}" aria-label="Cerrar sesion"><i class="bi bi-box-arrow-right"></i></a>
           </div>
         </header>

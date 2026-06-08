@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
+import time
 from functools import wraps
 from pathlib import Path
 
@@ -22,6 +23,33 @@ app.config.from_object(get_config())
 app.jinja_env.filters["badge_class"] = badge_class
 app.jinja_env.filters["money_usd"] = money_usd
 
+
+def validate_runtime_config() -> None:
+    if app.config.get("ENV") != "production":
+        return
+    database_url = str(app.config.get("DATABASE_URL", ""))
+    if app.config.get("SECRET_KEY") == "wulkan-dev":
+        raise RuntimeError("WULKAN_SECRET_KEY real es obligatorio en produccion.")
+    if app.config.get("DATA_BACKEND") != "sql":
+        raise RuntimeError("WULKAN_DATA_BACKEND=sql es obligatorio en produccion.")
+    if database_url.startswith("sqlite"):
+        raise RuntimeError("WULKAN_DATABASE_URL debe apuntar a PostgreSQL en produccion.")
+    if app.config.get("SQL_FALLBACK_TO_JSON"):
+        raise RuntimeError("WULKAN_SQL_FALLBACK_TO_JSON debe estar desactivado en produccion.")
+
+
+validate_runtime_config()
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if app.config.get("ENV") == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
 ORDER_STATUS_OPTIONS = [
     ("credit_review", "En revision"),
     ("approved_with_credit", "Aprobada con credito"),
@@ -39,6 +67,8 @@ PAYMENT_METHOD_OPTIONS = [
     ("mobile_payment", "Pago movil"),
     ("other", "Otro"),
 ]
+LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+PASSWORD_MIN_LENGTH = 10
 ALL_ADMIN_ROLES = {"super_admin", "operator", "sales", "inventory", "readonly"}
 WRITE_ROLES = {"super_admin", "operator"}
 SALES_ROLES = {"super_admin", "operator", "sales"}
@@ -76,6 +106,40 @@ def current_admin_role() -> str:
 
 def role_allowed(roles: set[str]) -> bool:
     return current_admin_role() in roles
+
+
+def login_attempt_key(scope: str, email: str) -> str:
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "local").split(",")[0].strip()
+    return f"{scope}:{ip_address}:{email.lower()}"
+
+
+def is_login_limited(scope: str, email: str) -> bool:
+    key = login_attempt_key(scope, email)
+    now = time.time()
+    window = int(app.config.get("LOGIN_WINDOW_SECONDS", 300))
+    attempts = [timestamp for timestamp in LOGIN_ATTEMPTS.get(key, []) if now - timestamp < window]
+    LOGIN_ATTEMPTS[key] = attempts
+    return len(attempts) >= int(app.config.get("LOGIN_MAX_ATTEMPTS", 5))
+
+
+def register_login_failure(scope: str, email: str) -> None:
+    key = login_attempt_key(scope, email)
+    LOGIN_ATTEMPTS.setdefault(key, []).append(time.time())
+
+
+def reset_login_attempts(scope: str, email: str) -> None:
+    LOGIN_ATTEMPTS.pop(login_attempt_key(scope, email), None)
+
+
+def password_errors(password: str) -> list[str]:
+    errors: list[str] = []
+    if len(password) < PASSWORD_MIN_LENGTH:
+        errors.append(f"Debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.")
+    if not any(char.isalpha() for char in password):
+        errors.append("Debe incluir letras.")
+    if not any(char.isdigit() for char in password):
+        errors.append("Debe incluir numeros.")
+    return errors
 
 
 def can_access_module(module: str) -> bool:
@@ -143,13 +207,17 @@ def protect_admin_csrf():
 @app.before_request
 def require_admin_session():
     public_prefixes = ("/api/mobile/", "/static/")
-    public_endpoints = {"login"}
+    public_endpoints = {"login", "healthz", "readyz"}
 
     if request.path.startswith(public_prefixes) or request.endpoint in public_endpoints:
         return None
 
     if not session.get("admin_authenticated"):
         return redirect(url_for("login", next=request.path))
+
+    allowed_password_endpoints = {"account_password", "logout"}
+    if session.get("must_change_password") and request.endpoint not in allowed_password_endpoints:
+        return redirect(url_for("account_password"))
 
     return None
 
@@ -162,6 +230,19 @@ def login():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         store = load_store()
+        if is_login_limited("admin", email):
+            error = "Demasiados intentos. Espera unos minutos e intentalo nuevamente."
+            record_audit_event(
+                store,
+                "login_limited",
+                "admin_user",
+                email,
+                "Login admin bloqueado temporalmente por intentos fallidos.",
+                actor={"id": email, "name": email or "desconocido", "role": "anonymous"},
+            )
+            save_store(store)
+            return render_template("login.html", error=error)
+
         admin_user = next(
             (
                 user
@@ -172,15 +253,29 @@ def login():
         )
 
         if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
+            reset_login_attempts("admin", email)
             session["admin_authenticated"] = True
             session["admin_user_id"] = admin_user["id"]
             session["admin_name"] = admin_user.get("name", "Admin Wulkan")
             session["admin_role"] = admin_user.get("role", "operator")
+            session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
             admin_user["lastLoginAt"] = utc_now()
             record_audit_event(store, "login", "admin_user", admin_user["id"], "Inicio de sesion admin.")
             save_store(store)
+            if session.get("must_change_password"):
+                return redirect(url_for("account_password"))
             return redirect(request.args.get("next") or url_for("dashboard"))
 
+        register_login_failure("admin", email)
+        record_audit_event(
+            store,
+            "login_failed",
+            "admin_user",
+            email,
+            "Intento fallido de inicio de sesion admin.",
+            actor={"id": email, "name": email or "desconocido", "role": "anonymous"},
+        )
+        save_store(store)
         error = "Credenciales invalidas."
 
     return render_template("login.html", error=error)
@@ -192,8 +287,73 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/account/password", methods=["GET", "POST"])
+def account_password():
+    store = load_store()
+    admin_user = find_by_id(store.get("admin_users", []), session.get("admin_user_id", ""))
+    if not admin_user:
+        session.clear()
+        return redirect(url_for("login"))
+
+    error = ""
+    success = ""
+    if request.method == "POST":
+        current_password = request.form.get("currentPassword", "")
+        new_password = request.form.get("newPassword", "")
+        confirm_password = request.form.get("confirmPassword", "")
+        if not check_password_hash(admin_user.get("passwordHash", ""), current_password):
+            error = "La contrasena actual no coincide."
+        elif new_password != confirm_password:
+            error = "La confirmacion de contrasena no coincide."
+        elif password_errors(new_password):
+            error = " ".join(password_errors(new_password))
+        else:
+            admin_user["passwordHash"] = generate_password_hash(new_password)
+            admin_user["mustChangePassword"] = False
+            admin_user["updatedAt"] = utc_now()
+            session["must_change_password"] = False
+            record_audit_event(
+                store,
+                "password_change",
+                "admin_user",
+                admin_user["id"],
+                "Contrasena admin actualizada por el usuario.",
+            )
+            save_store(store)
+            success = "Contrasena actualizada correctamente."
+
+    return render_template(
+        "account_password.html",
+        error=error,
+        success=success,
+        must_change=bool(session.get("must_change_password")),
+    )
+
+
 def current_rate() -> float:
     return 38.5
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify({"status": "ok", "service": "wulkan-admin"})
+
+
+@app.get("/readyz")
+def readyz():
+    try:
+        store = load_store()
+        return jsonify(
+            {
+                "status": "ready",
+                "dataBackend": app.config.get("DATA_BACKEND"),
+                "products": len(store.get("products", [])),
+                "clients": len(store.get("clients", [])),
+                "orders": len(store.get("orders", [])),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"status": "not_ready", "error": str(exc)}), 503
 
 
 def mobile_token_serializer() -> URLSafeTimedSerializer:
@@ -277,13 +437,15 @@ def record_audit_event(
     entity_id: str = "",
     detail: str = "",
     metadata: dict | None = None,
+    actor: dict | None = None,
 ) -> None:
-    actor_name = session.get("admin_name", "Sistema")
+    actor_payload = actor or {}
+    actor_name = actor_payload.get("name") or session.get("admin_name", "Sistema")
     event = {
         "id": next_id("audit", f"{action}-{entity_type}-{entity_id or actor_name}"),
-        "actorId": session.get("admin_user_id", ""),
+        "actorId": actor_payload.get("id") or session.get("admin_user_id", ""),
         "actorName": actor_name,
-        "actorRole": session.get("admin_role", ""),
+        "actorRole": actor_payload.get("role") or session.get("admin_role", ""),
         "action": action,
         "entityType": entity_type,
         "entityId": entity_id,
@@ -679,12 +841,14 @@ def admin_user_payload(existing: dict | None = None) -> dict:
         payload["id"] = next_id("admin", email)
         payload["createdAt"] = now
         payload["passwordHash"] = generate_password_hash(password or "wulkan2026")
+        payload["mustChangePassword"] = True
     else:
         payload["id"] = existing["id"]
         payload["createdAt"] = existing.get("createdAt", now)
         payload["passwordHash"] = (
             generate_password_hash(password) if password else existing.get("passwordHash", "")
         )
+        payload["mustChangePassword"] = True if password else bool(existing.get("mustChangePassword"))
     return payload
 
 
@@ -711,12 +875,14 @@ def client_payload(existing: dict | None = None) -> dict:
         payload["id"] = next_id("client", email or payload["businessName"])
         payload["createdAt"] = now
         payload["passwordHash"] = generate_password_hash(password or "ferretero2026")
+        payload["mustChangePassword"] = True
     else:
         payload["id"] = existing["id"]
         payload["createdAt"] = existing.get("createdAt", now)
         payload["passwordHash"] = (
             generate_password_hash(password) if password else existing.get("passwordHash", "")
         )
+        payload["mustChangePassword"] = True if password else bool(existing.get("mustChangePassword"))
     return payload
 
 
@@ -1406,6 +1572,8 @@ def api_create_order():
     client = find_by_id(store.get("clients", []), customer_id)
     if client and not customer_payload:
         customer_payload = {"id": client["id"], "name": client.get("businessName", "Cliente Wulkan")}
+    if client and client.get("mustChangePassword"):
+        return jsonify({"error": "Debes cambiar la contrasena temporal antes de crear ordenes."}), 403
     order_id = next_id("ord-mobile", "checkout")
     total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or 0)
     movements = store.get("credit_movements", [])
@@ -1513,6 +1681,7 @@ def api_client_credit():
                 "creditAvailableUsd": enriched["creditAvailableUsd"],
                 "paymentTermsDays": enriched["paymentTermsDays"],
                 "status": enriched["creditStatus"],
+                "mustChangePassword": bool(enriched.get("mustChangePassword")),
             }
         }
     )
@@ -1529,6 +1698,18 @@ def api_client_login():
     payload = request.get_json(silent=True) or {}
     email = payload.get("email", "").strip().lower()
     password = payload.get("password", "")
+    if is_login_limited("mobile", email):
+        record_audit_event(
+            store,
+            "login_limited",
+            "client",
+            email,
+            "Login movil bloqueado temporalmente por intentos fallidos.",
+            actor={"id": email, "name": email or "desconocido", "role": "mobile"},
+        )
+        save_store(store)
+        return jsonify({"error": "Demasiados intentos. Espera unos minutos."}), 429
+
     client = next(
         (
             item
@@ -1538,10 +1719,31 @@ def api_client_login():
         None,
     )
     if not client or not check_password_hash(client.get("passwordHash", ""), password):
+        register_login_failure("mobile", email)
+        record_audit_event(
+            store,
+            "login_failed",
+            "client",
+            email,
+            "Intento fallido de inicio de sesion movil.",
+            actor={"id": email, "name": email or "desconocido", "role": "mobile"},
+        )
+        save_store(store)
         return jsonify({"error": "Credenciales invalidas."}), 401
 
+    reset_login_attempts("mobile", email)
+    client["lastLoginAt"] = utc_now()
     enriched = enrich_client(client, store["orders"], store.get("credit_movements", []))
     access_token = issue_mobile_token(client)
+    record_audit_event(
+        store,
+        "login",
+        "client",
+        client["id"],
+        "Inicio de sesion movil.",
+        actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
+    )
+    save_store(store)
     return jsonify(
         {
             "accessToken": access_token,
@@ -1558,9 +1760,53 @@ def api_client_login():
                 "creditExposureUsd": enriched["creditExposureUsd"],
                 "creditAvailableUsd": enriched["creditAvailableUsd"],
                 "paymentTermsDays": enriched["paymentTermsDays"],
+                "mustChangePassword": bool(enriched.get("mustChangePassword")),
             }
         }
     )
+
+
+@app.post("/api/mobile/auth/change-password")
+def api_client_change_password():
+    store = load_store()
+    customer_id, auth_error = require_mobile_client_id()
+    if auth_error:
+        return auth_error, 401
+    client = find_by_id(store.get("clients", []), customer_id)
+    if not client:
+        return jsonify({"error": "Cliente no encontrado."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    current_password = payload.get("currentPassword", "")
+    new_password = payload.get("newPassword", "")
+    if not check_password_hash(client.get("passwordHash", ""), current_password):
+        record_audit_event(
+            store,
+            "password_change_failed",
+            "client",
+            client["id"],
+            "Cambio de contrasena movil fallido por clave actual invalida.",
+            actor={"id": client["id"], "name": client.get("businessName", ""), "role": "client"},
+        )
+        save_store(store)
+        return jsonify({"error": "La contrasena actual no coincide."}), 400
+    errors = password_errors(new_password)
+    if errors:
+        return jsonify({"error": " ".join(errors)}), 400
+
+    client["passwordHash"] = generate_password_hash(new_password)
+    client["mustChangePassword"] = False
+    client["updatedAt"] = utc_now()
+    record_audit_event(
+        store,
+        "password_change",
+        "client",
+        client["id"],
+        "Contrasena movil actualizada por el cliente.",
+        actor={"id": client["id"], "name": client.get("businessName", ""), "role": "client"},
+    )
+    save_store(store)
+    return jsonify({"status": "updated", "mustChangePassword": False})
 
 
 @app.get("/api/mobile/products")

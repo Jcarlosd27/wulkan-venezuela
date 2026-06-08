@@ -9,5 +9,6 @@ void main() {
     expect(session.isAuthenticated, isTrue);
     expect(session.id, 'client-ferreteria-valencia');
     expect(session.roleLabel, 'Ferretero B2B');
+    expect(session.mustChangePassword, isFalse);
   });
 }

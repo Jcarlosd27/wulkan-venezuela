@@ -29,6 +29,7 @@ class AdminUser(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="operator", nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
@@ -43,6 +44,7 @@ class Client(TimestampMixin, Base):
     phone: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     email: Mapped[str] = mapped_column(String(180), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     client_type: Mapped[str] = mapped_column(String(50), default="ferretero", nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
     credit_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -93,7 +93,12 @@
             <small class="d-block text-secondary">Ordenes {{ money_usd(client.creditOrdersUsd) }}</small>
           </td>
           <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
-          <td><span class="badge {{ client.status | badge_class }}">{{ client.status }}</span></td>
+          <td>
+            <span class="badge {{ client.status | badge_class }}">{{ client.status }}</span>
+            {% if client.mustChangePassword %}
+            <span class="badge text-bg-warning d-inline-block mt-1">Clave temporal</span>
+            {% endif %}
+          </td>
           <td class="text-end">
             <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}">
               <i class="bi bi-pencil"></i> Editar

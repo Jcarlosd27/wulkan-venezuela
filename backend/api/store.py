@@ -260,6 +260,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         admin_user.setdefault("name", admin_user.get("email", "Usuario admin"))
         admin_user.setdefault("role", "operator")
         admin_user.setdefault("status", "active")
+        admin_user.setdefault("mustChangePassword", False)
         admin_user.setdefault("createdAt", utc_now())
         admin_user.setdefault("updatedAt", utc_now())
     for client in store.get("clients", []):
@@ -268,6 +269,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         client.setdefault("contactName", "")
         client.setdefault("phone", "")
         client.setdefault("email", "")
+        client.setdefault("mustChangePassword", False)
         client.setdefault("clientType", "ferretero")
         client.setdefault("status", "active")
         client.setdefault("creditEnabled", False)

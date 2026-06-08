@@ -8,27 +8,31 @@ El producto final debe permitir que Wulkan administre catalogo, stock, clientes 
 
 ## Estado actual
 
-El proyecto actual es una demo/MVP interna avanzada.
+El proyecto actual es una plataforma en **pre-produccion avanzada / piloto comercial cerrado**.
 
 Ya existe:
 
 - Admin Flask con Bootstrap 5.3.
-- Modulos de dashboard, productos, categorias, biblioteca tecnica, stock, anuncios y ordenes.
-- API movil para productos, categorias, anuncios, ubicaciones y creacion de ordenes.
+- Modulos de dashboard, productos, categorias, biblioteca tecnica, stock, anuncios, ordenes, clientes, credito, usuarios admin y auditoria.
+- API movil para productos, categorias, anuncios, ubicaciones, autenticacion, credito, ordenes y cambio de contrasena.
 - App Flutter que puede consumir datos desde Flask si se ejecuta con `WULKAN_MOBILE_DATA_SOURCE=api`.
-- Tests moviles pasando.
-
-Todavia no es comercializable en produccion porque faltan:
-
-- Base de datos real.
-- Autenticacion real de administradores.
-- Clientes ferreteros con usuario y contrasena.
-- Linea de credito por cliente.
+- SQLAlchemy y Alembic con runtime SQL activable.
+- Clientes ferreteros con usuario, contrasena temporal y linea de credito.
 - Ordenes B2B asociadas a cliente.
 - Abonos/pagos externos.
-- Reglas de credito y bloqueo.
-- Auditoria y permisos.
-- Seguridad de API movil.
+- Reglas de credito y bloqueo por contrasena temporal.
+- CSRF, roles y auditoria.
+- Tests moviles pasando.
+
+Todavia falta para venderlo como produccion final:
+
+- Despliegue HTTPS.
+- PostgreSQL administrado.
+- Backups automaticos y prueba de restauracion.
+- Storage externo para imagenes y PDFs.
+- QA end-to-end con backend real y telefono fisico.
+- Recuperacion segura de contrasenas.
+- Rate limit persistente para login.
 
 ## Modelo comercial correcto
 

@@ -1,95 +1,102 @@
 # Estado del proyecto Wulkan
 
-Fecha: 2026-05-20
+Fecha: 2026-06-08
 
-## Porcentaje actual
+## Lectura ejecutiva
 
-Estimacion ejecutiva: **70% del proyecto total**.
+Wulkan ya no esta en etapa de maqueta. El proyecto se encuentra en nivel **pre-produccion avanzada / piloto comercial cerrado**.
 
-El checklist ponderado por items marca **62.4%**:
+Estimacion actual:
 
-- Hecho: 129 items.
-- En progreso: 100 items.
-- Pendiente: 58 items.
-- Formula usada: `hecho + en progreso * 0.5`.
+- **85%** para piloto comercial controlado con Wulkan y ferreteros seleccionados.
+- **70%** para produccion final vendible sin acompanar manualmente la operacion.
 
-Ese 62.4% no representa el producto completo en produccion porque muchas piezas terminadas son arquitectura, documentacion, mocks, contratos y preparacion tecnica. Al ponderar por riesgo real de lanzamiento, el avance total queda en **70%** porque ya hay Server Actions persistentes para verticales, productos, empresas, ubicaciones, casos tecnicos, ordenes B2B, proyectos, pagos y cotizaciones; Firestore Emulator fue ejecutado con seed MVP validado; Android SDK quedo instalado; y la app movil fue compilada, instalada y ejecutada en un telefono Android fisico.
+La diferencia existe porque las funciones principales ya estan conectadas, pero todavia faltan despliegue real, backups, storage externo, QA comercial y operacion HTTPS.
 
-## Lectura por bloque
+## Stack actual
 
-| Bloque | Estado | Avance estimado |
+- Backend: Flask.
+- Admin: Bootstrap 5.3, UIX local y Graphify local.
+- Persistencia: SQLAlchemy/Alembic con runtime SQL activable y JSON solo para desarrollo.
+- Base recomendada: PostgreSQL.
+- App movil: Flutter, con repositorio API Flask y modo mock para desarrollo.
+- API movil: Flask JSON con token bearer opcional/obligatorio en staging y produccion.
+
+## Modulos admin actuales
+
+| Modulo | Estado | Comentario |
 | --- | --- | --- |
-| Arquitectura, negocio y stack | Cerrado como base | 90% |
-| Monorepo, dominio y shared | Solido para MVP | 75% |
-| Admin web | Navegable, con permisos, Firestore y CRUD inicial amplio preparado | 78% |
-| Backend/Firebase | Functions, reglas, seed y Firestore Emulator validados localmente | 65% |
-| App movil | Mock funcional instalada en telefono Android fisico; contrato, entorno, Flutter SDK, Android SDK, runner, repositorio mock/Firestore, bootstrap Firebase, Auth, carrito/checkout y tests | 72% |
-| Datos persistentes | Seed ejecutado contra Firestore Emulator; falta probar Server Actions completas | 62% |
-| Pagos Venezuela | Validacion manual persistente preparada; falta integracion real | 42% |
-| Testing/QA | Typecheck/build, faltan pruebas de flujo | 20% |
-| Operacion real | Documentada, falta validacion comercial | 15% |
+| Dashboard | Operativo | Metricas, rotacion e inventario. |
+| Productos | Operativo | SKU, precios USD/VES, descuento, stock, variantes, imagenes y PDFs. |
+| Biblioteca tecnica | Operativo | Imagenes, fichas PDF y recursos asociados a productos. |
+| Categorias | Operativo | CRUD con imagen para app movil. |
+| Stock masivo | Operativo | Movimiento individual, carga masiva y reserva por orden. |
+| Anuncios app | Operativo | Banners para carrusel movil. |
+| Ordenes | Operativo | Ordenes B2B, credito, pagos externos y estados. |
+| Clientes ferreteros | Operativo | Usuario, contrasena, credito, estado y acceso movil. |
+| Credito | Operativo | Limite, usado, disponible, movimientos y abonos. |
+| Usuarios admin | Operativo | Roles, estados y contrasena temporal. |
+| Auditoria | Operativo | Eventos de cambios, login y seguridad. |
 
-## Fase actual
+## Conexion admin-movil
 
-Estamos entre:
+Ya esta conectado:
 
-- **Fase 1 cerrada**: fundacion tecnica y admin operativo inicial.
-- **Fase 2 avanzada**: ecommerce/catalogo/carrito/checkout en mock.
-- **Fases 3, 4 y 5 iniciadas/avanzadas**: B2B, servicio tecnico y red fisica con backend preparado.
+- Productos creados en admin salen por `/api/mobile/products`.
+- Categorias creadas en admin salen por `/api/mobile/categories`.
+- Anuncios creados en admin salen por `/api/mobile/announcements`.
+- Clientes ferreteros pueden iniciar sesion con `/api/mobile/auth/login`.
+- La app puede consultar credito con `/api/mobile/client/credit`.
+- Ordenes creadas desde app entran al admin por `/api/mobile/orders`.
+- Ordenes afectan credito y stock segun reglas del backend.
+- Clientes con contrasena temporal no pueden crear ordenes hasta cambiarla.
 
-La etapa real ahora es: **transicion de prototipo avanzado a MVP conectado**.
+## Seguridad y operacion
 
-## Lo que ya esta fuerte
+Entregado:
 
-- Contratos de dominio.
-- Admin navegable.
-- Reglas e indices Firestore.
-- Repositorio mock/Firestore.
-- Seed Firestore.
-- Cloud Functions criticas iniciales.
-- Sesion mock/Firebase preparada.
-- Custom claims preparados.
-- Matriz de permisos admin.
-- App movil mock con flujos principales.
-- Contrato de integracion movil.
-- Configuracion movil por `--dart-define`.
-- Flutter SDK estable instalado.
-- Android Studio instalado.
-- Android SDK instalado y licencias aceptadas.
-- Runner Android creado con package `com.wulkan.mobile`.
-- App movil instalada y ejecutada en telefono fisico `25098RA98G`.
-- Repositorio movil preparado para mock/Firestore.
-- Pantallas moviles principales desacopladas de datos hardcodeados.
-- Bootstrap Firebase condicional preparado.
-- Auth movil mock/Firebase preparado.
-- Mapper Firestore alineado con seed MVP.
-- Carrito/checkout movil preparado con payload de orden segura.
-- Tests moviles para repositorio y shell.
+- Login admin.
+- CSRF para formularios admin.
+- Roles por modulo.
+- Auditoria.
+- Login movil con token.
+- Rate limit basico de login.
+- Cambio obligatorio de contrasena temporal.
+- Health check `/healthz`.
+- Readiness check `/readyz`.
+- Migraciones reproducibles con Alembic.
+- Produccion bloqueada si usa configuracion insegura.
 
-## Lo que mas bloquea el salto de porcentaje
+## Que falta para venderlo como producto final
 
-- Firebase real o emuladores corriendo.
-- Login real admin y movil.
-- CRUD persistente.
-- Pruebas de flujos criticos.
-- Pagos reales o integracion inicial.
-- Firebase Android real.
-- Storage para imagenes/comprobantes.
+Prioridad alta:
 
-## Proximo objetivo
+- Desplegar en servidor real con HTTPS.
+- Configurar PostgreSQL administrado.
+- Desactivar JSON en produccion.
+- Backups automaticos y prueba de restauracion.
+- Storage externo para imagenes y PDFs.
+- QA end-to-end con telefono fisico apuntando a backend HTTPS.
+- Prueba comercial con ferretero real:
+  - Login.
+  - Cambio de contrasena.
+  - Consulta de credito.
+  - Compra.
+  - Orden en admin.
+  - Reserva/descuento de stock.
+  - Registro de abono externo.
+  - Recalculo de credito disponible.
 
-Subir de **70% a 75%** requiere:
+Prioridad media:
 
-1. Probar admin en `WULKAN_ADMIN_DATA_SOURCE=firestore`.
-2. Probar CRUD y acciones persistentes contra Firestore Emulator.
-3. Crear login admin real con Firebase Auth.
-4. Activar Storage para imagenes/comprobantes.
-5. Configurar Firebase Android real.
-6. Conectar catalogo movil a Firestore Emulator.
-7. Agregar pruebas de flujos criticos.
+- Recuperacion/restablecimiento seguro de contrasenas.
+- Rate limit persistente con Redis o equivalente.
+- Exportables CSV/PDF para ordenes, clientes y creditos.
+- Mejor gestion de archivos comerciales.
+- Observabilidad: logs, metricas y alertas.
 
-## Bloqueo actual
+## Conclusion comercial
 
-El bloqueo de Firebase CLI fue resuelto instalando `firebase-tools` y JDK 21. Firestore Emulator corrio en `127.0.0.1:8085` y el seed escribio 17 documentos en `wulkan-dev`.
+Wulkan esta listo para **piloto comercial cerrado** y demostraciones serias con flujo real admin-app.
 
-El bloqueo movil bajo un nivel importante: Flutter SDK 3.44.0 esta instalado en `C:\Users\sidne\development\flutter`, Android Studio y Android SDK estan instalados, el runner Android existe, la app pasa `flutter analyze` y `flutter test`, y Wulkan Mobile fue instalada y ejecutada en el telefono fisico `25098RA98G`. Falta Firebase Android real para pasar de mock a datos conectados.
+Para venderlo como producto final sin riesgo operativo, el siguiente bloque debe ser despliegue productivo, QA real y almacenamiento externo de archivos.

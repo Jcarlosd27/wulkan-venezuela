@@ -17,6 +17,7 @@ Esta carpeta contiene la documentacion viva del proyecto. Los documentos origina
 - [Avance Fase 7 - Base de datos](./product/AVANCE_FASE_7_BASE_DATOS.md)
 - [Avance Fase 8 - Runtime SQL](./product/AVANCE_FASE_8_RUNTIME_SQL.md)
 - [Avance Fase 9 - Seguridad admin](./product/AVANCE_FASE_9_SEGURIDAD_ADMIN.md)
+- [Avance Fase 10 - Identidad y readiness](./product/AVANCE_FASE_10_IDENTIDAD_READINESS.md)
 - [Roadmap MVP](./product/ROADMAP_MVP.md)
 - [Checklist arquitectura de negocio](./product/CHECKLIST_ARQUITECTURA_NEGOCIO.md)
 - [Estado Fase 0 y Fase 1](./product/FASE_0_1_ESTADO.md)

@@ -241,7 +241,8 @@
       "role": "super_admin",
       "status": "active",
       "createdAt": "2026-06-08T00:00:00Z",
-      "updatedAt": "2026-06-08T00:00:00Z"
+      "updatedAt": "2026-06-08T00:00:00Z",
+      "mustChangePassword": false
     }
   ],
   "clients": [
@@ -261,7 +262,8 @@
       "paymentTermsDays": 15,
       "notes": "Cliente demo para flujo B2B con linea de credito.",
       "createdAt": "2026-06-08T00:00:00Z",
-      "updatedAt": "2026-06-08T00:00:00Z"
+      "updatedAt": "2026-06-08T00:00:00Z",
+      "mustChangePassword": false
     }
   ],
   "credit_movements": [
@@ -280,6 +282,7 @@
       "createdAt": "2026-06-08T19:35:52.780241Z"
     }
   ],
+  "audit_events": [],
   "media_assets": [],
   "stock_movements": [
     {

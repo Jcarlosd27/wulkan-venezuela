@@ -42,7 +42,12 @@
           </td>
           <td>{{ user.email }}</td>
           <td><span class="badge text-bg-light">{{ user.role }}</span></td>
-          <td><span class="badge {{ user.status | badge_class }}">{{ user.status }}</span></td>
+          <td>
+            <span class="badge {{ user.status | badge_class }}">{{ user.status }}</span>
+            {% if user.mustChangePassword %}
+            <span class="badge text-bg-warning ms-1">Clave temporal</span>
+            {% endif %}
+          </td>
           <td class="text-end">
             <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editAdminUser{{ loop.index }}">
               <i class="bi bi-pencil"></i> Editar
