@@ -12,6 +12,9 @@ from config import Config
 DATA_DIR = Path(__file__).resolve().parent / "data"
 STORE_PATH = DATA_DIR / "wulkan_store.json"
 SQL_BACKEND_NAMES = {"sql", "database", "db"}
+PRODUCTION_ENV_NAME = "production"
+INSECURE_PRODUCTION_ADMIN_EMAILS = {"admin@wulkan.local"}
+INSECURE_PRODUCTION_CLIENT_EMAILS = {"ferreteria@wulkan.local"}
 
 
 def utc_now() -> str:
@@ -221,6 +224,34 @@ def use_sql_backend() -> bool:
     return str(Config.DATA_BACKEND).strip().lower() in SQL_BACKEND_NAMES
 
 
+def is_production() -> bool:
+    return str(Config.ENV).strip().lower() == PRODUCTION_ENV_NAME
+
+
+def production_safe_seed(store: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    if not is_production():
+        return store
+
+    sanitized = deepcopy(store)
+    sanitized["admin_users"] = [
+        user
+        for user in sanitized.get("admin_users", [])
+        if user.get("email", "").strip().lower() not in INSECURE_PRODUCTION_ADMIN_EMAILS
+    ]
+    sanitized["clients"] = [
+        client
+        for client in sanitized.get("clients", [])
+        if client.get("email", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_EMAILS
+    ]
+    return sanitized
+
+
+def default_collection(name: str) -> list[dict[str, Any]]:
+    if is_production() and name in {"admin_users", "clients"}:
+        return []
+    return deepcopy(DEFAULT_STORE[name])
+
+
 def load_json_store() -> dict[str, list[dict[str, Any]]]:
     ensure_store()
     with STORE_PATH.open("r", encoding="utf-8") as file:
@@ -239,7 +270,7 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
 
             store = load_sql_store()
             if not store.get("admin_users") and not store.get("products"):
-                sync_store_to_sql(load_json_store())
+                sync_store_to_sql(production_safe_seed(load_json_store()))
                 store = load_sql_store()
             normalize_store(store)
             return store
@@ -252,8 +283,8 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
 
 def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     store.setdefault("media_assets", [])
-    store.setdefault("admin_users", deepcopy(DEFAULT_STORE["admin_users"]))
-    store.setdefault("clients", deepcopy(DEFAULT_STORE["clients"]))
+    store.setdefault("admin_users", default_collection("admin_users"))
+    store.setdefault("clients", default_collection("clients"))
     store.setdefault("credit_movements", [])
     store.setdefault("audit_events", [])
     for admin_user in store.get("admin_users", []):

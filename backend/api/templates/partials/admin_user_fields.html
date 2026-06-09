@@ -29,6 +29,7 @@
   </div>
   <div class="col-12">
     <label class="form-label fw-semibold">Contrasena</label>
-    <input class="form-control" name="password" type="password" placeholder="{{ 'Dejar vacia para conservar' if user is defined else 'wulkan2026' }}">
+    <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if user is defined else 'Crea una contrasena temporal segura' }}" {% if user is not defined %}required{% endif %}>
+    <div class="form-text">Minimo 10 caracteres, con letras y numeros.</div>
   </div>
 </div>

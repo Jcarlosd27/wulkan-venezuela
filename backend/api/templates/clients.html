@@ -9,6 +9,13 @@
 {% endblock %}
 
 {% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
 <section class="row g-3 mb-3">
   <div class="col-12 col-md-3">
     <article class="metric-card">

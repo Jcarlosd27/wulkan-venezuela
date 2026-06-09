@@ -841,6 +841,47 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
     return ""
 
 
+def credential_form_error(password: str, existing: dict | None = None) -> str:
+    if existing is None and not password:
+        return "Debes definir una contrasena temporal segura."
+    if not password:
+        return ""
+    errors = password_errors(password)
+    if errors:
+        return " ".join(errors)
+    return ""
+
+
+def admin_user_form_error(store: dict, existing: dict | None = None) -> str:
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    if not email:
+        return "El email del usuario admin es obligatorio."
+    duplicated = any(
+        user.get("email", "").lower() == email
+        and (existing is None or user.get("id") != existing.get("id"))
+        for user in store["admin_users"]
+    )
+    if duplicated:
+        return f"Ya existe un usuario admin con el email {email}."
+    return credential_form_error(password, existing)
+
+
+def client_form_error(store: dict, existing: dict | None = None) -> str:
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    if not email:
+        return "El email del cliente ferretero es obligatorio."
+    duplicated = any(
+        client.get("email", "").lower() == email
+        and (existing is None or client.get("id") != existing.get("id"))
+        for client in store["clients"]
+    )
+    if duplicated:
+        return f"Ya existe un cliente con el email {email}."
+    return credential_form_error(password, existing)
+
+
 def admin_user_payload(existing: dict | None = None) -> dict:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
@@ -855,7 +896,7 @@ def admin_user_payload(existing: dict | None = None) -> dict:
     if existing is None:
         payload["id"] = next_id("admin", email)
         payload["createdAt"] = now
-        payload["passwordHash"] = generate_password_hash(password or "wulkan2026")
+        payload["passwordHash"] = generate_password_hash(password)
         payload["mustChangePassword"] = True
     else:
         payload["id"] = existing["id"]
@@ -889,7 +930,7 @@ def client_payload(existing: dict | None = None) -> dict:
     if existing is None:
         payload["id"] = next_id("client", email or payload["businessName"])
         payload["createdAt"] = now
-        payload["passwordHash"] = generate_password_hash(password or "ferretero2026")
+        payload["passwordHash"] = generate_password_hash(password)
         payload["mustChangePassword"] = True
     else:
         payload["id"] = existing["id"]
@@ -947,12 +988,17 @@ def admin_users():
     store = load_store()
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
-        existing_email = any(user.get("email", "").lower() == email for user in store["admin_users"])
-        if email and not existing_email:
-            user = admin_user_payload()
-            store["admin_users"].append(user)
-            record_audit_event(store, "create", "admin_user", user["id"], f"Usuario admin creado: {user['email']}.")
-            save_store(store)
+        error = admin_user_form_error(store)
+        if error:
+            return render_template(
+                "admin_users.html",
+                users=sorted(store["admin_users"], key=lambda item: item.get("name", "")),
+                error=error,
+            )
+        user = admin_user_payload()
+        store["admin_users"].append(user)
+        record_audit_event(store, "create", "admin_user", user["id"], f"Usuario admin creado: {email}.")
+        save_store(store)
         return redirect(url_for("admin_users"))
 
     return render_template(
@@ -967,6 +1013,13 @@ def admin_user_edit(user_id: str):
     store = load_store()
     user = find_by_id(store["admin_users"], user_id)
     if user:
+        error = admin_user_form_error(store, user)
+        if error:
+            return render_template(
+                "admin_users.html",
+                users=sorted(store["admin_users"], key=lambda item: item.get("name", "")),
+                error=error,
+            )
         updated = admin_user_payload(user)
         store["admin_users"] = [updated if item["id"] == user_id else item for item in store["admin_users"]]
         record_audit_event(store, "update", "admin_user", user_id, f"Usuario admin actualizado: {updated['email']}.")
@@ -982,12 +1035,29 @@ def clients():
         if not role_allowed(SALES_ROLES):
             return forbidden_response()
         email = request.form.get("email", "").strip().lower()
-        existing_email = any(client.get("email", "").lower() == email for client in store["clients"])
-        if email and not existing_email:
-            client = client_payload()
-            store["clients"].append(client)
-            record_audit_event(store, "create", "client", client["id"], f"Cliente creado: {client['businessName']}.")
-            save_store(store)
+        error = client_form_error(store)
+        if error:
+            clients_list = [
+                enrich_client(client, store["orders"], store.get("credit_movements", []))
+                for client in store["clients"]
+            ]
+            metrics = {
+                "clients": len(clients_list),
+                "active": sum(1 for client in clients_list if client.get("status") == "active"),
+                "credit_enabled": sum(1 for client in clients_list if client.get("creditEnabled")),
+                "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
+                "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
+            }
+            return render_template(
+                "clients.html",
+                clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
+                metrics=metrics,
+                error=error,
+            )
+        client = client_payload()
+        store["clients"].append(client)
+        record_audit_event(store, "create", "client", client["id"], f"Cliente creado: {client['businessName']}.")
+        save_store(store)
         return redirect(url_for("clients"))
 
     clients_list = [enrich_client(client, store["orders"], store.get("credit_movements", [])) for client in store["clients"]]
@@ -1011,6 +1081,25 @@ def client_edit(client_id: str):
     store = load_store()
     client = find_by_id(store["clients"], client_id)
     if client:
+        error = client_form_error(store, client)
+        if error:
+            clients_list = [
+                enrich_client(item, store["orders"], store.get("credit_movements", []))
+                for item in store["clients"]
+            ]
+            metrics = {
+                "clients": len(clients_list),
+                "active": sum(1 for item in clients_list if item.get("status") == "active"),
+                "credit_enabled": sum(1 for item in clients_list if item.get("creditEnabled")),
+                "credit_available": sum(float(item.get("creditAvailableUsd") or 0) for item in clients_list),
+                "credit_exposure": sum(float(item.get("creditExposureUsd") or 0) for item in clients_list),
+            }
+            return render_template(
+                "clients.html",
+                clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
+                metrics=metrics,
+                error=error,
+            )
         updated = client_payload(client)
         store["clients"] = [updated if item["id"] == client_id else item for item in store["clients"]]
         record_audit_event(store, "update", "client", client_id, f"Cliente actualizado: {updated['businessName']}.")

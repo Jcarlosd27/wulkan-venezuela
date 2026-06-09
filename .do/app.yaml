@@ -81,6 +81,9 @@ services:
       - key: WULKAN_RUN_MIGRATIONS
         scope: RUN_TIME
         value: "1"
+      - key: WULKAN_HARDEN_DEFAULT_ACCOUNTS
+        scope: RUN_TIME
+        value: "1"
 
 databases:
   - name: wulkan-db

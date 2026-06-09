@@ -9,6 +9,8 @@ if [ "${WULKAN_RUN_MIGRATIONS:-1}" = "1" ]; then
   python -m alembic upgrade head
 fi
 
+python scripts/harden_production_defaults.py
+
 exec gunicorn \
   --bind "0.0.0.0:${PORT}" \
   --workers "${WORKERS}" \
