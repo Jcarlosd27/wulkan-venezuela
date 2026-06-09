@@ -142,6 +142,19 @@ Backup:
 python scripts/backup_database.py --output-dir backups
 ```
 
+## Produccion en DigitalOcean
+
+El proyecto incluye una spec para App Platform en `.do/app.yaml` y una guia operativa en `infra/digitalocean/README.md`.
+
+Arquitectura recomendada:
+
+- App Platform ejecuta este backend con Docker.
+- Managed PostgreSQL usa `WULKAN_DATABASE_URL` o `DATABASE_URL`.
+- DigitalOcean Spaces usa `WULKAN_STORAGE_BACKEND=s3`.
+- La app movil se compila con `apps/mobile/dart_defines.digitalocean.example.json`.
+
+El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade head` al iniciar y luego levanta Gunicorn con el puerto entregado por DigitalOcean.
+
 ## Seguridad admin
 
 - Los formularios del admin usan CSRF con `csrf_field()`.

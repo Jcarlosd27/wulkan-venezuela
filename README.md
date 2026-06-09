@@ -5,13 +5,14 @@ Wulkan es una plataforma tecnica B2B2C enfocada inicialmente en Venezuela para v
 La base del proyecto sigue una estrategia de monolito modular:
 
 - `apps/mobile`: app Android Flutter para clientes, ferreteros y servicios tecnicos.
-- `apps/admin`: admin web Next.js para Wulkan, operadores y empresas.
+- `apps/admin`: admin web Next.js reservado para evolucion futura.
 - `packages/domain`: contratos y entidades puras del negocio.
 - `packages/shared`: constantes, estados y utilidades comunes.
 - `packages/ui`: componentes visuales compartidos para web.
 - `packages/config`: configuracion compartida de ambientes y colecciones.
 - `backend/functions`: Cloud Functions iniciales para reglas criticas.
-- `backend/api`: espacio reservado para una futura API NestJS.
+- `backend/api`: admin Flask productivo y API movil para catalogo, clientes, credito, ordenes, imagenes y PDFs.
+- `.do/app.yaml`: spec de DigitalOcean App Platform para backend Flask, PostgreSQL y Spaces.
 - `infra/firebase`: reglas, indices y configuracion Firebase.
 - `docs`: documentacion viva de producto, arquitectura y operacion.
 
@@ -33,6 +34,19 @@ Estos comandos quedaran activos cuando se instalen dependencias:
 ```bash
 pnpm install
 pnpm dev:admin
+pnpm dev:admin:flask
+pnpm mobile:build:apk:do
 pnpm test
 pnpm lint
 ```
+
+## Produccion DigitalOcean
+
+La guia de despliegue esta en `infra/digitalocean/README.md`.
+
+La arquitectura productiva recomendada es:
+
+- DigitalOcean App Platform para `backend/api`.
+- DigitalOcean Managed PostgreSQL para datos del ecommerce.
+- DigitalOcean Spaces para imagenes y PDFs.
+- App movil compilada con `apps/mobile/dart_defines.digitalocean.example.json`.

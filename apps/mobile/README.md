@@ -57,6 +57,12 @@ Para compilar APK de produccion contra la API HTTPS:
 npm run mobile:build:apk:prod
 ```
 
+Para DigitalOcean:
+
+```bash
+npm run mobile:build:apk:do
+```
+
 Antes de compilar, ajusta `dart_defines.production.example.json` con el dominio real:
 
 ```json
@@ -65,6 +71,15 @@ Antes de compilar, ajusta `dart_defines.production.example.json` con el dominio 
   "WULKAN_MOBILE_AUTH_MODE": "api",
   "WULKAN_ADMIN_API_URL": "https://tu-dominio.com/api/mobile",
   "WULKAN_MOBILE_ORDER_API_URL": "https://tu-dominio.com/api/mobile/orders"
+}
+```
+
+Si usas DigitalOcean App Platform, ajusta `dart_defines.digitalocean.example.json`:
+
+```json
+{
+  "WULKAN_ADMIN_API_URL": "https://admin.wulkanvenezuela.com/api/mobile",
+  "WULKAN_MOBILE_ORDER_API_URL": "https://admin.wulkanvenezuela.com/api/mobile/orders"
 }
 ```
 

@@ -1,0 +1,89 @@
+name: wulkan-venezuela
+region: nyc
+
+services:
+  - name: wulkan-admin
+    source_dir: backend/api
+    dockerfile_path: backend/api/Dockerfile
+    github:
+      repo: Jcarlosd27/wulkan-venezuela
+      branch: main
+      deploy_on_push: true
+    http_port: 5000
+    instance_count: 1
+    instance_size_slug: basic-xs
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: WULKAN_ENV
+        scope: RUN_TIME
+        value: production
+      - key: WULKAN_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: replace-with-a-long-random-secret
+      - key: WULKAN_DATA_BACKEND
+        scope: RUN_TIME
+        value: sql
+      - key: WULKAN_DATABASE_URL
+        scope: RUN_TIME
+        value: ${wulkan-db.DATABASE_URL}
+      - key: WULKAN_SQL_FALLBACK_TO_JSON
+        scope: RUN_TIME
+        value: "0"
+      - key: WULKAN_REQUIRE_MOBILE_TOKEN
+        scope: RUN_TIME
+        value: "1"
+      - key: WULKAN_STORAGE_BACKEND
+        scope: RUN_TIME
+        value: s3
+      - key: WULKAN_STORAGE_PUBLIC_BASE_URL
+        scope: RUN_TIME
+        value: https://wulkan-assets.nyc3.cdn.digitaloceanspaces.com
+      - key: WULKAN_S3_BUCKET
+        scope: RUN_TIME
+        value: wulkan-assets
+      - key: WULKAN_S3_REGION
+        scope: RUN_TIME
+        value: nyc3
+      - key: WULKAN_S3_ENDPOINT_URL
+        scope: RUN_TIME
+        value: https://nyc3.digitaloceanspaces.com
+      - key: WULKAN_S3_PREFIX
+        scope: RUN_TIME
+        value: production
+      - key: WULKAN_S3_ACL
+        scope: RUN_TIME
+        value: public-read
+      - key: AWS_ACCESS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+        value: replace-with-digitalocean-spaces-key
+      - key: AWS_SECRET_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: replace-with-digitalocean-spaces-secret
+      - key: WULKAN_LOGIN_MAX_ATTEMPTS
+        scope: RUN_TIME
+        value: "5"
+      - key: WULKAN_LOGIN_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "300"
+      - key: WULKAN_MAX_UPLOAD_MB
+        scope: RUN_TIME
+        value: "16"
+      - key: WULKAN_WEB_WORKERS
+        scope: RUN_TIME
+        value: "3"
+      - key: WULKAN_GUNICORN_TIMEOUT
+        scope: RUN_TIME
+        value: "60"
+      - key: WULKAN_RUN_MIGRATIONS
+        scope: RUN_TIME
+        value: "1"
+
+databases:
+  - name: wulkan-db
+    engine: PG
+    version: "16"
+    production: true

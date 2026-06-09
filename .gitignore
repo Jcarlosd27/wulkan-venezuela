@@ -35,6 +35,7 @@ local.properties
 !.env.example
 !**/.env.example
 !infra/docker/.env.production.example
+!infra/digitalocean/.env.digitalocean.example
 
 # Local database files
 backend/api/data/*.db

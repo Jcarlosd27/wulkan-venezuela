@@ -16,11 +16,31 @@ def env_bool(name: str, default: bool = False) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def normalize_database_url(database_url: str) -> str:
+    """Return a SQLAlchemy URL compatible with the psycopg v3 driver."""
+    if database_url.startswith("postgresql+psycopg://"):
+        return database_url
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    return database_url
+
+
+def database_url() -> str:
+    raw_url = (
+        os.environ.get("WULKAN_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or f"sqlite:///{DATA_DIR / 'wulkan.db'}"
+    )
+    return normalize_database_url(raw_url)
+
+
 class Config:
     ENV = os.environ.get("WULKAN_ENV", "development")
     SECRET_KEY = os.environ.get("WULKAN_SECRET_KEY", "wulkan-dev")
     DATA_BACKEND = os.environ.get("WULKAN_DATA_BACKEND", "json")
-    DATABASE_URL = os.environ.get("WULKAN_DATABASE_URL", f"sqlite:///{DATA_DIR / 'wulkan.db'}")
+    DATABASE_URL = database_url()
     REQUIRE_MOBILE_TOKEN = env_bool("WULKAN_REQUIRE_MOBILE_TOKEN", False)
     SQL_FALLBACK_TO_JSON = env_bool("WULKAN_SQL_FALLBACK_TO_JSON", True)
     LOGIN_MAX_ATTEMPTS = int(os.environ.get("WULKAN_LOGIN_MAX_ATTEMPTS", "5"))

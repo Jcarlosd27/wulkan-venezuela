@@ -15,7 +15,8 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 RUN mkdir -p data static/uploads
+RUN chmod +x scripts/start_web.sh
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "3", "--timeout", "60", "wsgi:application"]
+CMD ["sh", "scripts/start_web.sh"]
