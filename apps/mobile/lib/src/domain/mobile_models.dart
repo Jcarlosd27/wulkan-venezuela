@@ -62,6 +62,26 @@ class MobileProduct {
   String get categoryName => verticalName;
   bool get hasDiscount =>
       discountPercent > 0 || (originalPriceUsd ?? 0) > publicPriceUsd;
+  double get ferreteroPriceUsd =>
+      b2bPriceUsd > 0 ? b2bPriceUsd : publicPriceUsd;
+  double? get ferreteroReferencePriceUsd {
+    if (publicPriceUsd > ferreteroPriceUsd) {
+      return publicPriceUsd;
+    }
+    if ((originalPriceUsd ?? 0) > ferreteroPriceUsd) {
+      return originalPriceUsd;
+    }
+    return null;
+  }
+
+  double get ferreteroDiscountPercent {
+    final reference = ferreteroReferencePriceUsd;
+    if (reference == null || reference <= 0) {
+      return discountPercent;
+    }
+    return ((reference - ferreteroPriceUsd) / reference * 100).clamp(0, 100);
+  }
+
   String? get primaryImageUrl {
     if (imageUrl != null && imageUrl!.isNotEmpty) {
       return imageUrl;

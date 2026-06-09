@@ -564,7 +564,6 @@ class HomeScreen extends StatelessWidget {
         const SizedBox(height: 18),
         _PromoCarousel(onOpenCatalog: onOpenCatalog),
         const SizedBox(height: 18),
-        const _AnnouncementsStrip(placement: 'home'),
         _SectionTitle(
           title: 'Categorias',
           actionLabel: 'Ver todo',
@@ -888,12 +887,10 @@ class _PromoCarouselState extends State<_PromoCarousel> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<MobileProductPage>(
-      future: mobileRepository.listProductPage(
-        const MobileProductQuery(onlyAvailable: true, limit: 5),
-      ),
+    return FutureBuilder<List<MobileAnnouncement>>(
+      future: mobileRepository.listAnnouncements('home'),
       builder: (context, snapshot) {
-        final products = snapshot.data?.products ?? [];
+        final announcements = snapshot.data ?? [];
 
         if (snapshot.connectionState != ConnectionState.done) {
           return const SizedBox(
@@ -902,9 +899,10 @@ class _PromoCarouselState extends State<_PromoCarousel> {
           );
         }
 
-        if (products.isEmpty) {
+        if (announcements.isEmpty) {
           return const SizedBox.shrink();
         }
+        final activeIndex = _index.clamp(0, announcements.length - 1).toInt();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -912,14 +910,14 @@ class _PromoCarouselState extends State<_PromoCarousel> {
             SizedBox(
               height: 184,
               child: PageView.builder(
-                itemCount: products.length,
+                itemCount: announcements.length,
                 onPageChanged: (value) => setState(() => _index = value),
                 itemBuilder: (context, index) {
-                  final product = products[index];
+                  final announcement = announcements[index];
                   return Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: _PromoSlide(
-                      product: product,
+                      announcement: announcement,
                       onTap: widget.onOpenCatalog,
                     ),
                   );
@@ -930,15 +928,15 @@ class _PromoCarouselState extends State<_PromoCarousel> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                for (var i = 0; i < products.length; i++)
+                for (var i = 0; i < announcements.length; i++)
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 220),
-                    width: i == _index ? 22 : 7,
+                    width: i == activeIndex ? 22 : 7,
                     height: 7,
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(99),
-                      color: i == _index
+                      color: i == activeIndex
                           ? _wulkanOrange
                           : _wulkanOrange.withValues(alpha: 0.18),
                     ),
@@ -953,29 +951,24 @@ class _PromoCarouselState extends State<_PromoCarousel> {
 }
 
 class _PromoSlide extends StatelessWidget {
-  const _PromoSlide({required this.product, required this.onTap});
+  const _PromoSlide({required this.announcement, required this.onTap});
 
-  final MobileProduct product;
+  final MobileAnnouncement announcement;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final discount = product.discountPercent > 0
-        ? '${product.discountPercent.toStringAsFixed(0)}% OFF'
-        : 'Oferta Wulkan';
+    final imageUrl = announcement.imageUrl?.trim();
+    final ctaLabel = announcement.ctaLabel?.trim().isNotEmpty == true
+        ? announcement.ctaLabel!.trim()
+        : 'Ver catalogo';
 
     return InkWell(
       borderRadius: BorderRadius.circular(26),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(26),
-          gradient: const LinearGradient(
-            colors: [_wulkanBlack, Color(0xFF2A1710), _wulkanOrange],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
           boxShadow: [
             BoxShadow(
               color: _wulkanOrange.withValues(alpha: 0.2),
@@ -984,64 +977,89 @@ class _PromoSlide extends StatelessWidget {
             ),
           ],
         ),
-        child: Row(
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      color: Colors.white.withValues(alpha: 0.14),
-                    ),
-                    child: Text(
-                      discount,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    product.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          height: 1.02,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'USD ${product.publicPriceUsd.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Ver promocion',
-                    style: TextStyle(
-                      color: Colors.white,
-                      decoration: TextDecoration.underline,
-                      decorationColor: Colors.white,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
+            if (imageUrl != null && imageUrl.isNotEmpty)
+              Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const _PromoFallbackArt(),
+              )
+            else
+              const _PromoFallbackArt(),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xEE101010),
+                    Color(0xAA101010),
+                    Color(0x33101010),
+                  ],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
               ),
             ),
-            const SizedBox(width: 14),
-            _PromoProductArt(product: product),
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: SizedBox(
+                width: MediaQuery.sizeOf(context).width * 0.62,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _StatusPill(label: ctaLabel, color: Colors.white),
+                    const SizedBox(height: 12),
+                    Text(
+                      announcement.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            height: 1.02,
+                          ),
+                    ),
+                    if (announcement.body.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        announcement.body,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFE7E7E7),
+                          fontSize: 13,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          ctaLabel,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            decoration: TextDecoration.underline,
+                            decorationColor: Colors.white,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Icon(
+                          Icons.arrow_forward,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1049,53 +1067,49 @@ class _PromoSlide extends StatelessWidget {
   }
 }
 
-class _PromoProductArt extends StatelessWidget {
-  const _PromoProductArt({required this.product});
-
-  final MobileProduct product;
+class _PromoFallbackArt extends StatelessWidget {
+  const _PromoFallbackArt();
 
   @override
   Widget build(BuildContext context) {
-    final imageUrl = product.primaryImageUrl;
-
     return Container(
-      width: 118,
-      height: 128,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        color: Colors.white.withValues(alpha: 0.92),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [_wulkanBlack, Color(0xFF272727)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
-      child: imageUrl == null || imageUrl.isEmpty
-          ? Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(
-                  Icons.inventory_2_outlined,
-                  size: 58,
-                  color: _wulkanBlack.withValues(alpha: 0.88),
-                ),
-                Positioned(
-                  right: 12,
-                  top: 12,
-                  child: Icon(
-                    Icons.local_fire_department,
-                    color: _wulkanOrange.withValues(alpha: 0.9),
-                  ),
-                ),
-              ],
-            )
-          : Padding(
-              padding: const EdgeInsets.all(10),
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Icon(
-                  Icons.inventory_2_outlined,
-                  size: 58,
-                  color: _wulkanBlack,
-                ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -14,
+            bottom: -18,
+            child: Icon(
+              Icons.local_offer_outlined,
+              color: Colors.white.withValues(alpha: 0.08),
+              size: 152,
+            ),
+          ),
+          Positioned(
+            right: 22,
+            top: 22,
+            child: Container(
+              width: 62,
+              height: 62,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                color: _wulkanOrange,
+              ),
+              child: const Icon(
+                Icons.campaign_outlined,
+                color: Colors.white,
+                size: 34,
               ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1144,9 +1158,9 @@ class _FeaturedProductGrid extends StatelessWidget {
               subtitle: _productSubtitle(product),
               badge: product.badge,
               imageUrl: product.primaryImageUrl,
-              priceUsd: product.publicPriceUsd,
-              originalPriceUsd: product.originalPriceUsd,
-              discountPercent: product.discountPercent,
+              priceUsd: product.ferreteroPriceUsd,
+              originalPriceUsd: product.ferreteroReferencePriceUsd,
+              discountPercent: product.ferreteroDiscountPercent,
               category: product.categoryName,
               variants: product.variants,
               stock: product.availableStock,
@@ -1394,9 +1408,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   subtitle: _productSubtitle(product),
                   badge: product.badge,
                   imageUrl: product.primaryImageUrl,
-                  priceUsd: product.publicPriceUsd,
-                  originalPriceUsd: product.originalPriceUsd,
-                  discountPercent: product.discountPercent,
+                  priceUsd: product.ferreteroPriceUsd,
+                  originalPriceUsd: product.ferreteroReferencePriceUsd,
+                  discountPercent: product.ferreteroDiscountPercent,
                   category: product.categoryName,
                   variants: product.variants,
                   stock: product.availableStock,
@@ -1462,14 +1476,16 @@ class _CatalogSummary extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isLoading ? 'Cargando catalogo' : '$loadedCount productos',
+                  isLoading
+                      ? 'Cargando catalogo'
+                      : '$loadedCount productos disponibles',
                   style: Theme.of(context)
                       .textTheme
                       .titleSmall
                       ?.copyWith(fontWeight: FontWeight.w900),
                 ),
                 Text(
-                  hasMore ? 'Lectura paginada activa' : 'Catalogo al dia',
+                  hasMore ? 'Stock sincronizado' : 'Catalogo al dia',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -1478,7 +1494,7 @@ class _CatalogSummary extends StatelessWidget {
               ],
             ),
           ),
-          const _InfoChip(icon: Icons.sync_outlined, label: 'Admin'),
+          const _InfoChip(icon: Icons.storefront_outlined, label: 'B2B'),
         ],
       ),
     );
@@ -1499,7 +1515,7 @@ class _CatalogFilterBar extends StatelessWidget {
     const filters = [
       (_CatalogFilter.all, 'Todos'),
       (_CatalogFilter.available, 'Disponibles'),
-      (_CatalogFilter.validation, 'Validar'),
+      (_CatalogFilter.validation, 'Revision'),
       (_CatalogFilter.machinery, 'Maquinaria'),
       (_CatalogFilter.spareParts, 'Repuestos'),
     ];
@@ -1543,6 +1559,9 @@ class _ProductDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ferreteroPrice = product.ferreteroPriceUsd;
+    final referencePrice = product.ferreteroReferencePriceUsd;
+
     return FractionallySizedBox(
       heightFactor: 0.88,
       child: ListView(
@@ -1594,24 +1613,25 @@ class _ProductDetailSheet extends StatelessWidget {
             children: [
               _InfoChip(
                 icon: Icons.payments_outlined,
-                label: 'USD ${product.publicPriceUsd.toStringAsFixed(2)}',
+                label: 'Ferretero USD ${ferreteroPrice.toStringAsFixed(2)}',
               ),
-              if (product.hasDiscount)
+              if (product.ferreteroDiscountPercent > 0)
                 _InfoChip(
                   icon: Icons.local_offer_outlined,
-                  label: product.discountPercent > 0
-                      ? '${product.discountPercent.toStringAsFixed(0)}% OFF'
+                  label: product.ferreteroDiscountPercent > 0
+                      ? '${product.ferreteroDiscountPercent.toStringAsFixed(0)}% ahorro'
                       : 'Oferta',
                 ),
               _InfoChip(
                 icon: Icons.currency_exchange,
                 label:
-                    'VES ${(product.publicPriceUsd * mobileEnvironment.exchangeRateUsdVes).toStringAsFixed(2)}',
+                    'VES ${(ferreteroPrice * mobileEnvironment.exchangeRateUsdVes).toStringAsFixed(2)}',
               ),
-              _InfoChip(
-                icon: Icons.storefront_outlined,
-                label: 'B2B ${product.b2bPriceUsd.toStringAsFixed(2)}',
-              ),
+              if (referencePrice != null)
+                _InfoChip(
+                  icon: Icons.storefront_outlined,
+                  label: 'PVP USD ${referencePrice.toStringAsFixed(2)}',
+                ),
               _StockBadge(stock: product.availableStock),
               if (product.requiresTechnicalValidation)
                 const _InfoChip(
@@ -1857,8 +1877,7 @@ class CartScreen extends StatelessWidget {
               const _InlineNotice(
                 icon: Icons.shield_outlined,
                 title: 'Clave temporal pendiente',
-                message:
-                    'Actualiza tu clave en Perfil antes de crear ordenes B2B.',
+                message: 'Cambia la clave temporal antes de crear ordenes B2B.',
                 color: _wulkanOrange,
               ),
             const _AnnouncementsStrip(placement: 'checkout'),
@@ -2072,14 +2091,14 @@ class LocationsScreen extends StatelessWidget {
 
 String _productSubtitle(MobileProduct product) {
   if (product.requiresQuote) {
-    return "Requiere cotizacion e instalacion";
+    return "Cotizacion asistida por Wulkan";
   }
 
   if (product.requiresTechnicalValidation) {
-    return "Stock ${product.availableStock} - requiere validacion tecnica";
+    return "Stock ${product.availableStock} - validar con Wulkan";
   }
 
-  return "Stock ${product.availableStock} - precio publico USD ${product.publicPriceUsd.toStringAsFixed(0)}";
+  return "Stock ${product.availableStock} - precio ferretero USD ${product.ferreteroPriceUsd.toStringAsFixed(0)}";
 }
 
 class WorkModeScreen extends StatelessWidget {
@@ -2185,6 +2204,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _isChangingPassword = false;
+  bool _isPasswordSheetOpen = false;
 
   @override
   void dispose() {
@@ -2223,6 +2243,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) {
         return;
       }
+      if (_isPasswordSheetOpen && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Contrasena actualizada.')),
       );
@@ -2237,6 +2260,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _openPasswordChangeSheet() async {
+    if (_isPasswordSheetOpen) {
+      return;
+    }
+
+    _isPasswordSheetOpen = true;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
+
+        return Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _wulkanLine,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                  _PasswordChangePanel(
+                    currentPasswordController: _currentPasswordController,
+                    newPasswordController: _newPasswordController,
+                    confirmPasswordController: _confirmPasswordController,
+                    isSaving: _isChangingPassword,
+                    requiredChange: true,
+                    asCard: false,
+                    onSubmit: _changePassword,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    _isPasswordSheetOpen = false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
@@ -2245,16 +2321,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         const _SectionTitle(title: 'Cuenta'),
-        _AccountHeaderCard(session: session),
-        if (session.mustChangePassword)
-          _PasswordChangePanel(
-            currentPasswordController: _currentPasswordController,
-            newPasswordController: _newPasswordController,
-            confirmPasswordController: _confirmPasswordController,
-            isSaving: _isChangingPassword,
-            requiredChange: true,
-            onSubmit: _changePassword,
-          ),
+        _AccountHeaderCard(
+          session: session,
+          onOpenPasswordChange:
+              session.mustChangePassword ? _openPasswordChangeSheet : null,
+        ),
         _CreditSnapshotPanel(customerId: session.id),
         _OrderSummaryPanel(customerId: session.id),
         _InfoPanel(
@@ -2277,9 +2348,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 }
 
 class _AccountHeaderCard extends StatelessWidget {
-  const _AccountHeaderCard({required this.session});
+  const _AccountHeaderCard({
+    required this.session,
+    this.onOpenPasswordChange,
+  });
 
   final MobileUserSession session;
+  final VoidCallback? onOpenPasswordChange;
 
   @override
   Widget build(BuildContext context) {
@@ -2347,12 +2422,26 @@ class _AccountHeaderCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Tus precios, credito y ordenes se sincronizan con el panel Wulkan Admin.',
-              style: TextStyle(
-                color: _wulkanMuted,
-                fontWeight: FontWeight.w700,
-              ),
+            Row(
+              children: [
+                const Icon(Icons.sync_outlined, color: _wulkanMuted, size: 18),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Cuenta sincronizada con Wulkan Admin.',
+                    style: TextStyle(
+                      color: _wulkanMuted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (onOpenPasswordChange != null)
+                  TextButton.icon(
+                    onPressed: onOpenPasswordChange,
+                    icon: const Icon(Icons.lock_reset_outlined, size: 18),
+                    label: const Text('Cambiar clave'),
+                  ),
+              ],
             ),
           ],
         ),
@@ -2369,6 +2458,7 @@ class _PasswordChangePanel extends StatelessWidget {
     required this.isSaving,
     required this.requiredChange,
     required this.onSubmit,
+    this.asCard = true,
   });
 
   final TextEditingController currentPasswordController;
@@ -2377,71 +2467,71 @@ class _PasswordChangePanel extends StatelessWidget {
   final bool isSaving;
   final bool requiredChange;
   final VoidCallback onSubmit;
+  final bool asCard;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.security_outlined, color: _wulkanOrange),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    requiredChange
-                        ? 'Actualiza tu clave temporal'
-                        : 'Cambiar contrasena',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w900),
-                  ),
+    final content = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.security_outlined, color: _wulkanOrange),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  requiredChange
+                      ? 'Actualiza tu clave temporal'
+                      : 'Cambiar contrasena',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w900),
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Usa una contrasena privada de al menos 10 caracteres con letras y numeros.',
-              style: TextStyle(color: _wulkanMuted),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: currentPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Contrasena actual',
-                prefixIcon: Icon(Icons.lock_outline),
-                border: OutlineInputBorder(),
               ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Usa una contrasena privada de al menos 10 caracteres con letras y numeros.',
+            style: TextStyle(color: _wulkanMuted),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: currentPasswordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Contrasena actual',
+              prefixIcon: Icon(Icons.lock_outline),
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: newPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Nueva contrasena',
-                prefixIcon: Icon(Icons.key_outlined),
-                border: OutlineInputBorder(),
-              ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: newPasswordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Nueva contrasena',
+              prefixIcon: Icon(Icons.key_outlined),
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: confirmPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Confirmar nueva contrasena',
-                prefixIcon: Icon(Icons.verified_user_outlined),
-                border: OutlineInputBorder(),
-              ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: confirmPasswordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Confirmar nueva contrasena',
+              prefixIcon: Icon(Icons.verified_user_outlined),
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
               onPressed: isSaving ? null : onSubmit,
               icon: isSaving
                   ? const SizedBox(
@@ -2452,9 +2542,19 @@ class _PasswordChangePanel extends StatelessWidget {
                   : const Icon(Icons.shield_outlined),
               label: Text(isSaving ? 'Guardando' : 'Guardar contrasena'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+
+    if (!asCard) {
+      return content;
+    }
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: content,
     );
   }
 }
@@ -2612,16 +2712,162 @@ class _OrderSummaryPanel extends StatelessWidget {
           );
         }
 
-        return _InfoPanel(
-          title: 'Ordenes recientes',
-          lines: [
-            for (final order in orders.take(3))
-              '${order.id}: ${order.status} - saldo USD ${order.balanceUsd.toStringAsFixed(2)} - stock ${order.stockStatus}',
-          ],
+        return Card(
+          elevation: 0,
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Ordenes recientes',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: _wulkanBlack,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                for (final order in orders.take(3)) _CustomerOrderRow(order),
+              ],
+            ),
+          ),
         );
       },
     );
   }
+}
+
+class _CustomerOrderRow extends StatelessWidget {
+  const _CustomerOrderRow(this.order);
+
+  final MobileOrderSummary order;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _customerOrderStatus(order.status, order.paymentStatus);
+    final stock = _customerStockStatus(order.stockStatus);
+    final isCancelled = order.status.toLowerCase().contains('cancel');
+    final amountLabel =
+        isCancelled || order.balanceUsd <= 0 ? 'Total' : 'Saldo';
+    final amount = isCancelled || order.balanceUsd <= 0
+        ? order.totalUsd
+        : order.balanceUsd;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SoftIcon(icon: status.icon, color: status.color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Orden del ${_formatCustomerDate(order.createdAt)}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${status.label} - $stock',
+                  style: const TextStyle(
+                    color: _wulkanMuted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$amountLabel USD ${amount.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: status.color,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+({String label, IconData icon, Color color}) _customerOrderStatus(
+  String status,
+  String paymentStatus,
+) {
+  final normalized = status.toLowerCase();
+  final payment = paymentStatus.toLowerCase();
+
+  if (normalized.contains('cancel')) {
+    return (
+      label: 'Cancelada',
+      icon: Icons.cancel_outlined,
+      color: const Color(0xFFDC3545)
+    );
+  }
+  if (normalized.contains('approved')) {
+    return (
+      label: 'Aprobada con credito',
+      icon: Icons.check_circle_outline,
+      color: const Color(0xFF198754)
+    );
+  }
+  if (payment.contains('partial') || normalized.contains('partial')) {
+    return (
+      label: 'Pago parcial',
+      icon: Icons.payments_outlined,
+      color: const Color(0xFF0D6EFD)
+    );
+  }
+  if (payment.contains('paid')) {
+    return (
+      label: 'Pagada',
+      icon: Icons.verified_outlined,
+      color: const Color(0xFF198754)
+    );
+  }
+  return (
+    label: 'En revision Wulkan',
+    icon: Icons.schedule_outlined,
+    color: _wulkanOrange
+  );
+}
+
+String _customerStockStatus(String stockStatus) {
+  final normalized = stockStatus.toLowerCase();
+  if (normalized.contains('reserved')) {
+    return 'stock reservado';
+  }
+  if (normalized.contains('released')) {
+    return 'stock liberado';
+  }
+  if (normalized.contains('partial')) {
+    return 'stock parcial';
+  }
+  return 'stock por confirmar';
+}
+
+String _formatCustomerDate(DateTime value) {
+  const months = [
+    'ene',
+    'feb',
+    'mar',
+    'abr',
+    'may',
+    'jun',
+    'jul',
+    'ago',
+    'sep',
+    'oct',
+    'nov',
+    'dic',
+  ];
+  return '${value.day.toString().padLeft(2, '0')} ${months[value.month - 1]}';
 }
 
 class _InfoPanel extends StatelessWidget {

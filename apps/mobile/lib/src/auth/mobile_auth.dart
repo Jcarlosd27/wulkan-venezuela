@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/mobile_environment.dart';
 
@@ -87,22 +88,36 @@ class MockMobileAuthRepository implements MobileAuthRepository {
 }
 
 class ApiMobileAuthRepository implements MobileAuthRepository {
-  ApiMobileAuthRepository({required String baseUrl})
-      : _baseUri = Uri.parse(baseUrl);
+  ApiMobileAuthRepository({
+    required String baseUrl,
+    FlutterSecureStorage? storage,
+  })  : _baseUri = Uri.parse(baseUrl),
+        _storage = storage ?? const FlutterSecureStorage();
 
+  static const _sessionKey = "wulkan_mobile_session";
   final Uri _baseUri;
+  final FlutterSecureStorage _storage;
   MobileUserSession? _session;
 
   @override
   Future<MobileUserSession> getCurrentSession() async {
-    return _session ??
-        const MobileUserSession(
-          id: "anonymous",
-          name: "Invitado",
-          email: "",
-          roleLabel: "Sin sesion",
-          isAuthenticated: false,
-        );
+    if (_session != null) {
+      return _session!;
+    }
+
+    final stored = await _readStoredSession();
+    if (stored != null) {
+      _session = stored;
+      return stored;
+    }
+
+    return const MobileUserSession(
+      id: "anonymous",
+      name: "Invitado",
+      email: "",
+      roleLabel: "Sin sesion",
+      isAuthenticated: false,
+    );
   }
 
   @override
@@ -142,6 +157,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         accessToken: token,
         mustChangePassword: data["mustChangePassword"] == true,
       );
+      await _persistSession(_session!);
       return _session!;
     } finally {
       client.close(force: true);
@@ -189,6 +205,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         accessToken: session.accessToken,
         mustChangePassword: false,
       );
+      await _persistSession(_session!);
     } finally {
       client.close(force: true);
     }
@@ -197,6 +214,54 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
   @override
   Future<void> signOut() async {
     _session = null;
+    await _storage.delete(key: _sessionKey);
+  }
+
+  Future<void> _persistSession(MobileUserSession session) {
+    return _storage.write(
+      key: _sessionKey,
+      value: jsonEncode({
+        "id": session.id,
+        "name": session.name,
+        "email": session.email,
+        "roleLabel": session.roleLabel,
+        "accessToken": session.accessToken,
+        "mustChangePassword": session.mustChangePassword,
+      }),
+    );
+  }
+
+  Future<MobileUserSession?> _readStoredSession() async {
+    final raw = await _storage.read(key: _sessionKey);
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+
+    try {
+      final payload = jsonDecode(raw);
+      if (payload is! Map<String, dynamic>) {
+        return null;
+      }
+
+      final token = payload["accessToken"]?.toString() ?? "";
+      final id = payload["id"]?.toString() ?? "";
+      if (token.isEmpty || id.isEmpty) {
+        return null;
+      }
+
+      return MobileUserSession(
+        id: id,
+        name: payload["name"]?.toString() ?? "Cliente Wulkan",
+        email: payload["email"]?.toString() ?? "",
+        roleLabel: payload["roleLabel"]?.toString() ?? "Ferretero B2B",
+        isAuthenticated: true,
+        accessToken: token,
+        mustChangePassword: payload["mustChangePassword"] == true,
+      );
+    } catch (_) {
+      await _storage.delete(key: _sessionKey);
+      return null;
+    }
   }
 }
 

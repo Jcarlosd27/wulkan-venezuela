@@ -22,7 +22,7 @@ class MobileCartService {
         sku: product.sku,
         title: product.name,
         quantity: 1,
-        unitPriceUsd: product.publicPriceUsd,
+        unitPriceUsd: product.ferreteroPriceUsd,
         requiresQuote: product.requiresQuote,
         requiresTechnicalValidation: product.requiresTechnicalValidation,
         imageUrl: product.primaryImageUrl,
@@ -71,7 +71,7 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
   }
 
   void addProduct(MobileProduct product) {
-    if (product.publicPriceUsd <= 0) {
+    if (product.ferreteroPriceUsd <= 0) {
       return;
     }
 
@@ -95,7 +95,7 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
         sku: product.sku,
         title: product.name,
         quantity: 1,
-        unitPriceUsd: product.publicPriceUsd,
+        unitPriceUsd: product.ferreteroPriceUsd,
         requiresQuote: product.requiresQuote,
         requiresTechnicalValidation: product.requiresTechnicalValidation,
         imageUrl: product.primaryImageUrl,

@@ -13,7 +13,7 @@ void main() {
 
       expect(items, hasLength(1));
       expect(items.first.sku, 'WUL-MOT-45CC');
-      expect(items.first.unitPriceUsd, 185);
+      expect(items.first.unitPriceUsd, 162);
     });
 
     test('calculates checkout preview in USD and VES', () {
@@ -84,6 +84,7 @@ void main() {
       expect(controller.value, hasLength(1));
       expect(controller.itemCount, 3);
       expect(controller.contains(product.id), isTrue);
+      expect(controller.value.first.unitPriceUsd, 162);
       expect(controller.value.first.imageUrl, product.imageUrl);
 
       controller.decrement(product.id);
