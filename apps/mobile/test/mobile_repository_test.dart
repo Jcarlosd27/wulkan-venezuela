@@ -83,6 +83,9 @@ void main() {
 
       expect(credit.creditAvailableUsd, 915);
       expect(credit.status, 'in_use');
+      expect(credit.defaultSaleType, 'term_credit');
+      expect(credit.allowedPaymentTermsDays, contains(30));
+      expect(credit.assignedSeller.name, 'Vendedor Wulkan');
       expect(orders, isNotEmpty);
       expect(orders.first.status, 'partial_paid');
     });

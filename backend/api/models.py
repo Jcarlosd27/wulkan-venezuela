@@ -183,6 +183,27 @@ class CreditMovement(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class ServiceTechnician(TimestampMixin, Base):
+    __tablename__ = "service_technicians"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    company_name: Mapped[str] = mapped_column(String(180), default="", nullable=False)
+    contact_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    phone: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    whatsapp: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    email: Mapped[str] = mapped_column(String(180), default="", nullable=False)
+    state: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    city: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    address: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    specialties: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    coverage: Mapped[str] = mapped_column(String(220), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    visible_in_app: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 

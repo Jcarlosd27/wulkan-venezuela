@@ -11,10 +11,14 @@ class MobileSecureOrderDraft {
   const MobileSecureOrderDraft({
     required this.items,
     required this.preview,
+    this.saleType = "cash",
+    this.paymentTermDays = 0,
   });
 
   final List<MobileCartItem> items;
   final MobileCheckoutPreview preview;
+  final String saleType;
+  final int paymentTermDays;
 
   Map<String, dynamic> toCallablePayload() {
     return {
@@ -27,6 +31,8 @@ class MobileSecureOrderDraft {
           },
       ],
       "exchangeRateUsdVes": preview.exchangeRateUsdVes,
+      "saleType": saleType,
+      "paymentTermDays": paymentTermDays,
     };
   }
 }
@@ -95,9 +101,14 @@ class ApiMobileOrderService implements MobileOrderService {
   ) {
     return {
       "source": "mobile_app",
+      "salesChannel": "mobile",
+      "saleType": draft.saleType,
+      "paymentTermDays": draft.paymentTermDays,
       "customer": {
         "id": session.id,
         "name": session.name,
+        "sellerId": session.assignedSeller.id,
+        "sellerName": session.assignedSeller.name,
       },
       "items": [
         for (final item in draft.items)

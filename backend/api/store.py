@@ -183,6 +183,27 @@ DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
         }
     ],
     "credit_movements": [],
+    "service_technicians": [
+        {
+            "id": "svc-caracas-central",
+            "name": "Servicio tecnico autorizado Caracas",
+            "companyName": "Wulkan Servicio Caracas",
+            "contactName": "Coordinador tecnico",
+            "phone": "+58 000-0000000",
+            "whatsapp": "+58 000-0000000",
+            "email": "servicio.caracas@wulkan.local",
+            "state": "Distrito Capital",
+            "city": "Caracas",
+            "address": "Direccion por confirmar",
+            "specialties": ["Motosierras", "Motobombas", "Repuestos"],
+            "coverage": "Caracas y zona central",
+            "status": "active",
+            "visibleInApp": True,
+            "notes": "Registro demo para directorio de servicios tecnicos.",
+            "createdAt": "2026-06-09T00:00:00Z",
+            "updatedAt": "2026-06-09T00:00:00Z",
+        }
+    ],
     "audit_events": [],
     "media_assets": [],
     "stock_movements": [
@@ -286,12 +307,18 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     store.setdefault("admin_users", default_collection("admin_users"))
     store.setdefault("clients", default_collection("clients"))
     store.setdefault("credit_movements", [])
+    store.setdefault("service_technicians", [])
     store.setdefault("audit_events", [])
     for admin_user in store.get("admin_users", []):
         admin_user.setdefault("name", admin_user.get("email", "Usuario admin"))
         admin_user.setdefault("role", "operator")
         admin_user.setdefault("status", "active")
         admin_user.setdefault("mustChangePassword", False)
+        admin_user.setdefault("sellerCode", "")
+        admin_user.setdefault("sellerZone", "")
+        admin_user.setdefault("phone", "")
+        admin_user.setdefault("commissionRatePercent", 0.0)
+        admin_user.setdefault("salesGoalUsd", 0.0)
         admin_user.setdefault("createdAt", utc_now())
         admin_user.setdefault("updatedAt", utc_now())
     for client in store.get("clients", []):
@@ -303,6 +330,18 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         client.setdefault("mustChangePassword", False)
         client.setdefault("clientType", "ferretero")
         client.setdefault("status", "active")
+        client.setdefault("address", "")
+        client.setdefault("state", "")
+        client.setdefault("city", "")
+        client.setdefault("deliveryZone", "")
+        client.setdefault("assignedSellerId", "")
+        client.setdefault("assignedSellerName", "")
+        client.setdefault("defaultSaleType", "cash")
+        client.setdefault("allowedPaymentTermsDays", [0])
+        client.setdefault("creditRequestStatus", "none")
+        client.setdefault("creditRequestedUsd", 0.0)
+        client.setdefault("creditApprovedBy", "")
+        client.setdefault("creditApprovedAt", "")
         client.setdefault("creditEnabled", False)
         client.setdefault("creditLimitUsd", 0.0)
         client.setdefault("creditUsedUsd", 0.0)
@@ -319,6 +358,14 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         order.setdefault("totalUsd", 0.0)
         order.setdefault("totalVes", 0.0)
         order.setdefault("exchangeRateUsdVes", 38.5)
+        order.setdefault("saleType", "credit_line" if order.get("creditStatus") == "approved" else "cash")
+        order.setdefault("paymentTermDays", 0)
+        order.setdefault("sellerId", "")
+        order.setdefault("sellerName", "")
+        order.setdefault("salesChannel", "mobile")
+        order.setdefault("commissionRatePercent", 0.0)
+        order.setdefault("commissionUsd", 0.0)
+        order.setdefault("commissionStatus", "commission_pending")
         order.setdefault("creditBeforeUsd", 0.0)
         order.setdefault("creditAfterUsd", 0.0)
         order.setdefault("creditStatus", "manual_review")
@@ -345,6 +392,23 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         movement.setdefault("note", "")
         movement.setdefault("createdBy", "Admin")
         movement.setdefault("createdAt", utc_now())
+    for technician in store.get("service_technicians", []):
+        technician.setdefault("name", "")
+        technician.setdefault("companyName", "")
+        technician.setdefault("contactName", "")
+        technician.setdefault("phone", "")
+        technician.setdefault("whatsapp", "")
+        technician.setdefault("email", "")
+        technician.setdefault("state", "")
+        technician.setdefault("city", "")
+        technician.setdefault("address", "")
+        technician.setdefault("specialties", [])
+        technician.setdefault("coverage", "")
+        technician.setdefault("status", "active")
+        technician.setdefault("visibleInApp", True)
+        technician.setdefault("notes", "")
+        technician.setdefault("createdAt", utc_now())
+        technician.setdefault("updatedAt", utc_now())
     for event in store.get("audit_events", []):
         event.setdefault("actorId", "")
         event.setdefault("actorName", "Sistema")

@@ -1948,7 +1948,6 @@ class CartScreen extends StatelessWidget {
         }
 
         final preview = mobileCartService.calculatePreview(items);
-        final draft = MobileSecureOrderDraft(items: items, preview: preview);
 
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -1982,24 +1981,251 @@ class CartScreen extends StatelessWidget {
                 color: _wulkanOrange,
               ),
             const _AnnouncementsStrip(placement: 'checkout'),
-            _InfoPanel(
-              title: 'Resumen de compra',
-              lines: [
-                'Subtotal: USD ${preview.subtotalUsd.toStringAsFixed(2)}',
-                'Tasa referencial: ${preview.exchangeRateUsdVes} VES/USD',
-                'Total referencial: ${preview.totalVes.toStringAsFixed(2)} VES',
-                preview.requiresOperatorReview
-                    ? 'Requiere revision operativa antes de confirmar.'
-                    : 'Pago pendiente de validacion por operador.',
-              ],
+            _CheckoutCommercePanel(
+              items: items,
+              preview: preview,
+              session: session,
             ),
-            const SizedBox(height: 8),
-            _CreateOrderButton(draft: draft, session: session),
           ],
         );
       },
     );
   }
+}
+
+class _CheckoutCommercePanel extends StatefulWidget {
+  const _CheckoutCommercePanel({
+    required this.items,
+    required this.preview,
+    required this.session,
+  });
+
+  final List<MobileCartItem> items;
+  final MobileCheckoutPreview preview;
+  final MobileUserSession session;
+
+  @override
+  State<_CheckoutCommercePanel> createState() => _CheckoutCommercePanelState();
+}
+
+class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
+  bool _initialized = false;
+  String _saleType = "cash";
+  int _paymentTermDays = 0;
+
+  void _initialize(MobileCreditSnapshot? credit) {
+    if (_initialized) {
+      return;
+    }
+
+    final terms = _positiveTerms(
+      credit?.allowedPaymentTermsDays ?? widget.session.allowedPaymentTermsDays,
+    );
+    final defaultTerm =
+        terms.isNotEmpty ? terms.first : (credit?.paymentTermsDays ?? 0);
+    final preferredSaleType = credit?.defaultSaleType.isNotEmpty == true
+        ? credit!.defaultSaleType
+        : widget.session.defaultSaleType;
+    final canUseLine =
+        credit?.creditEnabled == true && (credit?.creditAvailableUsd ?? 0) > 0;
+    final canUseTerm = terms.isNotEmpty;
+
+    _saleType = switch (preferredSaleType) {
+      "credit_line" when canUseLine => "credit_line",
+      "term_credit" when canUseTerm => "term_credit",
+      _ => "cash",
+    };
+    _paymentTermDays = defaultTerm;
+    _initialized = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<MobileCreditSnapshot>(
+      future: mobileRepository.getCredit(widget.session.id),
+      builder: (context, snapshot) {
+        final credit = snapshot.data;
+        _initialize(credit);
+
+        final terms = _positiveTerms(
+          credit?.allowedPaymentTermsDays ??
+              widget.session.allowedPaymentTermsDays,
+        );
+        if (_saleType == "term_credit" && terms.isNotEmpty) {
+          _paymentTermDays =
+              terms.contains(_paymentTermDays) ? _paymentTermDays : terms.first;
+        }
+        final canUseTerm = terms.isNotEmpty;
+        final canUseLine = credit?.creditEnabled == true &&
+            (credit?.creditAvailableUsd ?? 0) > 0;
+        final sellerName = credit?.assignedSeller.name.isNotEmpty == true
+            ? credit!.assignedSeller.name
+            : widget.session.assignedSeller.name;
+        final selectedTerm = _saleType == "term_credit" ? _paymentTermDays : 0;
+        final draft = MobileSecureOrderDraft(
+          items: widget.items,
+          preview: widget.preview,
+          saleType: _saleType,
+          paymentTermDays: selectedTerm,
+        );
+
+        return Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const _SoftIcon(icon: Icons.assignment_turned_in_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Condicion comercial',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
+                          Text(
+                            sellerName.isEmpty
+                                ? 'Orden revisada por Wulkan'
+                                : 'Vendedor asignado: $sellerName',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _wulkanMuted,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _SaleTypeChip(
+                      label: 'Efectivo',
+                      selected: _saleType == "cash",
+                      onSelected: () => setState(() => _saleType = "cash"),
+                    ),
+                    _SaleTypeChip(
+                      label: terms.isNotEmpty
+                          ? 'Credito ${terms.first} dias'
+                          : 'Credito plazo',
+                      selected: _saleType == "term_credit",
+                      enabled: canUseTerm,
+                      onSelected: () => setState(() {
+                        _saleType = "term_credit";
+                        _paymentTermDays = terms.contains(_paymentTermDays)
+                            ? _paymentTermDays
+                            : terms.first;
+                      }),
+                    ),
+                    _SaleTypeChip(
+                      label: 'Linea de credito',
+                      selected: _saleType == "credit_line",
+                      enabled: canUseLine,
+                      onSelected: () =>
+                          setState(() => _saleType = "credit_line"),
+                    ),
+                  ],
+                ),
+                if (_saleType == "term_credit" && terms.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final term in terms)
+                        _SaleTypeChip(
+                          label: '$term dias',
+                          selected: _paymentTermDays == term,
+                          onSelected: () =>
+                              setState(() => _paymentTermDays = term),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 14),
+                _InfoPanel(
+                  title: 'Resumen de compra',
+                  compact: true,
+                  lines: [
+                    'Subtotal: USD ${widget.preview.subtotalUsd.toStringAsFixed(2)}',
+                    'Total referencial: ${widget.preview.totalVes.toStringAsFixed(2)} VES',
+                    'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
+                    if (credit != null && _saleType == "credit_line")
+                      'Credito disponible: USD ${credit.creditAvailableUsd.toStringAsFixed(2)}',
+                    widget.preview.requiresOperatorReview
+                        ? 'Requiere revision operativa antes de confirmar.'
+                        : 'Validacion operativa Wulkan antes del despacho.',
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _CreateOrderButton(draft: draft, session: widget.session),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SaleTypeChip extends StatelessWidget {
+  const _SaleTypeChip({
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+    this.enabled = true,
+  });
+
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: enabled ? (_) => onSelected() : null,
+      selectedColor: _wulkanBlack,
+      backgroundColor: enabled ? Colors.white : const Color(0xFFF1F3F5),
+      labelStyle: TextStyle(
+        color: selected
+            ? Colors.white
+            : (enabled ? _wulkanInk : const Color(0xFFADB5BD)),
+        fontWeight: FontWeight.w900,
+      ),
+      side: BorderSide(
+        color: selected ? _wulkanBlack : _wulkanLine,
+      ),
+    );
+  }
+}
+
+List<int> _positiveTerms(List<int> terms) {
+  return terms.where((term) => term > 0).toSet().toList()..sort();
+}
+
+String _saleTypeLabel(String saleType, int paymentTermDays) {
+  return switch (saleType) {
+    "credit_line" => "Linea de credito",
+    "term_credit" =>
+      "Credito ${paymentTermDays > 0 ? paymentTermDays : 0} dias",
+    _ => "Efectivo",
+  };
 }
 
 class _CreateOrderButton extends StatefulWidget {
@@ -2572,6 +2798,23 @@ class _AccountHeaderCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+            if (session.assignedSeller.name.isNotEmpty) ...[
+              _AccountMetaLine(
+                icon: Icons.support_agent_outlined,
+                label: 'Vendedor',
+                value: session.assignedSeller.name,
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (_positiveTerms(session.allowedPaymentTermsDays).isNotEmpty) ...[
+              _AccountMetaLine(
+                icon: Icons.event_available_outlined,
+                label: 'Plazos',
+                value:
+                    '${_positiveTerms(session.allowedPaymentTermsDays).join(", ")} dias',
+              ),
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
                 const Icon(Icons.sync_outlined, color: _wulkanMuted, size: 18),
@@ -2596,6 +2839,46 @@ class _AccountHeaderCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AccountMetaLine extends StatelessWidget {
+  const _AccountMetaLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: _wulkanMuted),
+        const SizedBox(width: 8),
+        Text(
+          '$label: ',
+          style: const TextStyle(
+            color: _wulkanMuted,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _wulkanBlack,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2752,6 +3035,7 @@ class _CreditDashboardCard extends StatelessWidget {
         ? 0.0
         : (credit.creditExposureUsd / credit.creditLimitUsd).clamp(0.0, 1.0);
     final statusColor = enabled ? const Color(0xFF198754) : _wulkanOrange;
+    final terms = _positiveTerms(credit.allowedPaymentTermsDays);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2824,12 +3108,24 @@ class _CreditDashboardCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)} - ${credit.paymentTermsDays} dias',
+              terms.isEmpty
+                  ? 'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)}'
+                  : 'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)} - plazos ${terms.join(", ")} dias',
               style: const TextStyle(
                 color: _wulkanMuted,
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (credit.assignedSeller.name.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Vendedor: ${credit.assignedSeller.name}',
+                style: const TextStyle(
+                  color: _wulkanMuted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -3021,40 +3317,59 @@ String _formatCustomerDate(DateTime value) {
 }
 
 class _InfoPanel extends StatelessWidget {
-  const _InfoPanel({required this.title, required this.lines});
+  const _InfoPanel({
+    required this.title,
+    required this.lines,
+    this.compact = false,
+  });
 
   final String title;
   final List<String> lines;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final content = Padding(
+      padding: EdgeInsets.all(compact ? 12 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w900, color: _wulkanBlack),
+          ),
+          const SizedBox(height: 8),
+          for (final line in lines)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                line,
+                style: const TextStyle(color: _wulkanMuted),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (compact) {
+      return Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: const Color(0xFFF8F9FA),
+          border: Border.all(color: _wulkanLine),
+        ),
+        child: content,
+      );
+    }
+
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w900, color: _wulkanBlack),
-            ),
-            const SizedBox(height: 8),
-            for (final line in lines)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  line,
-                  style: const TextStyle(color: _wulkanMuted),
-                ),
-              ),
-          ],
-        ),
-      ),
+      child: content,
     );
   }
 }

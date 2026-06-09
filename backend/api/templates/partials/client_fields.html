@@ -1,3 +1,5 @@
+{% set selected_terms = client.allowedPaymentTermsDays if client is defined else [0] %}
+{% set selected_sale_type = client.defaultSaleType if client is defined else 'cash' %}
 <div class="row g-3">
   <div class="col-12 col-md-7">
     <label class="form-label fw-semibold">Nombre comercial</label>
@@ -14,6 +16,22 @@
   <div class="col-12 col-md-6">
     <label class="form-label fw-semibold">Telefono</label>
     <input class="form-control" name="phone" value="{{ client.phone if client is defined else '' }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Direccion del cliente</label>
+    <input class="form-control" name="address" value="{{ client.address if client is defined else '' }}" placeholder="Direccion fiscal o de despacho">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Estado</label>
+    <input class="form-control" name="state" value="{{ client.state if client is defined else '' }}" placeholder="Ej: Carabobo">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Ciudad</label>
+    <input class="form-control" name="city" value="{{ client.city if client is defined else '' }}" placeholder="Ej: Valencia">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Zona comercial</label>
+    <input class="form-control" name="deliveryZone" value="{{ client.deliveryZone if client is defined else '' }}" placeholder="Ruta o zona">
   </div>
   <div class="col-12 col-md-7">
     <label class="form-label fw-semibold">Email / usuario movil</label>
@@ -43,6 +61,60 @@
     </select>
   </div>
   <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Vendedor asignado</label>
+    {% if current_admin_role() == 'sales' %}
+      <input type="hidden" name="assignedSellerId" value="{{ session.get('admin_user_id', '') }}">
+      <input class="form-control" readonly value="{{ session.get('admin_name', 'Vendedor') }}">
+    {% else %}
+      {% set selected_seller = client.assignedSellerId if client is defined else '' %}
+      <select class="form-select" name="assignedSellerId">
+        <option value="">Sin asignar</option>
+        {% for seller in sellers %}
+        <option value="{{ seller.id }}" {% if selected_seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Tipo de venta default</label>
+    <select class="form-select" name="defaultSaleType">
+      {% for value, label in sale_type_options %}
+      <option value="{{ value }}" {% if selected_sale_type == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-12 col-md-8">
+    <label class="form-label fw-semibold">Terminos permitidos</label>
+    <div class="product-checks flex-wrap">
+      {% for term in payment_terms %}
+      <label class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="allowedPaymentTermsDays" value="{{ term }}" {% if term in selected_terms %}checked{% endif %}>
+        <span class="form-check-label">{{ 'Contado' if term == 0 else term ~ ' dias' }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="col-12">
+    <hr class="my-1">
+  </div>
+
+  {% if can_approve_credit %}
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Estado credito</label>
+    {% set selected_credit_status = client.creditRequestStatus if client is defined else 'none' %}
+    <select class="form-select" name="creditRequestStatus">
+      <option value="none" {% if selected_credit_status == 'none' %}selected{% endif %}>Sin solicitud</option>
+      <option value="pending" {% if selected_credit_status == 'pending' %}selected{% endif %}>Solicitado</option>
+      <option value="approved" {% if selected_credit_status == 'approved' %}selected{% endif %}>Aprobado</option>
+      <option value="rejected" {% if selected_credit_status == 'rejected' %}selected{% endif %}>Rechazado</option>
+    </select>
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Limite credito USD</label>
+    <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}">
+  </div>
+  <div class="col-12 col-md-4">
     <label class="form-label fw-semibold">Dias de credito</label>
     <input class="form-control" name="paymentTermsDays" inputmode="numeric" value="{{ client.paymentTermsDays if client is defined else 0 }}">
   </div>
@@ -50,21 +122,41 @@
     <div class="product-checks">
       <label class="form-check mb-0">
         <input class="form-check-input" type="checkbox" name="creditEnabled" {% if client is defined and client.creditEnabled %}checked{% endif %}>
-        <span class="form-check-label">Credito habilitado</span>
+        <span class="form-check-label">Credito aprobado y habilitado</span>
+      </label>
+    </div>
+  </div>
+  {% else %}
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Solicitud credito</label>
+    <div class="product-checks">
+      <label class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="requestCredit" {% if client is defined and client.creditRequestStatus == 'pending' %}checked{% endif %}>
+        <span class="form-check-label">Solicitar revision</span>
       </label>
     </div>
   </div>
   <div class="col-12 col-md-4">
-    <label class="form-label fw-semibold">Limite credito USD</label>
-    <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}">
+    <label class="form-label fw-semibold">Monto solicitado USD</label>
+    <input class="form-control" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}">
   </div>
   <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Estado actual</label>
+    <input class="form-control" readonly value="{{ client.creditRequestStatus if client is defined else 'none' }}">
+  </div>
+  {% endif %}
+
+  <div class="col-12 col-md-4">
     <label class="form-label fw-semibold">Credito usado USD</label>
-    <input class="form-control" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}">
+    <input class="form-control" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}" {% if not can_approve_credit %}readonly{% endif %}>
   </div>
   <div class="col-12 col-md-4">
     <label class="form-label fw-semibold">Disponible calculado</label>
     <input class="form-control" readonly value="{{ money_usd(client.creditAvailableUsd) if client is defined else money_usd(0) }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Aprobado por</label>
+    <input class="form-control" readonly value="{{ client.creditApprovedBy if client is defined else '' }}">
   </div>
   <div class="col-12">
     <label class="form-label fw-semibold">Notas internas</label>

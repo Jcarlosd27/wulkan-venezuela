@@ -12,6 +12,7 @@
     {% set selected_role = user.role if user is defined else 'operator' %}
     <select class="form-select" name="role">
       <option value="super_admin" {% if selected_role == 'super_admin' %}selected{% endif %}>Super admin</option>
+      <option value="commercial_manager" {% if selected_role == 'commercial_manager' %}selected{% endif %}>Gerente comercial</option>
       <option value="operator" {% if selected_role == 'operator' %}selected{% endif %}>Operador</option>
       <option value="sales" {% if selected_role == 'sales' %}selected{% endif %}>Ventas</option>
       <option value="inventory" {% if selected_role == 'inventory' %}selected{% endif %}>Inventario</option>

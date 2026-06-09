@@ -17,7 +17,7 @@ void main() {
     );
     await tester.enterText(
       find.byKey(const Key('mobile-login-password')),
-      'ferretero2026',
+      'clave-segura-local',
     );
     await tester.tap(find.byKey(const Key('mobile-login-submit')));
     await tester.pumpAndSettle();

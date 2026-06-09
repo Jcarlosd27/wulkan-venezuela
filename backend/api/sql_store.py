@@ -14,6 +14,7 @@ from models import (
     MediaAsset,
     Order,
     Product,
+    ServiceTechnician,
     StockMovement,
 )
 
@@ -273,6 +274,32 @@ def credit_movement_to_dict(row: CreditMovement) -> dict[str, Any]:
     return payload
 
 
+def service_technician_to_dict(row: ServiceTechnician) -> dict[str, Any]:
+    payload = copy_payload(row.payload)
+    payload.update(
+        {
+            "id": row.id,
+            "name": row.name,
+            "companyName": row.company_name,
+            "contactName": row.contact_name,
+            "phone": row.phone,
+            "whatsapp": row.whatsapp,
+            "email": row.email,
+            "state": row.state,
+            "city": row.city,
+            "address": row.address,
+            "specialties": row.specialties or [],
+            "coverage": row.coverage,
+            "status": row.status,
+            "visibleInApp": row.visible_in_app,
+            "notes": row.notes,
+            "createdAt": iso_dt(row.created_at),
+            "updatedAt": iso_dt(row.updated_at),
+        }
+    )
+    return payload
+
+
 def audit_event_to_dict(row: AuditEvent) -> dict[str, Any]:
     payload = copy_payload(row.payload)
     payload.update(
@@ -325,6 +352,10 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
             "stock_movements": [stock_movement_to_dict(row) for row in session.query(StockMovement).all()],
             "orders": [order_to_dict(row) for row in session.query(Order).all()],
             "credit_movements": [credit_movement_to_dict(row) for row in session.query(CreditMovement).all()],
+            "service_technicians": [
+                service_technician_to_dict(row)
+                for row in session.query(ServiceTechnician).filter(ServiceTechnician.status != "deleted").all()
+            ],
             "audit_events": [
                 audit_event_to_dict(row)
                 for row in session.query(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(1000).all()
@@ -348,6 +379,7 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
         sync_orders(session, store)
         session.flush()
         sync_credit_movements(session, store)
+        sync_service_technicians(session, store)
         sync_audit_events(session, store)
         session.commit()
 
@@ -658,6 +690,39 @@ def sync_credit_movements(session, store: dict[str, Any]) -> None:
                 "payload": movement,
             },
         )
+
+
+def sync_service_technicians(session, store: dict[str, Any]) -> None:
+    live_ids: set[str] = set()
+    for technician in store.get("service_technicians", []):
+        object_id = technician["id"]
+        live_ids.add(object_id)
+        upsert(
+            session,
+            ServiceTechnician,
+            object_id,
+            {
+                "id": object_id,
+                "name": technician.get("name", ""),
+                "company_name": technician.get("companyName", ""),
+                "contact_name": technician.get("contactName", ""),
+                "phone": technician.get("phone", ""),
+                "whatsapp": technician.get("whatsapp", ""),
+                "email": technician.get("email", ""),
+                "state": technician.get("state", ""),
+                "city": technician.get("city", ""),
+                "address": technician.get("address", ""),
+                "specialties": technician.get("specialties", []),
+                "coverage": technician.get("coverage", ""),
+                "status": technician.get("status", "active"),
+                "visible_in_app": bool(technician.get("visibleInApp", True)),
+                "notes": technician.get("notes", ""),
+                "created_at": parse_dt(technician.get("createdAt")),
+                "updated_at": parse_dt(technician.get("updatedAt")),
+                "payload": technician,
+            },
+        )
+    soft_prune(session, ServiceTechnician, live_ids)
 
 
 def sync_audit_events(session, store: dict[str, Any]) -> None:

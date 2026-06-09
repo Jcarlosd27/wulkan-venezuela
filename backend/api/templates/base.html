@@ -6,7 +6,7 @@
     <title>{{ title or "Wulkan Admin Flask" }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/uix.css') }}?v=20260608-sidebar-single-scroll-1" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/uix.css') }}?v=20260609-commercial-core" rel="stylesheet">
   </head>
   <body>
     <div class="app-shell">
@@ -23,6 +23,11 @@
           <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
             <i class="bi bi-grid-1x2"></i> Dashboard
           </a>
+          {% if can_access_module('sellers') %}
+          <a class="nav-link {% if request.endpoint in ['sellers', 'seller_edit'] %}active{% endif %}" href="{{ url_for('sellers') }}">
+            <i class="bi bi-person-badge"></i> Vendedores
+          </a>
+          {% endif %}
           {% if can_access_module('clients') %}
           <a class="nav-link {% if request.endpoint in ['clients', 'client_edit'] %}active{% endif %}" href="{{ url_for('clients') }}">
             <i class="bi bi-shop"></i> Clientes
@@ -61,6 +66,11 @@
           {% if can_access_module('announcements') %}
           <a class="nav-link {% if request.endpoint == 'announcements' %}active{% endif %}" href="{{ url_for('announcements') }}">
             <i class="bi bi-megaphone"></i> Anuncios app
+          </a>
+          {% endif %}
+          {% if can_access_module('service_technicians') %}
+          <a class="nav-link {% if request.endpoint in ['service_technicians', 'service_technician_edit'] %}active{% endif %}" href="{{ url_for('service_technicians') }}">
+            <i class="bi bi-tools"></i> Servicios tecnicos
           </a>
           {% endif %}
           <span class="nav-section mt-2">Sistema</span>

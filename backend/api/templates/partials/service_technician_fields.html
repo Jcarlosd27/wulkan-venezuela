@@ -1,0 +1,67 @@
+<div class="row g-3">
+  <div class="col-12 col-md-7">
+    <label class="form-label fw-semibold">Nombre visible</label>
+    <input class="form-control" name="name" required value="{{ technician.name if technician is defined else '' }}" placeholder="Servicio tecnico autorizado Valencia">
+  </div>
+  <div class="col-12 col-md-5">
+    <label class="form-label fw-semibold">Empresa / taller</label>
+    <input class="form-control" name="companyName" value="{{ technician.companyName if technician is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Contacto</label>
+    <input class="form-control" name="contactName" value="{{ technician.contactName if technician is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Telefono</label>
+    <input class="form-control" name="phone" value="{{ technician.phone if technician is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">WhatsApp</label>
+    <input class="form-control" name="whatsapp" value="{{ technician.whatsapp if technician is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Email</label>
+    <input class="form-control" name="email" type="email" value="{{ technician.email if technician is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Estado</label>
+    <input class="form-control" name="state" value="{{ technician.state if technician is defined else '' }}" placeholder="Carabobo">
+  </div>
+  <div class="col-12 col-md-4">
+    <label class="form-label fw-semibold">Ciudad</label>
+    <input class="form-control" name="city" value="{{ technician.city if technician is defined else '' }}" placeholder="Valencia">
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Direccion</label>
+    <input class="form-control" name="address" value="{{ technician.address if technician is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-6">
+    <label class="form-label fw-semibold">Cobertura</label>
+    <input class="form-control" name="coverage" value="{{ technician.coverage if technician is defined else '' }}" placeholder="Valencia, Naguanagua, San Diego">
+  </div>
+  <div class="col-12 col-md-6">
+    <label class="form-label fw-semibold">Estado operativo</label>
+    {% set selected_status = technician.status if technician is defined else 'active' %}
+    <select class="form-select" name="status">
+      <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Activo</option>
+      <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactivo</option>
+      <option value="blocked" {% if selected_status == 'blocked' %}selected{% endif %}>Bloqueado</option>
+    </select>
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Especialidades</label>
+    <textarea class="form-control" name="specialties" rows="3" placeholder="Motosierras&#10;Motobombas&#10;Repuestos">{{ (technician.specialties | join('\n')) if technician is defined else '' }}</textarea>
+  </div>
+  <div class="col-12">
+    <div class="product-checks">
+      <label class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="visibleInApp" {% if technician is not defined or technician.visibleInApp %}checked{% endif %}>
+        <span class="form-check-label">Visible en app movil</span>
+      </label>
+    </div>
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Notas internas</label>
+    <textarea class="form-control" name="notes" rows="3">{{ technician.notes if technician is defined else '' }}</textarea>
+  </div>
+</div>

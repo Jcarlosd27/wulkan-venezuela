@@ -204,6 +204,12 @@ class MockMobileRepository implements MobileRepository {
       creditAvailableUsd: 915,
       paymentTermsDays: 15,
       status: "in_use",
+      allowedPaymentTermsDays: const [0, 15, 30],
+      defaultSaleType: "term_credit",
+      assignedSeller: const MobileSellerSnapshot(
+        id: "seller-demo",
+        name: "Vendedor Wulkan",
+      ),
     );
   }
 
@@ -342,6 +348,8 @@ class FirestoreMobileRepository implements MobileRepository {
       creditAvailableUsd: 0,
       paymentTermsDays: 0,
       status: "without_credit",
+      allowedPaymentTermsDays: const [0],
+      defaultSaleType: "cash",
     );
   }
 
@@ -442,6 +450,9 @@ class ApiMobileRepository implements MobileRepository {
     );
     final credit = payload["credit"];
     final data = credit is Map<String, dynamic> ? credit : <String, dynamic>{};
+    final seller = data["assignedSeller"];
+    final sellerData =
+        seller is Map<String, dynamic> ? seller : <String, dynamic>{};
 
     return MobileCreditSnapshot(
       customerId: _asString(data["customerId"], fallback: customerId),
@@ -453,6 +464,15 @@ class ApiMobileRepository implements MobileRepository {
       creditAvailableUsd: _asDouble(data["creditAvailableUsd"]),
       paymentTermsDays: _asInt(data["paymentTermsDays"]),
       status: _asString(data["status"], fallback: "without_credit"),
+      allowedPaymentTermsDays: _asIntList(
+        data["allowedPaymentTermsDays"],
+        fallback: const [0],
+      ),
+      defaultSaleType: _asString(data["defaultSaleType"], fallback: "cash"),
+      assignedSeller: MobileSellerSnapshot(
+        id: _asString(sellerData["id"]),
+        name: _asString(sellerData["name"]),
+      ),
     );
   }
 
@@ -718,6 +738,21 @@ Map<String, String> _asStringMap(Object? value) {
         .map((key, mapValue) => MapEntry(key.toString(), mapValue.toString()));
   }
   return const {};
+}
+
+List<int> _asIntList(Object? value, {required List<int> fallback}) {
+  if (value is List) {
+    final items = value
+        .map((item) => int.tryParse(item.toString()))
+        .whereType<int>()
+        .toSet()
+        .toList()
+      ..sort();
+
+    return items.isEmpty ? fallback : items;
+  }
+
+  return fallback;
 }
 
 double _asDouble(Object? value, {double fallback = 0}) {

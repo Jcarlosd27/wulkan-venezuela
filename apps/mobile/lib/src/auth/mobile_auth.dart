@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/mobile_environment.dart';
+import '../domain/mobile_models.dart';
 
 class MobileUserSession {
   const MobileUserSession({
@@ -15,6 +16,9 @@ class MobileUserSession {
     required this.isAuthenticated,
     this.accessToken = "",
     this.mustChangePassword = false,
+    this.allowedPaymentTermsDays = const [0],
+    this.defaultSaleType = "cash",
+    this.assignedSeller = const MobileSellerSnapshot(id: "", name: ""),
   });
 
   final String id;
@@ -24,6 +28,9 @@ class MobileUserSession {
   final bool isAuthenticated;
   final String accessToken;
   final bool mustChangePassword;
+  final List<int> allowedPaymentTermsDays;
+  final String defaultSaleType;
+  final MobileSellerSnapshot assignedSeller;
 }
 
 abstract class MobileAuthRepository {
@@ -71,6 +78,12 @@ class MockMobileAuthRepository implements MobileAuthRepository {
       email: email.trim().toLowerCase(),
       roleLabel: "Ferretero B2B",
       isAuthenticated: true,
+      allowedPaymentTermsDays: const [0, 15, 30],
+      defaultSaleType: "term_credit",
+      assignedSeller: const MobileSellerSnapshot(
+        id: "seller-demo",
+        name: "Vendedor Wulkan",
+      ),
     );
     return _session!;
   }
@@ -147,6 +160,10 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
       final token = payload is Map<String, dynamic>
           ? payload["accessToken"]?.toString() ?? ""
           : "";
+      final assignedSeller = data["assignedSeller"];
+      final sellerData = assignedSeller is Map<String, dynamic>
+          ? assignedSeller
+          : <String, dynamic>{};
 
       _session = MobileUserSession(
         id: data["id"]?.toString() ?? "",
@@ -156,6 +173,13 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         isAuthenticated: true,
         accessToken: token,
         mustChangePassword: data["mustChangePassword"] == true,
+        allowedPaymentTermsDays:
+            _asIntList(data["allowedPaymentTermsDays"], fallback: const [0]),
+        defaultSaleType: data["defaultSaleType"]?.toString() ?? "cash",
+        assignedSeller: MobileSellerSnapshot(
+          id: sellerData["id"]?.toString() ?? "",
+          name: sellerData["name"]?.toString() ?? "",
+        ),
       );
       await _persistSession(_session!);
       return _session!;
@@ -204,6 +228,9 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         isAuthenticated: session.isAuthenticated,
         accessToken: session.accessToken,
         mustChangePassword: false,
+        allowedPaymentTermsDays: session.allowedPaymentTermsDays,
+        defaultSaleType: session.defaultSaleType,
+        assignedSeller: session.assignedSeller,
       );
       await _persistSession(_session!);
     } finally {
@@ -227,6 +254,12 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         "roleLabel": session.roleLabel,
         "accessToken": session.accessToken,
         "mustChangePassword": session.mustChangePassword,
+        "allowedPaymentTermsDays": session.allowedPaymentTermsDays,
+        "defaultSaleType": session.defaultSaleType,
+        "assignedSeller": {
+          "id": session.assignedSeller.id,
+          "name": session.assignedSeller.name,
+        },
       }),
     );
   }
@@ -248,6 +281,10 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
       if (token.isEmpty || id.isEmpty) {
         return null;
       }
+      final assignedSeller = payload["assignedSeller"];
+      final sellerData = assignedSeller is Map<String, dynamic>
+          ? assignedSeller
+          : <String, dynamic>{};
 
       return MobileUserSession(
         id: id,
@@ -257,6 +294,15 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         isAuthenticated: true,
         accessToken: token,
         mustChangePassword: payload["mustChangePassword"] == true,
+        allowedPaymentTermsDays: _asIntList(
+          payload["allowedPaymentTermsDays"],
+          fallback: const [0],
+        ),
+        defaultSaleType: payload["defaultSaleType"]?.toString() ?? "cash",
+        assignedSeller: MobileSellerSnapshot(
+          id: sellerData["id"]?.toString() ?? "",
+          name: sellerData["name"]?.toString() ?? "",
+        ),
       );
     } catch (_) {
       await _storage.delete(key: _sessionKey);
@@ -336,3 +382,18 @@ MobileAuthRepository createMobileAuthRepository() {
 }
 
 final mobileAuthRepository = createMobileAuthRepository();
+
+List<int> _asIntList(Object? value, {required List<int> fallback}) {
+  if (value is List) {
+    final items = value
+        .map((item) => int.tryParse(item.toString()))
+        .whereType<int>()
+        .toSet()
+        .toList()
+      ..sort();
+
+    return items.isEmpty ? fallback : items;
+  }
+
+  return fallback;
+}

@@ -118,6 +118,8 @@ void main() {
         requiresOperatorReview: false,
         blockingReasons: [],
       ),
+      saleType: 'term_credit',
+      paymentTermDays: 15,
     );
 
     expect(draft.toCallablePayload(), {
@@ -129,6 +131,8 @@ void main() {
         },
       ],
       'exchangeRateUsdVes': 38.5,
+      'saleType': 'term_credit',
+      'paymentTermDays': 15,
     });
   });
 

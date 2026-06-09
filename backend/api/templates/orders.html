@@ -31,9 +31,9 @@
   <div class="col-12 col-md-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
-      <span>En revision</span>
-      <strong>{{ metrics.review }}</strong>
-      <em>Manual</em>
+      <span>Comision pend.</span>
+      <strong>{{ money_usd(metrics.commission_pending) }}</strong>
+      <em>Ventas</em>
     </article>
   </div>
 </section>
@@ -52,6 +52,8 @@
         <tr>
           <th>Orden</th>
           <th>Cliente</th>
+          <th>Vendedor</th>
+          <th>Tipo</th>
           <th>Total</th>
           <th>Abonado</th>
           <th>Saldo</th>
@@ -73,6 +75,14 @@
             <small class="text-secondary">{{ order.customerId or 'Sin cliente vinculado' }}</small>
           </td>
           <td>
+            <strong class="d-block">{{ order.sellerName }}</strong>
+            <small class="text-secondary">{{ money_usd(order.commissionUsd) }} - {{ order.commissionRatePercent }}%</small>
+          </td>
+          <td>
+            <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
+            <small class="d-block text-secondary">{{ order.paymentTermDays }} dias</small>
+          </td>
+          <td>
             <strong>{{ money_usd(order.totalUsd) }}</strong>
             <small class="d-block text-secondary">{{ order.itemsCount }} items</small>
           </td>
@@ -89,6 +99,7 @@
           <td>
             <span class="badge {{ order.status | badge_class }}">{{ order.status }}</span>
             <small class="d-block text-secondary">{{ order.paymentStatus }}</small>
+            <small class="d-block text-secondary">{{ order.commissionStatus }}</small>
           </td>
           <td class="text-end">
             <div class="btn-group btn-group-sm">
@@ -103,7 +114,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="9">
+          <td colspan="11">
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-receipt"></i></div>
               <strong>Sin ordenes B2B todavia</strong>
@@ -125,7 +136,7 @@
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Actualizar estado</h2>
-          <p class="mb-0 text-secondary">{{ order.orderId }} · {{ order.customerName }}</p>
+          <p class="mb-0 text-secondary">{{ order.orderId }} - {{ order.customerName }}</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>

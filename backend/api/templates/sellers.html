@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% set heading = "Vendedores" %}
+{% set description = "Administra vendedores, cartera asignada, ventas y comisiones por orden B2B." %}
+
+{% block top_action %}
+{% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
+<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSellerModal">
+  <i class="bi bi-plus-lg"></i> Nuevo vendedor
+</button>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-person-badge"></i></div>
+      <span>Vendedores</span>
+      <strong>{{ metrics.sellers }}</strong>
+      <em>Activos</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-shop"></i></div>
+      <span>Cartera</span>
+      <strong>{{ metrics.clients }}</strong>
+      <em>Clientes</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+      <span>Ventas</span>
+      <strong>{{ money_usd(metrics.sales) }}</strong>
+      <em>USD</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-cash-stack"></i></div>
+      <span>Comision pend.</span>
+      <strong>{{ money_usd(metrics.commission_pending) }}</strong>
+      <em>Liquidar</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Equipo de ventas</h2>
+      <span>Comision, cartera asignada y actividad comercial.</span>
+    </div>
+    <span>{{ sellers | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Vendedor</th>
+          <th>Zona</th>
+          <th>Cartera</th>
+          <th>Ventas</th>
+          <th>Comision</th>
+          <th>Estado</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for seller in sellers %}
+        <tr>
+          <td>
+            <div class="category-cell">
+              <div class="category-thumb"><i class="bi bi-person-badge"></i></div>
+              <div>
+                <strong>{{ seller.name }}</strong>
+                <small>{{ seller.sellerCode or seller.email }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong class="d-block">{{ seller.sellerZone or 'Sin zona' }}</strong>
+            <small class="text-secondary">{{ seller.phone or seller.email }}</small>
+          </td>
+          <td>
+            <strong>{{ seller.clientsCount }}</strong>
+            <small class="d-block text-secondary">{{ seller.ordersCount }} ordenes</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(seller.salesUsd) }}</strong>
+            <small class="d-block text-secondary">{{ seller.openOrders }} abiertas</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(seller.commissionPendingUsd) }}</strong>
+            <small class="d-block text-secondary">{{ seller.commissionRatePercent }}% base</small>
+          </td>
+          <td><span class="badge {{ seller.status | badge_class }}">{{ seller.status }}</span></td>
+          <td class="text-end">
+            {% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
+            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editSeller{{ loop.index }}">
+              <i class="bi bi-pencil"></i> Editar
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-secondary">Sin vendedores registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="modal fade" id="newSellerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <form class="modal-content" method="post">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Nuevo vendedor</h2>
+          <p class="mb-0 text-secondary">Crea acceso al panel y define comision comercial.</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        {% include "partials/seller_fields.html" %}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Crear vendedor</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% for seller in sellers %}
+<div class="modal fade" id="editSeller{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <form class="modal-content" method="post" action="{{ url_for('seller_edit', seller_id=seller.id) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Editar {{ seller.name }}</h2>
+          <p class="mb-0 text-secondary">Actualiza acceso, zona, meta y comision.</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        {% include "partials/seller_fields.html" %}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

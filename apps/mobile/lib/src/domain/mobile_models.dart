@@ -158,6 +158,16 @@ class MobileLocation {
   final String subtitle;
 }
 
+class MobileSellerSnapshot {
+  const MobileSellerSnapshot({
+    required this.id,
+    required this.name,
+  });
+
+  final String id;
+  final String name;
+}
+
 class MobileAnnouncement {
   const MobileAnnouncement({
     required this.id,
@@ -259,6 +269,9 @@ class MobileCreditSnapshot {
     required this.creditAvailableUsd,
     required this.paymentTermsDays,
     required this.status,
+    this.allowedPaymentTermsDays = const [0],
+    this.defaultSaleType = "cash",
+    this.assignedSeller = const MobileSellerSnapshot(id: "", name: ""),
   });
 
   final String customerId;
@@ -270,6 +283,9 @@ class MobileCreditSnapshot {
   final double creditAvailableUsd;
   final int paymentTermsDays;
   final String status;
+  final List<int> allowedPaymentTermsDays;
+  final String defaultSaleType;
+  final MobileSellerSnapshot assignedSeller;
 }
 
 class MobileOrderSummary {

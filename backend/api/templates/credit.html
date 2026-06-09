@@ -51,12 +51,15 @@
       <thead>
         <tr>
           <th>Cliente</th>
+          <th>Vendedor</th>
           <th>Estado credito</th>
+          <th>Solicitado</th>
           <th>Limite</th>
           <th>Deuda manual</th>
           <th>Ordenes abiertas</th>
           <th>Disponible</th>
           <th>Dias</th>
+          {% if can_approve_credit %}<th class="text-end">Decision</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -67,14 +70,19 @@
               <div class="category-thumb"><i class="bi bi-shop"></i></div>
               <div>
                 <strong>{{ client.businessName }}</strong>
-                <small>{{ client.email }}</small>
+                <small>{{ client.email }} - {{ client.city or 'Sin ciudad' }}</small>
               </div>
             </div>
+          </td>
+          <td>
+            <strong class="d-block">{{ client.assignedSellerName or 'Sin vendedor' }}</strong>
+            <small class="text-secondary">{{ client.deliveryZone or client.state or '' }}</small>
           </td>
           <td>
             <span class="badge {{ client.creditStatus | badge_class }}">{{ client.creditStatus }}</span>
             <small class="d-block text-secondary">{{ client.status }}</small>
           </td>
+          <td>{{ money_usd(client.creditRequestedUsd) }}</td>
           <td>{{ money_usd(client.creditLimitUsd) }}</td>
           <td>{{ money_usd(client.creditUsedUsd) }}</td>
           <td>
@@ -86,14 +94,67 @@
           </td>
           <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
           <td>{{ client.paymentTermsDays }}</td>
+          {% if can_approve_credit %}
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#creditModal{{ loop.index }}">
+              <i class="bi bi-check2-square"></i> Revisar
+            </button>
+          </td>
+          {% endif %}
         </tr>
         {% else %}
-        <tr><td colspan="7" class="text-secondary">Sin clientes ferreteros registrados.</td></tr>
+        <tr><td colspan="{{ 10 if can_approve_credit else 9 }}" class="text-secondary">Sin clientes ferreteros registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
+
+{% if can_approve_credit %}
+{% for client in clients %}
+<div class="modal fade" id="creditModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" action="{{ url_for('credit_decision', client_id=client.id) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Revision de credito</h2>
+          <p class="mb-0 text-secondary">{{ client.businessName }} - {{ client.assignedSellerName or 'Sin vendedor' }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Decision</label>
+            <select class="form-select" name="decision">
+              <option value="approved">Aprobar credito</option>
+              <option value="rejected">Rechazar solicitud</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Dias</label>
+            <select class="form-select" name="paymentTermsDays">
+              {% for term in payment_terms %}
+              <option value="{{ term }}" {% if client.paymentTermsDays == term %}selected{% endif %}>{{ 'Contado' if term == 0 else term ~ ' dias' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Limite aprobado USD</label>
+            <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd or client.creditRequestedUsd }}">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar decision</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
 
 <section class="panel category-panel">
   <div class="panel-header">

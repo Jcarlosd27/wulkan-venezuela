@@ -36,9 +36,9 @@
   <div class="col-12 col-md-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-credit-card"></i></div>
-      <span>Con credito</span>
-      <strong>{{ metrics.credit_enabled }}</strong>
-      <em>USD</em>
+      <span>Solicitudes</span>
+      <strong>{{ metrics.credit_requested }}</strong>
+      <em>Credito</em>
     </article>
   </div>
   <div class="col-12 col-md-3">
@@ -65,6 +65,7 @@
         <tr>
           <th>Cliente</th>
           <th>Contacto</th>
+          <th>Vendedor</th>
           <th>Credito</th>
           <th>Comprometido</th>
           <th>Disponible</th>
@@ -80,7 +81,7 @@
               <div class="category-thumb"><i class="bi bi-shop"></i></div>
               <div>
                 <strong>{{ client.businessName }}</strong>
-                <small>{{ client.taxId or client.id }}</small>
+                <small>{{ client.taxId or client.id }} - {{ client.city or 'Sin ciudad' }}</small>
               </div>
             </div>
           </td>
@@ -89,8 +90,14 @@
             <small class="text-secondary">{{ client.email }}</small>
           </td>
           <td>
+            <strong class="d-block">{{ client.assignedSellerName or 'Sin vendedor' }}</strong>
+            <small class="text-secondary">{{ client.deliveryZone or client.state or 'Sin zona' }}</small>
+          </td>
+          <td>
             {% if client.creditEnabled %}
             <span class="badge text-bg-primary">{{ money_usd(client.creditLimitUsd) }}</span>
+            {% elif client.creditRequestStatus == 'pending' %}
+            <span class="badge text-bg-warning">{{ money_usd(client.creditRequestedUsd) }}</span>
             {% else %}
             <span class="badge text-bg-secondary">Sin credito</span>
             {% endif %}
@@ -102,6 +109,7 @@
           <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
           <td>
             <span class="badge {{ client.status | badge_class }}">{{ client.status }}</span>
+            <span class="badge {{ client.creditStatus | badge_class }} d-inline-block mt-1">{{ client.creditStatus }}</span>
             {% if client.mustChangePassword %}
             <span class="badge text-bg-warning d-inline-block mt-1">Clave temporal</span>
             {% endif %}

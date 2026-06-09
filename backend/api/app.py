@@ -73,24 +73,42 @@ PAYMENT_METHOD_OPTIONS = [
     ("mobile_payment", "Pago movil"),
     ("other", "Otro"),
 ]
+SALE_TYPE_OPTIONS = [
+    ("cash", "Contado / efectivo"),
+    ("term_credit", "Credito por dias"),
+    ("credit_line", "Linea de credito"),
+    ("phone_request", "Solicitud telefonica"),
+]
+PAYMENT_TERM_OPTIONS = [0, 10, 15, 20, 30, 40]
+ROLE_LABELS = {
+    "super_admin": "Super admin",
+    "commercial_manager": "Gerente comercial",
+    "operator": "Operador",
+    "sales": "Vendedor",
+    "inventory": "Inventario",
+    "readonly": "Solo lectura",
+}
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
-ALL_ADMIN_ROLES = {"super_admin", "operator", "sales", "inventory", "readonly"}
-WRITE_ROLES = {"super_admin", "operator"}
-SALES_ROLES = {"super_admin", "operator", "sales"}
-INVENTORY_ROLES = {"super_admin", "operator", "inventory"}
+ALL_ADMIN_ROLES = {"super_admin", "commercial_manager", "operator", "sales", "inventory", "readonly"}
+WRITE_ROLES = {"super_admin", "commercial_manager", "operator"}
+SALES_ROLES = {"super_admin", "commercial_manager", "operator", "sales"}
+INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
+CREDIT_APPROVAL_ROLES = {"super_admin", "commercial_manager", "operator"}
 ADMIN_ONLY_ROLES = {"super_admin"}
 MODULE_ACCESS = {
     "admin_users": ADMIN_ONLY_ROLES,
     "audit": ADMIN_ONLY_ROLES,
-    "clients": {"super_admin", "operator", "sales", "readonly"},
-    "credit": {"super_admin", "operator", "sales"},
-    "orders": {"super_admin", "operator", "sales", "readonly"},
+    "sellers": {"super_admin", "commercial_manager", "operator", "readonly"},
+    "clients": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
+    "credit": {"super_admin", "commercial_manager", "operator", "sales"},
+    "orders": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
     "products": ALL_ADMIN_ROLES,
     "media_library": ALL_ADMIN_ROLES,
     "categories": ALL_ADMIN_ROLES,
     "stock": ALL_ADMIN_ROLES,
     "announcements": ALL_ADMIN_ROLES,
+    "service_technicians": ALL_ADMIN_ROLES,
 }
 
 
@@ -112,6 +130,44 @@ def current_admin_role() -> str:
 
 def role_allowed(roles: set[str]) -> bool:
     return current_admin_role() in roles
+
+
+def sales_users(store: dict) -> list[dict]:
+    return sorted(
+        [
+            user
+            for user in store.get("admin_users", [])
+            if user.get("role") == "sales" and user.get("status") == "active"
+        ],
+        key=lambda user: user.get("name", ""),
+    )
+
+
+def current_admin_user(store: dict) -> dict | None:
+    return find_by_id(store.get("admin_users", []), session.get("admin_user_id", ""))
+
+
+def current_seller_assignment(store: dict) -> tuple[str, str]:
+    if current_admin_role() != "sales":
+        return "", ""
+    user = current_admin_user(store)
+    if not user:
+        return "", ""
+    return user.get("id", ""), user.get("name", "")
+
+
+def sale_type_label(value: str) -> str:
+    return dict(SALE_TYPE_OPTIONS).get(value, value or "Sin definir")
+
+
+def seller_commission_rate(store: dict, seller_id: str) -> float:
+    seller = find_by_id(store.get("admin_users", []), seller_id)
+    return float((seller or {}).get("commissionRatePercent") or 0)
+
+
+def seller_name_for(store: dict, seller_id: str) -> str:
+    seller = find_by_id(store.get("admin_users", []), seller_id)
+    return (seller or {}).get("name", "")
 
 
 def login_attempt_key(scope: str, email: str) -> str:
@@ -188,6 +244,8 @@ def security_context():
         "csrf_field": csrf_field,
         "can_access_module": can_access_module,
         "current_admin_role": current_admin_role,
+        "role_labels": ROLE_LABELS,
+        "sale_type_label": sale_type_label,
     }
 
 
@@ -529,6 +587,12 @@ def enrich_client(
     enriched = dict(client)
     enriched["creditLimitUsd"] = float(enriched.get("creditLimitUsd") or 0)
     enriched["creditUsedUsd"] = float(enriched.get("creditUsedUsd") or 0)
+    enriched["creditRequestedUsd"] = float(enriched.get("creditRequestedUsd") or 0)
+    enriched["allowedPaymentTermsDays"] = [
+        int(term)
+        for term in enriched.get("allowedPaymentTermsDays", [0])
+        if str(term).strip().isdigit()
+    ] or [0]
     enriched["creditOrdersUsd"] = client_order_credit_used(
         orders or [],
         enriched.get("id", ""),
@@ -544,6 +608,10 @@ def enrich_client(
             enriched["creditStatus"] = "in_use"
         else:
             enriched["creditStatus"] = "available"
+    elif enriched.get("creditRequestStatus") == "pending":
+        enriched["creditStatus"] = "credit_requested"
+    elif enriched.get("creditRequestStatus") == "rejected":
+        enriched["creditStatus"] = "rejected"
     return enriched
 
 
@@ -559,6 +627,13 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["payments"] = order_payments(movements, order_id)
     enriched["inventoryStatus"] = enriched.get("inventoryStatus", "pending")
     enriched["stockStatus"] = enriched.get("stockStatus", "pending")
+    enriched["saleType"] = enriched.get("saleType", "cash")
+    enriched["saleTypeLabel"] = sale_type_label(enriched["saleType"])
+    enriched["paymentTermDays"] = int(enriched.get("paymentTermDays") or 0)
+    enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
+    enriched["commissionRatePercent"] = float(enriched.get("commissionRatePercent") or 0)
+    enriched["commissionUsd"] = float(enriched.get("commissionUsd") or 0)
+    enriched["commissionStatus"] = enriched.get("commissionStatus") or "commission_pending"
     customer = enriched.get("customer") or {}
     enriched["customerName"] = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
     enriched["itemsCount"] = len(enriched.get("items") or [])
@@ -867,6 +942,21 @@ def admin_user_form_error(store: dict, existing: dict | None = None) -> str:
     return credential_form_error(password, existing)
 
 
+def seller_form_error(store: dict, existing: dict | None = None) -> str:
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    if not email:
+        return "El email del vendedor es obligatorio."
+    duplicated = any(
+        user.get("email", "").lower() == email
+        and (existing is None or user.get("id") != existing.get("id"))
+        for user in store["admin_users"]
+    )
+    if duplicated:
+        return f"Ya existe un usuario con el email {email}."
+    return credential_form_error(password, existing)
+
+
 def client_form_error(store: dict, existing: dict | None = None) -> str:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
@@ -882,6 +972,18 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
     return credential_form_error(password, existing)
 
 
+def selected_payment_terms() -> list[int]:
+    terms = []
+    for raw_value in request.form.getlist("allowedPaymentTermsDays"):
+        try:
+            value = int(raw_value)
+        except ValueError:
+            continue
+        if value in PAYMENT_TERM_OPTIONS and value not in terms:
+            terms.append(value)
+    return terms or [0]
+
+
 def admin_user_payload(existing: dict | None = None) -> dict:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
@@ -891,6 +993,11 @@ def admin_user_payload(existing: dict | None = None) -> dict:
         "email": email,
         "role": request.form.get("role", "operator"),
         "status": request.form.get("status", "active"),
+        "sellerCode": request.form.get("sellerCode", "").strip().upper(),
+        "sellerZone": request.form.get("sellerZone", "").strip(),
+        "phone": request.form.get("phone", "").strip(),
+        "commissionRatePercent": float(request.form.get("commissionRatePercent") or (existing or {}).get("commissionRatePercent") or 0),
+        "salesGoalUsd": float(request.form.get("salesGoalUsd") or (existing or {}).get("salesGoalUsd") or 0),
         "updatedAt": now,
     }
     if existing is None:
@@ -912,6 +1019,36 @@ def client_payload(existing: dict | None = None) -> dict:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     now = utc_now()
+    active_store = load_store()
+    seller_id = request.form.get("assignedSellerId", "").strip()
+    current_seller_id, current_seller_name = current_seller_assignment(active_store)
+    if current_seller_id:
+        seller_id = current_seller_id
+    seller_name = seller_name_for(active_store, seller_id) if seller_id else current_seller_name
+
+    approval_allowed = role_allowed(CREDIT_APPROVAL_ROLES)
+    requested_credit_status = request.form.get("creditRequestStatus", "none")
+    existing_credit_status = (existing or {}).get("creditRequestStatus", "none")
+    credit_enabled = (existing or {}).get("creditEnabled", False)
+    credit_limit = float((existing or {}).get("creditLimitUsd") or 0)
+    payment_terms_days = int((existing or {}).get("paymentTermsDays") or 0)
+    credit_requested = float(request.form.get("creditRequestedUsd") or (existing or {}).get("creditRequestedUsd") or 0)
+
+    if approval_allowed:
+        credit_enabled = request.form.get("creditEnabled") == "on" and requested_credit_status == "approved"
+        credit_limit = float(request.form.get("creditLimitUsd") or 0)
+        payment_terms_days = int(request.form.get("paymentTermsDays") or 0)
+        if credit_enabled:
+            requested_credit_status = "approved"
+    else:
+        if existing is None:
+            requested_credit_status = "pending" if request.form.get("requestCredit") == "on" else "none"
+            credit_enabled = False
+            credit_limit = 0.0
+            payment_terms_days = 0
+        else:
+            requested_credit_status = existing_credit_status
+
     payload = {
         "businessName": request.form.get("businessName", "").strip(),
         "taxId": request.form.get("taxId", "").strip(),
@@ -920,13 +1057,29 @@ def client_payload(existing: dict | None = None) -> dict:
         "email": email,
         "clientType": request.form.get("clientType", "ferretero"),
         "status": request.form.get("status", "active"),
-        "creditEnabled": request.form.get("creditEnabled") == "on",
-        "creditLimitUsd": float(request.form.get("creditLimitUsd") or 0),
+        "address": request.form.get("address", "").strip(),
+        "state": request.form.get("state", "").strip(),
+        "city": request.form.get("city", "").strip(),
+        "deliveryZone": request.form.get("deliveryZone", "").strip(),
+        "assignedSellerId": seller_id,
+        "assignedSellerName": seller_name,
+        "defaultSaleType": request.form.get("defaultSaleType", "cash"),
+        "allowedPaymentTermsDays": selected_payment_terms(),
+        "creditRequestStatus": requested_credit_status,
+        "creditRequestedUsd": credit_requested,
+        "creditEnabled": credit_enabled,
+        "creditLimitUsd": credit_limit,
         "creditUsedUsd": float(request.form.get("creditUsedUsd") or (existing or {}).get("creditUsedUsd") or 0),
-        "paymentTermsDays": int(request.form.get("paymentTermsDays") or 0),
+        "paymentTermsDays": payment_terms_days,
         "notes": request.form.get("notes", "").strip(),
         "updatedAt": now,
     }
+    if approval_allowed and requested_credit_status == "approved":
+        payload["creditApprovedBy"] = session.get("admin_name", "Admin")
+        payload["creditApprovedAt"] = now
+    elif existing:
+        payload["creditApprovedBy"] = existing.get("creditApprovedBy", "")
+        payload["creditApprovedAt"] = existing.get("creditApprovedAt", "")
     if existing is None:
         payload["id"] = next_id("client", email or payload["businessName"])
         payload["createdAt"] = now
@@ -940,6 +1093,121 @@ def client_payload(existing: dict | None = None) -> dict:
         )
         payload["mustChangePassword"] = True if password else bool(existing.get("mustChangePassword"))
     return payload
+
+
+def clients_page_context(store: dict, error: str = "") -> dict:
+    clients_list = [
+        enrich_client(client, store["orders"], store.get("credit_movements", []))
+        for client in store["clients"]
+    ]
+    metrics = {
+        "clients": len(clients_list),
+        "active": sum(1 for client in clients_list if client.get("status") == "active"),
+        "credit_enabled": sum(1 for client in clients_list if client.get("creditEnabled")),
+        "credit_requested": sum(1 for client in clients_list if client.get("creditRequestStatus") == "pending"),
+        "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
+        "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
+    }
+    return {
+        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "sellers": sales_users(store),
+        "payment_terms": PAYMENT_TERM_OPTIONS,
+        "sale_type_options": SALE_TYPE_OPTIONS,
+        "can_approve_credit": role_allowed(CREDIT_APPROVAL_ROLES),
+        "metrics": metrics,
+        "error": error,
+    }
+
+
+def enrich_seller(store: dict, seller: dict) -> dict:
+    enriched = dict(seller)
+    seller_id = enriched.get("id", "")
+    movements = store.get("credit_movements", [])
+    seller_orders = [
+        enrich_order(order, movements)
+        for order in store.get("orders", [])
+        if order.get("sellerId") == seller_id
+    ]
+    enriched["clientsCount"] = sum(
+        1
+        for client in store.get("clients", [])
+        if client.get("assignedSellerId") == seller_id
+    )
+    enriched["ordersCount"] = len(seller_orders)
+    enriched["salesUsd"] = round(sum(float(order.get("totalUsd") or 0) for order in seller_orders), 2)
+    enriched["openOrders"] = sum(1 for order in seller_orders if order.get("balanceUsd", 0) > 0)
+    enriched["commissionUsd"] = round(sum(float(order.get("commissionUsd") or 0) for order in seller_orders), 2)
+    enriched["commissionPendingUsd"] = round(
+        sum(
+            float(order.get("commissionUsd") or 0)
+            for order in seller_orders
+            if order.get("commissionStatus") == "commission_pending"
+        ),
+        2,
+    )
+    return enriched
+
+
+def sellers_page_context(store: dict, error: str = "") -> dict:
+    sellers = [enrich_seller(store, seller) for seller in sales_users(store)]
+    metrics = {
+        "sellers": len(sellers),
+        "clients": sum(int(seller.get("clientsCount") or 0) for seller in sellers),
+        "sales": sum(float(seller.get("salesUsd") or 0) for seller in sellers),
+        "commission_pending": sum(float(seller.get("commissionPendingUsd") or 0) for seller in sellers),
+    }
+    return {
+        "sellers": sellers,
+        "metrics": metrics,
+        "error": error,
+    }
+
+
+def service_technician_payload(existing: dict | None = None) -> dict:
+    name = request.form.get("name", "").strip()
+    now = utc_now()
+    payload = {
+        "name": name,
+        "companyName": request.form.get("companyName", "").strip(),
+        "contactName": request.form.get("contactName", "").strip(),
+        "phone": request.form.get("phone", "").strip(),
+        "whatsapp": request.form.get("whatsapp", "").strip(),
+        "email": request.form.get("email", "").strip().lower(),
+        "state": request.form.get("state", "").strip(),
+        "city": request.form.get("city", "").strip(),
+        "address": request.form.get("address", "").strip(),
+        "specialties": split_lines(request.form.get("specialties", "")),
+        "coverage": request.form.get("coverage", "").strip(),
+        "status": request.form.get("status", "active"),
+        "visibleInApp": request.form.get("visibleInApp") == "on",
+        "notes": request.form.get("notes", "").strip(),
+        "updatedAt": now,
+    }
+    if existing is None:
+        payload["id"] = next_id("svc", name)
+        payload["createdAt"] = now
+    else:
+        payload["id"] = existing["id"]
+        payload["createdAt"] = existing.get("createdAt", now)
+    return payload
+
+
+def service_technicians_page_context(store: dict, error: str = "") -> dict:
+    technicians = sorted(
+        [item for item in store.get("service_technicians", []) if item.get("status") != "deleted"],
+        key=lambda item: (item.get("state", ""), item.get("city", ""), item.get("name", "")),
+    )
+    metrics = {
+        "technicians": len(technicians),
+        "visible": sum(1 for item in technicians if item.get("visibleInApp")),
+        "active": sum(1 for item in technicians if item.get("status") == "active"),
+        "states": len({item.get("state", "") for item in technicians if item.get("state")}),
+    }
+    return {
+        "technicians": technicians,
+        "metrics": metrics,
+        "error": error,
+    }
 
 
 def active_announcements(placement: str | None = None) -> list[dict]:
@@ -966,11 +1234,18 @@ def dashboard():
         "products": len(products),
         "active_products": sum(1 for product in products if product.get("status") == "active"),
         "clients": len(clients_list),
+        "sellers": len(sales_users(store)),
+        "credit_requested": sum(1 for client in clients_list if client.get("creditRequestStatus") == "pending"),
         "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
         "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
         "low_stock": sum(1 for product in products if int(product.get("availableStock") or 0) <= 5),
         "orders": len(orders),
         "gross_revenue": gross_revenue,
+        "commission_pending": sum(
+            float(order.get("commissionUsd") or 0)
+            for order in enriched_orders
+            if order.get("commissionStatus") == "commission_pending"
+        ),
         "announcements": len(store["announcements"]),
     }
     return render_template(
@@ -1027,8 +1302,56 @@ def admin_user_edit(user_id: str):
     return redirect(url_for("admin_users"))
 
 
+@app.route("/sellers", methods=["GET", "POST"])
+@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+def sellers():
+    store = load_store()
+    if request.method == "POST":
+        if not role_allowed(WRITE_ROLES):
+            return forbidden_response()
+        error = seller_form_error(store)
+        if error:
+            return render_template("sellers.html", **sellers_page_context(store, error))
+        seller = admin_user_payload()
+        seller["role"] = "sales"
+        if not seller.get("sellerCode"):
+            seller["sellerCode"] = seller["id"].replace("admin-", "VEN-").upper()[:24]
+        store["admin_users"].append(seller)
+        record_audit_event(store, "create", "seller", seller["id"], f"Vendedor creado: {seller['name']}.")
+        save_store(store)
+        return redirect(url_for("sellers"))
+
+    return render_template("sellers.html", **sellers_page_context(store))
+
+
+@app.post("/sellers/<seller_id>/edit")
+@require_roles("super_admin", "commercial_manager", "operator")
+def seller_edit(seller_id: str):
+    store = load_store()
+    seller = find_by_id(store["admin_users"], seller_id)
+    if seller and seller.get("role") == "sales":
+        error = seller_form_error(store, seller)
+        if error:
+            return render_template("sellers.html", **sellers_page_context(store, error))
+        updated = admin_user_payload(seller)
+        updated["role"] = "sales"
+        store["admin_users"] = [
+            updated if item["id"] == seller_id else item
+            for item in store["admin_users"]
+        ]
+        for client in store.get("clients", []):
+            if client.get("assignedSellerId") == seller_id:
+                client["assignedSellerName"] = updated.get("name", "")
+        for order in store.get("orders", []):
+            if order.get("sellerId") == seller_id:
+                order["sellerName"] = updated.get("name", "")
+        record_audit_event(store, "update", "seller", seller_id, f"Vendedor actualizado: {updated['name']}.")
+        save_store(store)
+    return redirect(url_for("sellers"))
+
+
 @app.route("/clients", methods=["GET", "POST"])
-@require_roles("super_admin", "operator", "sales", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "sales", "readonly")
 def clients():
     store = load_store()
     if request.method == "POST":
@@ -1037,69 +1360,25 @@ def clients():
         email = request.form.get("email", "").strip().lower()
         error = client_form_error(store)
         if error:
-            clients_list = [
-                enrich_client(client, store["orders"], store.get("credit_movements", []))
-                for client in store["clients"]
-            ]
-            metrics = {
-                "clients": len(clients_list),
-                "active": sum(1 for client in clients_list if client.get("status") == "active"),
-                "credit_enabled": sum(1 for client in clients_list if client.get("creditEnabled")),
-                "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
-                "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
-            }
-            return render_template(
-                "clients.html",
-                clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
-                metrics=metrics,
-                error=error,
-            )
+            return render_template("clients.html", **clients_page_context(store, error))
         client = client_payload()
         store["clients"].append(client)
         record_audit_event(store, "create", "client", client["id"], f"Cliente creado: {client['businessName']}.")
         save_store(store)
         return redirect(url_for("clients"))
 
-    clients_list = [enrich_client(client, store["orders"], store.get("credit_movements", [])) for client in store["clients"]]
-    metrics = {
-        "clients": len(clients_list),
-        "active": sum(1 for client in clients_list if client.get("status") == "active"),
-        "credit_enabled": sum(1 for client in clients_list if client.get("creditEnabled")),
-        "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
-        "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
-    }
-    return render_template(
-        "clients.html",
-        clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
-        metrics=metrics,
-    )
+    return render_template("clients.html", **clients_page_context(store))
 
 
 @app.post("/clients/<client_id>/edit")
-@require_roles("super_admin", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator", "sales")
 def client_edit(client_id: str):
     store = load_store()
     client = find_by_id(store["clients"], client_id)
     if client:
         error = client_form_error(store, client)
         if error:
-            clients_list = [
-                enrich_client(item, store["orders"], store.get("credit_movements", []))
-                for item in store["clients"]
-            ]
-            metrics = {
-                "clients": len(clients_list),
-                "active": sum(1 for item in clients_list if item.get("status") == "active"),
-                "credit_enabled": sum(1 for item in clients_list if item.get("creditEnabled")),
-                "credit_available": sum(float(item.get("creditAvailableUsd") or 0) for item in clients_list),
-                "credit_exposure": sum(float(item.get("creditExposureUsd") or 0) for item in clients_list),
-            }
-            return render_template(
-                "clients.html",
-                clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
-                metrics=metrics,
-                error=error,
-            )
+            return render_template("clients.html", **clients_page_context(store, error))
         updated = client_payload(client)
         store["clients"] = [updated if item["id"] == client_id else item for item in store["clients"]]
         record_audit_event(store, "update", "client", client_id, f"Cliente actualizado: {updated['businessName']}.")
@@ -1402,8 +1681,78 @@ def media_library():
     )
 
 
+@app.route("/service-technicians", methods=["GET", "POST"])
+@require_roles("super_admin", "commercial_manager", "operator", "sales", "inventory", "readonly")
+def service_technicians():
+    store = load_store()
+    if request.method == "POST":
+        if not role_allowed(WRITE_ROLES):
+            return forbidden_response()
+        name = request.form.get("name", "").strip()
+        if not name:
+            return render_template(
+                "service_technicians.html",
+                **service_technicians_page_context(store, "El nombre del servicio tecnico es obligatorio."),
+            )
+        technician = service_technician_payload()
+        store.setdefault("service_technicians", []).append(technician)
+        record_audit_event(
+            store,
+            "create",
+            "service_technician",
+            technician["id"],
+            f"Servicio tecnico creado: {technician['name']}.",
+        )
+        save_store(store)
+        return redirect(url_for("service_technicians"))
+
+    return render_template("service_technicians.html", **service_technicians_page_context(store))
+
+
+@app.post("/service-technicians/<technician_id>/edit")
+@require_roles("super_admin", "commercial_manager", "operator")
+def service_technician_edit(technician_id: str):
+    store = load_store()
+    technician = find_by_id(store.get("service_technicians", []), technician_id)
+    if technician:
+        updated = service_technician_payload(technician)
+        store["service_technicians"] = [
+            updated if item["id"] == technician_id else item
+            for item in store.get("service_technicians", [])
+        ]
+        record_audit_event(
+            store,
+            "update",
+            "service_technician",
+            technician_id,
+            f"Servicio tecnico actualizado: {updated['name']}.",
+        )
+        save_store(store)
+    return redirect(url_for("service_technicians"))
+
+
+@app.post("/service-technicians/<technician_id>/delete")
+@require_roles("super_admin", "commercial_manager", "operator")
+def service_technician_delete(technician_id: str):
+    store = load_store()
+    technician = find_by_id(store.get("service_technicians", []), technician_id)
+    if technician:
+        technician["status"] = "deleted"
+        technician["visibleInApp"] = False
+        technician["updatedAt"] = utc_now()
+        record_audit_event(
+            store,
+            "delete",
+            "service_technician",
+            technician_id,
+            f"Servicio tecnico eliminado: {technician.get('name', technician_id)}.",
+        )
+        save_store(store)
+    return redirect(url_for("service_technicians"))
+
+
 @app.get("/credit")
-@require_roles("super_admin", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator", "sales")
 def credit():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -1431,7 +1780,47 @@ def credit():
         clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
         payments=sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
         metrics=metrics,
+        payment_terms=PAYMENT_TERM_OPTIONS,
+        can_approve_credit=role_allowed(CREDIT_APPROVAL_ROLES),
     )
+
+
+@app.post("/credit/<client_id>/decision")
+@require_roles("super_admin", "commercial_manager", "operator")
+def credit_decision(client_id: str):
+    store = load_store()
+    client = find_by_id(store.get("clients", []), client_id)
+    if not client:
+        return redirect(url_for("credit"))
+
+    decision = request.form.get("decision", "approved")
+    now = utc_now()
+    if decision == "approved":
+        credit_limit = float(request.form.get("creditLimitUsd") or client.get("creditRequestedUsd") or 0)
+        payment_terms = int(request.form.get("paymentTermsDays") or client.get("paymentTermsDays") or 0)
+        client["creditEnabled"] = credit_limit > 0
+        client["creditLimitUsd"] = credit_limit
+        client["paymentTermsDays"] = payment_terms
+        client["creditRequestStatus"] = "approved"
+        client["creditApprovedBy"] = session.get("admin_name", "Admin")
+        client["creditApprovedAt"] = now
+        allowed_terms = set(int(term) for term in client.get("allowedPaymentTermsDays", [0]) if str(term).isdigit())
+        allowed_terms.add(payment_terms)
+        client["allowedPaymentTermsDays"] = sorted(allowed_terms)
+        detail = f"Credito aprobado por {money_usd(credit_limit)} a {payment_terms} dias."
+    else:
+        client["creditEnabled"] = False
+        client["creditLimitUsd"] = 0.0
+        client["paymentTermsDays"] = 0
+        client["creditRequestStatus"] = "rejected"
+        client["creditApprovedBy"] = session.get("admin_name", "Admin")
+        client["creditApprovedAt"] = now
+        detail = "Solicitud de credito rechazada."
+
+    client["updatedAt"] = now
+    record_audit_event(store, "credit_decision", "client", client_id, detail)
+    save_store(store)
+    return redirect(url_for("credit"))
 
 
 @app.get("/audit")
@@ -1455,7 +1844,7 @@ def audit():
 
 
 @app.get("/orders")
-@require_roles("super_admin", "operator", "sales", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "sales", "readonly")
 def orders():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -1468,18 +1857,24 @@ def orders():
         "total": sum(float(order.get("totalUsd") or 0) for order in enriched_orders),
         "balance": sum(float(order.get("balanceUsd") or 0) for order in enriched_orders),
         "review": sum(1 for order in enriched_orders if order.get("status") == "credit_review"),
+        "commission_pending": sum(
+            float(order.get("commissionUsd") or 0)
+            for order in enriched_orders
+            if order.get("commissionStatus") == "commission_pending"
+        ),
     }
     return render_template(
         "orders.html",
         orders=enriched_orders,
         status_options=ORDER_STATUS_OPTIONS,
         payment_methods=PAYMENT_METHOD_OPTIONS,
+        sale_type_options=SALE_TYPE_OPTIONS,
         metrics=metrics,
     )
 
 
 @app.post("/orders/<order_id>/status")
-@require_roles("super_admin", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator", "sales")
 def order_status_update(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
@@ -1517,9 +1912,12 @@ def order_status_update(order_id: str):
 
     if target_status == "cancelled":
         order["creditStatus"] = "cancelled"
+        order["commissionStatus"] = "commission_cancelled"
     elif target_status == "paid" and balance > 0:
         target_status = "partial_paid"
         note = note or "La orden tiene saldo pendiente; registra el abono para cerrarla como pagada."
+    elif target_status in {"delivered", "paid"} and float(order.get("commissionUsd") or 0) > 0:
+        order["commissionStatus"] = "commission_approved"
 
     order["status"] = target_status
     order["managedBy"] = session.get("admin_name", "Admin")
@@ -1534,7 +1932,7 @@ def order_status_update(order_id: str):
 
 
 @app.post("/orders/<order_id>/payments")
-@require_roles("super_admin", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator", "sales")
 def order_payment_create(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
@@ -1572,6 +1970,8 @@ def order_payment_create(order_id: str):
     order["paymentStatus"] = "paid" if balance_after <= 0 else "partial"
     order["status"] = "paid" if balance_after <= 0 else "partial_paid"
     order["creditStatus"] = "released" if balance_after <= 0 else order.get("creditStatus", "approved")
+    if balance_after <= 0 and float(order.get("commissionUsd") or 0) > 0:
+        order["commissionStatus"] = "commission_approved"
     apply_inventory_transition(store, order, order["status"])
     order["managedBy"] = session.get("admin_name", "Admin")
     order["managedAt"] = utc_now()
@@ -1682,9 +2082,25 @@ def api_create_order():
     total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or 0)
     movements = store.get("credit_movements", [])
     credit_before = credit_available(client, store["orders"], movements) if client else 0.0
-    credit_after = max(0.0, round(credit_before - total_usd, 2)) if client and client.get("creditEnabled") else 0.0
+    requested_sale_type = payload.get("saleType") or payload.get("paymentMethod") or (client or {}).get("defaultSaleType") or "cash"
+    sale_type = requested_sale_type if requested_sale_type in dict(SALE_TYPE_OPTIONS) else "cash"
+    allowed_terms = [
+        int(term)
+        for term in (client or {}).get("allowedPaymentTermsDays", [0])
+        if str(term).isdigit()
+    ] or [0]
+    payment_term_days = int(payload.get("paymentTermDays") or (client or {}).get("paymentTermsDays") or 0)
+    if sale_type == "term_credit" and payment_term_days not in allowed_terms:
+        payment_term_days = 0
+
+    seller_id = (client or {}).get("assignedSellerId", "")
+    seller_name = (client or {}).get("assignedSellerName", "") or seller_name_for(store, seller_id)
+    commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
+    commission_usd = round(total_usd * commission_rate / 100, 2)
+    credit_after = max(0.0, round(credit_before - total_usd, 2)) if sale_type == "credit_line" and client and client.get("creditEnabled") else credit_before
     can_use_credit = (
-        client is not None
+        sale_type == "credit_line"
+        and client is not None
         and client.get("status") == "active"
         and client.get("creditEnabled")
         and credit_before >= total_usd
@@ -1692,8 +2108,12 @@ def api_create_order():
     credit_status = "approved" if can_use_credit else "manual_review"
     if client and client.get("status") != "active":
         credit_status = "client_not_active"
+    elif sale_type == "cash":
+        credit_status = "without_credit"
     elif client and not client.get("creditEnabled"):
         credit_status = "without_credit"
+    elif sale_type == "term_credit":
+        credit_status = "manual_review"
     order = {
         "id": order_id,
         "orderId": order_id,
@@ -1703,6 +2123,14 @@ def api_create_order():
         "totalUsd": total_usd,
         "totalVes": float(preview.get("totalVes") or 0),
         "exchangeRateUsdVes": float(preview.get("exchangeRateUsdVes") or current_rate()),
+        "saleType": sale_type,
+        "paymentTermDays": payment_term_days,
+        "sellerId": seller_id,
+        "sellerName": seller_name,
+        "salesChannel": payload.get("salesChannel", "mobile"),
+        "commissionRatePercent": commission_rate,
+        "commissionUsd": commission_usd,
+        "commissionStatus": "commission_pending" if commission_usd else "commission_cancelled",
         "creditBeforeUsd": credit_before,
         "creditAfterUsd": credit_after,
         "creditStatus": credit_status,
@@ -1713,7 +2141,7 @@ def api_create_order():
         "statusHistory": [
             {
                 "status": "approved_with_credit" if can_use_credit else "credit_review",
-                "note": "Orden creada desde app movil.",
+                "note": f"Orden creada desde app movil con venta {sale_type_label(sale_type)}.",
                 "adminUserId": "",
                 "adminName": "Sistema",
                 "createdAt": utc_now(),
@@ -1736,6 +2164,10 @@ def api_create_order():
             "creditBeforeUsd": credit_before,
             "creditAfterUsd": credit_after,
             "balanceUsd": total_usd,
+            "saleType": sale_type,
+            "paymentTermDays": payment_term_days,
+            "sellerId": seller_id,
+            "sellerName": seller_name,
         }
     ), 201
 
@@ -1784,6 +2216,12 @@ def api_client_credit():
                 "creditExposureUsd": enriched["creditExposureUsd"],
                 "creditAvailableUsd": enriched["creditAvailableUsd"],
                 "paymentTermsDays": enriched["paymentTermsDays"],
+                "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
+                "defaultSaleType": enriched.get("defaultSaleType", "cash"),
+                "assignedSeller": {
+                    "id": enriched.get("assignedSellerId", ""),
+                    "name": enriched.get("assignedSellerName", ""),
+                },
                 "status": enriched["creditStatus"],
                 "mustChangePassword": bool(enriched.get("mustChangePassword")),
             }
@@ -1864,6 +2302,12 @@ def api_client_login():
                 "creditExposureUsd": enriched["creditExposureUsd"],
                 "creditAvailableUsd": enriched["creditAvailableUsd"],
                 "paymentTermsDays": enriched["paymentTermsDays"],
+                "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
+                "defaultSaleType": enriched.get("defaultSaleType", "cash"),
+                "assignedSeller": {
+                    "id": enriched.get("assignedSellerId", ""),
+                    "name": enriched.get("assignedSellerName", ""),
+                },
                 "mustChangePassword": bool(enriched.get("mustChangePassword")),
             }
         }
@@ -1956,8 +2400,46 @@ def api_announcements():
     return jsonify({"items": active_announcements(placement)})
 
 
+@app.get("/api/mobile/service-technicians")
+def api_service_technicians():
+    store = load_store()
+    technicians = [
+        technician
+        for technician in store.get("service_technicians", [])
+        if technician.get("status") == "active" and technician.get("visibleInApp")
+    ]
+    return jsonify({"items": technicians})
+
+
 @app.get("/api/mobile/locations")
 def api_locations():
+    store = load_store()
+    technicians = [
+        technician
+        for technician in store.get("service_technicians", [])
+        if technician.get("status") == "active" and technician.get("visibleInApp")
+    ]
+    if technicians:
+        return jsonify(
+            {
+                "items": [
+                    {
+                        "id": technician.get("id", ""),
+                        "name": technician.get("name", ""),
+                        "subtitle": " - ".join(
+                            part
+                            for part in [technician.get("city", ""), technician.get("coverage", "")]
+                            if part
+                        ),
+                        "phone": technician.get("phone", ""),
+                        "whatsapp": technician.get("whatsapp", ""),
+                        "address": technician.get("address", ""),
+                        "specialties": technician.get("specialties", []),
+                    }
+                    for technician in technicians
+                ]
+            }
+        )
     return jsonify(
         {
             "items": [

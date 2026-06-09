@@ -11,12 +11,15 @@ void main() {
 
     final session = await repository.signIn(
       email: 'ferreteria@wulkan.local',
-      password: 'ferretero2026',
+      password: 'clave-segura-local',
     );
 
     expect(session.isAuthenticated, isTrue);
     expect(session.id, 'client-ferreteria-valencia');
     expect(session.roleLabel, 'Ferretero B2B');
     expect(session.mustChangePassword, isFalse);
+    expect(session.defaultSaleType, 'term_credit');
+    expect(session.allowedPaymentTermsDays, contains(15));
+    expect(session.assignedSeller.name, 'Vendedor Wulkan');
   });
 }
