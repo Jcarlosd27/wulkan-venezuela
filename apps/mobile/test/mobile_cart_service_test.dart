@@ -59,7 +59,8 @@ void main() {
           preview.blockingReasons, contains('requires_technical_validation'));
     });
 
-    test('controller adds, increments and removes live cart items', () {
+    test('controller adds quantities, increments and removes live cart items',
+        () {
       final controller = MobileCartController();
       const product = MobileProduct(
         id: 'prod-motosierra-45cc',
@@ -77,18 +78,18 @@ void main() {
         imageUrl: 'https://cdn.example.com/motosierra.jpg',
       );
 
-      controller.addProduct(product);
-      controller.addProduct(product);
+      controller.addProduct(product, quantity: 2);
+      controller.addProduct(product, quantity: 3);
       controller.increment(product.id);
 
       expect(controller.value, hasLength(1));
-      expect(controller.itemCount, 3);
+      expect(controller.itemCount, 6);
       expect(controller.contains(product.id), isTrue);
       expect(controller.value.first.unitPriceUsd, 162);
       expect(controller.value.first.imageUrl, product.imageUrl);
 
       controller.decrement(product.id);
-      expect(controller.itemCount, 2);
+      expect(controller.itemCount, 5);
 
       controller.remove(product.id);
       expect(controller.value, isEmpty);

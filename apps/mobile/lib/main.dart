@@ -1120,6 +1120,26 @@ class _FeaturedProductGrid extends StatelessWidget {
 
   final VoidCallback onOpenCart;
 
+  bool _addFeaturedToCart(
+    BuildContext context,
+    MobileProduct product,
+    int quantity,
+  ) {
+    if (!_canAddProductQuantity(context, product, quantity)) {
+      return false;
+    }
+
+    mobileCartController.addProduct(product, quantity: quantity);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$quantity uds de ${product.name} agregadas al carrito',
+        ),
+      ),
+    );
+    return true;
+  }
+
   void _openProductPreview(BuildContext context, MobileProduct product) {
     showModalBottomSheet<void>(
       context: context,
@@ -1127,10 +1147,11 @@ class _FeaturedProductGrid extends StatelessWidget {
       useSafeArea: true,
       builder: (sheetContext) => _ProductDetailSheet(
         product: product,
-        onAdd: () {
-          mobileCartController.addProduct(product);
-          Navigator.of(sheetContext).pop();
-          onOpenCart();
+        onAddQuantity: (quantity) {
+          if (_addFeaturedToCart(context, product, quantity)) {
+            Navigator.of(sheetContext).pop();
+            onOpenCart();
+          }
         },
       ),
     );
@@ -1161,7 +1182,7 @@ class _FeaturedProductGrid extends StatelessWidget {
             crossAxisCount: 2,
             mainAxisSpacing: 14,
             crossAxisSpacing: 14,
-            childAspectRatio: 0.56,
+            childAspectRatio: 0.46,
           ),
           itemBuilder: (context, index) {
             final product = products[index];
@@ -1179,6 +1200,11 @@ class _FeaturedProductGrid extends StatelessWidget {
               stock: product.availableStock,
               requiresQuote: product.requiresQuote,
               onTap: () => _openProductPreview(context, product),
+              onAddQuantity: (quantity) {
+                if (_addFeaturedToCart(context, product, quantity)) {
+                  onOpenCart();
+                }
+              },
             );
           },
         );
@@ -1332,18 +1358,20 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _loadFirstPage();
   }
 
-  void _addToCart(MobileProduct product) {
-    if (product.availableStock <= 0 && !product.requiresQuote) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${product.name} no tiene stock disponible')),
-      );
-      return;
+  bool _addToCart(MobileProduct product, {int quantity = 1}) {
+    if (!_canAddProductQuantity(context, product, quantity)) {
+      return false;
     }
 
-    mobileCartController.addProduct(product);
+    mobileCartController.addProduct(product, quantity: quantity);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${product.name} agregado al carrito')),
+      SnackBar(
+        content: Text(
+          '$quantity uds de ${product.name} agregadas al carrito',
+        ),
+      ),
     );
+    return true;
   }
 
   void _openProduct(MobileProduct product) {
@@ -1353,9 +1381,10 @@ class _CatalogScreenState extends State<CatalogScreen> {
       useSafeArea: true,
       builder: (context) => _ProductDetailSheet(
         product: product,
-        onAdd: () {
-          _addToCart(product);
-          Navigator.of(context).pop();
+        onAddQuantity: (quantity) {
+          if (_addToCart(product, quantity: quantity)) {
+            Navigator.of(context).pop();
+          }
         },
       ),
     );
@@ -1407,7 +1436,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 crossAxisCount: 2,
                 mainAxisSpacing: 14,
                 crossAxisSpacing: 14,
-                childAspectRatio: 0.56,
+                childAspectRatio: 0.46,
               ),
               itemBuilder: (context, index) {
                 final product = _products[index];
@@ -1425,6 +1454,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   stock: product.availableStock,
                   requiresQuote: product.requiresQuote,
                   onTap: () => _openProduct(product),
+                  onAddQuantity: (quantity) =>
+                      _addToCart(product, quantity: quantity),
                 );
               },
             ),
@@ -1556,19 +1587,44 @@ class _CatalogFilterBar extends StatelessWidget {
   }
 }
 
-class _ProductDetailSheet extends StatelessWidget {
+class _ProductDetailSheet extends StatefulWidget {
   const _ProductDetailSheet({
     required this.product,
-    required this.onAdd,
+    required this.onAddQuantity,
   });
 
   final MobileProduct product;
-  final VoidCallback onAdd;
+  final ValueChanged<int> onAddQuantity;
+
+  @override
+  State<_ProductDetailSheet> createState() => _ProductDetailSheetState();
+}
+
+class _ProductDetailSheetState extends State<_ProductDetailSheet> {
+  int _quantity = 1;
+
+  Future<void> _editQuantity() async {
+    final selected = await _showQuantityPicker(
+      context,
+      initialQuantity: _quantity,
+      stock: widget.product.availableStock,
+      allowBeyondStock: widget.product.requiresQuote,
+    );
+
+    if (!mounted || selected == null) {
+      return;
+    }
+
+    setState(() => _quantity = selected);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final product = widget.product;
     final ferreteroPrice = product.ferreteroPriceUsd;
     final referencePrice = product.ferreteroReferencePriceUsd;
+    final accentColor = _productAccentColor(product.categoryName);
+    final canAdd = product.requiresQuote || product.availableStock > 0;
 
     return FractionallySizedBox(
       heightFactor: 0.88,
@@ -1600,11 +1656,11 @@ class _ProductDetailSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          if (product.primaryImageUrl != null)
-            _ProductImageHero(
-              imageUrl: product.primaryImageUrl!,
-              title: product.name,
-            ),
+          _ProductDetailMedia(
+            imageUrl: product.primaryImageUrl,
+            title: product.name,
+            accentColor: accentColor,
+          ),
           if (product.imageUrls.length > 1) ...[
             const SizedBox(height: 8),
             SizedBox(
@@ -1691,6 +1747,13 @@ class _ProductDetailSheet extends StatelessWidget {
             title: 'Compatibilidad',
             lines: product.compatibilityNotes,
           ),
+          _QuantitySelectorButton(
+            quantity: _quantity,
+            stock: product.availableStock,
+            requiresQuote: product.requiresQuote,
+            onPressed: canAdd ? _editQuantity : null,
+          ),
+          const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1703,12 +1766,14 @@ class _ProductDetailSheet extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: onAdd,
+              onPressed: canAdd ? () => widget.onAddQuantity(_quantity) : null,
               icon: const Icon(Icons.add_shopping_cart),
               label: Text(
-                product.requiresQuote
-                    ? 'Agregar para cotizar'
-                    : 'Agregar al carrito',
+                !canAdd
+                    ? 'Sin stock disponible'
+                    : product.requiresQuote
+                        ? 'Agregar para cotizar'
+                        : 'Agregar $_quantity al carrito',
               ),
             ),
           ),
@@ -2131,10 +2196,59 @@ String _productSubtitle(MobileProduct product) {
   }
 
   if (product.requiresTechnicalValidation) {
-    return "Stock ${product.availableStock} - validar con Wulkan";
+    return "${product.availableStock} disp. - validar Wulkan";
   }
 
-  return "Stock ${product.availableStock} - precio ferretero USD ${product.ferreteroPriceUsd.toStringAsFixed(0)}";
+  return "${product.availableStock} disp. - ferretero USD ${product.ferreteroPriceUsd.toStringAsFixed(0)}";
+}
+
+int _cartQuantityForProduct(String productId) {
+  return mobileCartController.value
+      .where((item) => item.productId == productId)
+      .fold<int>(0, (total, item) => total + item.quantity);
+}
+
+bool _canAddProductQuantity(
+  BuildContext context,
+  MobileProduct product,
+  int quantity,
+) {
+  if (product.requiresQuote) {
+    return true;
+  }
+
+  if (product.availableStock <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${product.name} no tiene stock disponible')),
+    );
+    return false;
+  }
+
+  final quantityInCart = _cartQuantityForProduct(product.id);
+  final remainingStock = product.availableStock - quantityInCart;
+  if (remainingStock <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Ya tienes todo el stock disponible de ${product.name} en el carrito',
+        ),
+      ),
+    );
+    return false;
+  }
+
+  if (quantity > remainingStock) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Puedes agregar maximo $remainingStock uds mas de ${product.name}',
+        ),
+      ),
+    );
+    return false;
+  }
+
+  return true;
 }
 
 class WorkModeScreen extends StatelessWidget {
@@ -3695,6 +3809,134 @@ class _ModuleTile extends StatelessWidget {
   }
 }
 
+class _ProductDetailMedia extends StatelessWidget {
+  const _ProductDetailMedia({
+    required this.title,
+    required this.accentColor,
+    this.imageUrl,
+  });
+
+  final String title;
+  final Color accentColor;
+  final String? imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = imageUrl != null && imageUrl!.isNotEmpty;
+
+    return AspectRatio(
+      aspectRatio: 16 / 10,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                accentColor.withValues(alpha: 0.22),
+                _wulkanOrange.withValues(alpha: 0.12),
+                Colors.white,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                right: -26,
+                bottom: -34,
+                child: Icon(
+                  Icons.agriculture_outlined,
+                  size: 150,
+                  color: accentColor.withValues(alpha: 0.12),
+                ),
+              ),
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: hasImage
+                      ? Image.network(
+                          imageUrl!,
+                          fit: BoxFit.contain,
+                          semanticLabel: title,
+                          errorBuilder: (_, __, ___) =>
+                              _ProductFallbackMark(accentColor: accentColor),
+                        )
+                      : _ProductFallbackMark(accentColor: accentColor),
+                ),
+              ),
+              Positioned(
+                left: 14,
+                bottom: 14,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: Colors.white.withValues(alpha: 0.92),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.verified_outlined,
+                          size: 15, color: accentColor),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Wulkan stock',
+                        style: TextStyle(
+                          color: accentColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductFallbackMark extends StatelessWidget {
+  const _ProductFallbackMark({required this.accentColor});
+
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 96,
+        height: 96,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white,
+          border: Border.all(color: accentColor.withValues(alpha: 0.22)),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.18),
+              blurRadius: 24,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.inventory_2_outlined,
+          color: _wulkanBlack,
+          size: 48,
+        ),
+      ),
+    );
+  }
+}
+
 class _ProductImageHero extends StatelessWidget {
   const _ProductImageHero({required this.imageUrl, required this.title});
 
@@ -3741,6 +3983,7 @@ class _ProductTile extends StatelessWidget {
     this.stock,
     this.requiresQuote = false,
     this.onTap,
+    this.onAddQuantity,
   });
 
   final String sku;
@@ -3756,11 +3999,13 @@ class _ProductTile extends StatelessWidget {
   final int? stock;
   final bool requiresQuote;
   final VoidCallback? onTap;
+  final ValueChanged<int>? onAddQuantity;
 
   @override
   Widget build(BuildContext context) {
     final hasDiscount =
         discountPercent > 0 || ((originalPriceUsd ?? 0) > (priceUsd ?? 0));
+    final accentColor = _productAccentColor(category);
 
     return InkWell(
       borderRadius: BorderRadius.circular(22),
@@ -3769,7 +4014,14 @@ class _ProductTile extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(22),
           color: Colors.white,
-          border: Border.all(color: _wulkanLine),
+          border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.14),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -3777,7 +4029,10 @@ class _ProductTile extends StatelessWidget {
           children: [
             Stack(
               children: [
-                _ProductImageFrame(imageUrl: imageUrl),
+                _ProductImageFrame(
+                  imageUrl: imageUrl,
+                  accentColor: accentColor,
+                ),
                 Positioned(
                   top: 10,
                   right: 10,
@@ -3816,7 +4071,7 @@ class _ProductTile extends StatelessWidget {
                     Text(
                       category,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: _wulkanOrange,
+                            color: accentColor,
                             fontWeight: FontWeight.w900,
                           ),
                     ),
@@ -3871,11 +4126,18 @@ class _ProductTile extends StatelessWidget {
                           'USD',
                           style:
                               Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: _wulkanOrange,
+                                    color: accentColor,
                                     fontWeight: FontWeight.w900,
                                   ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    _ProductCardActions(
+                      stock: stock ?? 0,
+                      requiresQuote: requiresQuote,
+                      accentColor: accentColor,
+                      onAddQuantity: onAddQuantity,
                     ),
                   ],
                 ),
@@ -3888,10 +4150,256 @@ class _ProductTile extends StatelessWidget {
   }
 }
 
+class _ProductCardActions extends StatefulWidget {
+  const _ProductCardActions({
+    required this.stock,
+    required this.requiresQuote,
+    required this.accentColor,
+    this.onAddQuantity,
+  });
+
+  final int stock;
+  final bool requiresQuote;
+  final Color accentColor;
+  final ValueChanged<int>? onAddQuantity;
+
+  @override
+  State<_ProductCardActions> createState() => _ProductCardActionsState();
+}
+
+class _ProductCardActionsState extends State<_ProductCardActions> {
+  int _quantity = 1;
+
+  Future<void> _editQuantity() async {
+    final selected = await _showQuantityPicker(
+      context,
+      initialQuantity: _quantity,
+      stock: widget.stock,
+      allowBeyondStock: widget.requiresQuote,
+    );
+
+    if (!mounted || selected == null) {
+      return;
+    }
+
+    setState(() => _quantity = selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canAdd = widget.requiresQuote || widget.stock > 0;
+    final quantityLabel = canAdd ? 'Cant. $_quantity' : 'Sin stock';
+
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: canAdd ? _editQuantity : null,
+            icon: const Icon(Icons.format_list_numbered, size: 16),
+            label: Text(quantityLabel),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              foregroundColor: widget.accentColor,
+              side:
+                  BorderSide(color: widget.accentColor.withValues(alpha: 0.4)),
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 7),
+        SizedBox(
+          width: 38,
+          height: 34,
+          child: IconButton.filled(
+            tooltip: 'Agregar cantidad',
+            onPressed: canAdd && widget.onAddQuantity != null
+                ? () => widget.onAddQuantity!(_quantity)
+                : null,
+            icon: const Icon(Icons.add_shopping_cart, size: 17),
+            style: IconButton.styleFrom(
+              backgroundColor: widget.accentColor,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: _wulkanLine,
+              disabledForegroundColor: _wulkanMuted,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuantitySelectorButton extends StatelessWidget {
+  const _QuantitySelectorButton({
+    required this.quantity,
+    required this.stock,
+    required this.requiresQuote,
+    required this.onPressed,
+  });
+
+  final int quantity;
+  final int stock;
+  final bool requiresQuote;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final helper = requiresQuote
+        ? 'Cantidad para cotizar'
+        : stock <= 0
+            ? 'Sin stock disponible'
+            : 'Disponible: $stock uds';
+
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.format_list_numbered),
+      label: Text('Cantidad $quantity - $helper'),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(46),
+        alignment: Alignment.centerLeft,
+        foregroundColor: _wulkanBlack,
+        side: const BorderSide(color: _wulkanLine),
+      ),
+    );
+  }
+}
+
+Future<int?> _showQuantityPicker(
+  BuildContext context, {
+  required int initialQuantity,
+  required int stock,
+  required bool allowBeyondStock,
+}) async {
+  final limit = allowBeyondStock
+      ? 999
+      : stock <= 0
+          ? 1
+          : stock;
+  int normalize(int value) {
+    if (value < 1) {
+      return 1;
+    }
+    if (value > limit) {
+      return limit;
+    }
+    return value;
+  }
+
+  var quantity = normalize(initialQuantity);
+  final controller = TextEditingController(text: quantity.toString());
+
+  final result = await showDialog<int>(
+    context: context,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          void setQuantity(int value) {
+            final normalized = normalize(value);
+            setDialogState(() => quantity = normalized);
+            controller.text = normalized.toString();
+            controller.selection = TextSelection.fromPosition(
+              TextPosition(offset: controller.text.length),
+            );
+          }
+
+          return AlertDialog(
+            title: const Text('Cantidad a comprar'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  allowBeyondStock
+                      ? 'Ingresa la cantidad para cotizar.'
+                      : 'Maximo disponible: $limit uds.',
+                  style: const TextStyle(color: _wulkanMuted),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    IconButton.filledTonal(
+                      onPressed: () => setQuantity(quantity - 1),
+                      icon: const Icon(Icons.remove),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        onChanged: (value) {
+                          final parsed = int.tryParse(value);
+                          if (parsed != null) {
+                            quantity = normalize(parsed);
+                          }
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Unidades',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton.filledTonal(
+                      onPressed: () => setQuantity(quantity + 1),
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final parsed = int.tryParse(controller.text);
+                  Navigator.of(dialogContext)
+                      .pop(normalize(parsed ?? quantity));
+                },
+                child: const Text('Aplicar'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  controller.dispose();
+  return result;
+}
+
+Color _productAccentColor(String value) {
+  final normalized = value.toLowerCase();
+  if (normalized.contains('repuesto')) {
+    return const Color(0xFF0D6EFD);
+  }
+  if (normalized.contains('industrial')) {
+    return const Color(0xFF6F42C1);
+  }
+  if (normalized.contains('maquinaria') ||
+      normalized.contains('jardin') ||
+      normalized.contains('bosque')) {
+    return const Color(0xFF198754);
+  }
+  return _wulkanOrange;
+}
+
 class _ProductImageFrame extends StatelessWidget {
-  const _ProductImageFrame({this.imageUrl});
+  const _ProductImageFrame({
+    this.imageUrl,
+    this.accentColor = _wulkanOrange,
+  });
 
   final String? imageUrl;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -3900,9 +4408,9 @@ class _ProductImageFrame extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(0),
         child: imageUrl == null || imageUrl!.isEmpty
-            ? const _WulkanProductPlaceholder()
+            ? _WulkanProductPlaceholder(accentColor: accentColor)
             : ColoredBox(
-                color: const Color(0xFFF3F0ED),
+                color: accentColor.withValues(alpha: 0.08),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Image.network(
@@ -3920,12 +4428,26 @@ class _ProductImageFrame extends StatelessWidget {
 }
 
 class _WulkanProductPlaceholder extends StatelessWidget {
-  const _WulkanProductPlaceholder();
+  const _WulkanProductPlaceholder({
+    this.accentColor = _wulkanOrange,
+  });
+
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: const Color(0xFFF3F0ED),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            accentColor.withValues(alpha: 0.16),
+            _wulkanOrange.withValues(alpha: 0.08),
+            const Color(0xFFF8FAFD),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
       child: Stack(
         children: [
           Positioned(
@@ -3934,7 +4456,7 @@ class _WulkanProductPlaceholder extends StatelessWidget {
             child: Icon(
               Icons.agriculture_outlined,
               size: 104,
-              color: _wulkanBlack.withValues(alpha: 0.06),
+              color: accentColor.withValues(alpha: 0.12),
             ),
           ),
           Center(
@@ -3944,7 +4466,14 @@ class _WulkanProductPlaceholder extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white,
-                border: Border.all(color: _wulkanLine),
+                border: Border.all(color: accentColor.withValues(alpha: 0.16)),
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withValues(alpha: 0.16),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
               child: const Icon(
                 Icons.inventory_2_outlined,

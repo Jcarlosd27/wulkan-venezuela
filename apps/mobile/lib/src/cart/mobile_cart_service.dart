@@ -70,10 +70,11 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
     return value.any((item) => item.productId == productId);
   }
 
-  void addProduct(MobileProduct product) {
+  void addProduct(MobileProduct product, {int quantity = 1}) {
     if (product.ferreteroPriceUsd <= 0) {
       return;
     }
+    final normalizedQuantity = quantity < 1 ? 1 : quantity;
 
     final existingIndex =
         value.indexWhere((item) => item.productId == product.id);
@@ -82,7 +83,7 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
       final updated = [...value];
       final current = updated[existingIndex];
       updated[existingIndex] = current.copyWith(
-        quantity: current.quantity + 1,
+        quantity: current.quantity + normalizedQuantity,
       );
       value = updated;
       return;
@@ -94,7 +95,7 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
         productId: product.id,
         sku: product.sku,
         title: product.name,
-        quantity: 1,
+        quantity: normalizedQuantity,
         unitPriceUsd: product.ferreteroPriceUsd,
         requiresQuote: product.requiresQuote,
         requiresTechnicalValidation: product.requiresTechnicalValidation,
