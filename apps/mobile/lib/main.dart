@@ -577,7 +577,6 @@ class HomeScreen extends StatelessWidget {
           onAction: onOpenCatalog,
         ),
         _FeaturedProductGrid(
-          onOpenCatalog: onOpenCatalog,
           onOpenCart: onOpenCart,
         ),
       ],
@@ -1116,12 +1115,26 @@ class _PromoFallbackArt extends StatelessWidget {
 
 class _FeaturedProductGrid extends StatelessWidget {
   const _FeaturedProductGrid({
-    required this.onOpenCatalog,
     required this.onOpenCart,
   });
 
-  final VoidCallback onOpenCatalog;
   final VoidCallback onOpenCart;
+
+  void _openProductPreview(BuildContext context, MobileProduct product) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => _ProductDetailSheet(
+        product: product,
+        onAdd: () {
+          mobileCartController.addProduct(product);
+          Navigator.of(sheetContext).pop();
+          onOpenCart();
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1165,11 +1178,7 @@ class _FeaturedProductGrid extends StatelessWidget {
               variants: product.variants,
               stock: product.availableStock,
               requiresQuote: product.requiresQuote,
-              onTap: onOpenCatalog,
-              onAction: () {
-                mobileCartController.addProduct(product);
-                onOpenCart();
-              },
+              onTap: () => _openProductPreview(context, product),
             );
           },
         );
@@ -1416,7 +1425,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   stock: product.availableStock,
                   requiresQuote: product.requiresQuote,
                   onTap: () => _openProduct(product),
-                  onAction: () => _addToCart(product),
                 );
               },
             ),
@@ -1567,14 +1575,28 @@ class _ProductDetailSheet extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Center(
-            child: Container(
-              width: 42,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFFD3DAE5),
-                borderRadius: BorderRadius.circular(99),
-              ),
+          SizedBox(
+            height: 36,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD3DAE5),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    tooltip: 'Cerrar',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
@@ -1669,11 +1691,25 @@ class _ProductDetailSheet extends StatelessWidget {
             title: 'Compatibilidad',
             lines: product.compatibilityNotes,
           ),
-          FilledButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add_shopping_cart),
-            label: Text(
-              product.requiresQuote ? 'Agregar para cotizar' : 'Agregar',
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Cerrar detalle'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add_shopping_cart),
+              label: Text(
+                product.requiresQuote
+                    ? 'Agregar para cotizar'
+                    : 'Agregar al carrito',
+              ),
             ),
           ),
         ],
@@ -3705,7 +3741,6 @@ class _ProductTile extends StatelessWidget {
     this.stock,
     this.requiresQuote = false,
     this.onTap,
-    this.onAction,
   });
 
   final String sku;
@@ -3721,7 +3756,6 @@ class _ProductTile extends StatelessWidget {
   final int? stock;
   final bool requiresQuote;
   final VoidCallback? onTap;
-  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -3752,14 +3786,11 @@ class _ProductTile extends StatelessWidget {
                     backgroundColor: Colors.white,
                     foregroundColor: _wulkanBlack,
                     child: IconButton(
+                      tooltip: 'Ver detalle',
                       padding: EdgeInsets.zero,
                       iconSize: 17,
-                      onPressed: onAction ?? onTap,
-                      icon: Icon(
-                        requiresQuote
-                            ? Icons.request_quote_outlined
-                            : Icons.shopping_bag_outlined,
-                      ),
+                      onPressed: onTap,
+                      icon: const Icon(Icons.visibility_outlined),
                     ),
                   ),
                 ),
