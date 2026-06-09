@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -95,6 +96,8 @@ WRITE_ROLES = {"super_admin", "commercial_manager", "operator"}
 SALES_ROLES = {"super_admin", "commercial_manager", "operator", "sales"}
 INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
 CREDIT_APPROVAL_ROLES = {"super_admin", "commercial_manager", "operator"}
+COMMISSION_MANAGEMENT_ROLES = {"super_admin", "commercial_manager", "operator"}
+MOBILE_SALES_ROLES = {"super_admin", "commercial_manager", "sales"}
 ADMIN_ONLY_ROLES = {"super_admin"}
 MODULE_ACCESS = {
     "admin_users": ADMIN_ONLY_ROLES,
@@ -103,6 +106,7 @@ MODULE_ACCESS = {
     "clients": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
     "credit": {"super_admin", "commercial_manager", "operator", "sales"},
     "orders": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
+    "commissions": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
     "products": ALL_ADMIN_ROLES,
     "media_library": ALL_ADMIN_ROLES,
     "categories": ALL_ADMIN_ROLES,
@@ -160,6 +164,48 @@ def sale_type_label(value: str) -> str:
     return dict(SALE_TYPE_OPTIONS).get(value, value or "Sin definir")
 
 
+def commission_status_label(value: str) -> str:
+    return {
+        "commission_pending": "Pendiente",
+        "commission_approved": "Aprobada",
+        "commission_paid": "Pagada",
+        "commission_cancelled": "Anulada",
+    }.get(value, value or "Sin definir")
+
+
+def parse_utc_datetime(value: str | None) -> datetime:
+    if not value:
+        return datetime.now(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return datetime.now(timezone.utc)
+
+
+def add_days_iso(value: str | None, days: int) -> str:
+    base = parse_utc_datetime(value)
+    return (base + timedelta(days=max(0, int(days or 0)))).isoformat().replace("+00:00", "Z")
+
+
+def order_due_status(order: dict) -> tuple[str, int]:
+    due_date = order.get("dueDate", "")
+    if order.get("balanceUsd", 0) <= 0:
+        return "paid", 0
+    if not due_date:
+        return "without_due_date", 0
+    due_at = parse_utc_datetime(due_date)
+    today = datetime.now(timezone.utc)
+    delta = (due_at.date() - today.date()).days
+    if delta < 0:
+        return "overdue", abs(delta)
+    if delta <= 3:
+        return "due_soon", delta
+    return "current", delta
+
+
 def seller_commission_rate(store: dict, seller_id: str) -> float:
     seller = find_by_id(store.get("admin_users", []), seller_id)
     return float((seller or {}).get("commissionRatePercent") or 0)
@@ -168,6 +214,51 @@ def seller_commission_rate(store: dict, seller_id: str) -> float:
 def seller_name_for(store: dict, seller_id: str) -> str:
     seller = find_by_id(store.get("admin_users", []), seller_id)
     return (seller or {}).get("name", "")
+
+
+def visible_clients_for_current_user(store: dict) -> list[dict]:
+    clients = store.get("clients", [])
+    if current_admin_role() != "sales":
+        return clients
+    seller_id = session.get("admin_user_id", "")
+    return [client for client in clients if client.get("assignedSellerId") == seller_id]
+
+
+def can_access_client_record(client: dict | None) -> bool:
+    if not client:
+        return False
+    if current_admin_role() != "sales":
+        return True
+    return client.get("assignedSellerId") == session.get("admin_user_id", "")
+
+
+def visible_orders_for_current_user(store: dict) -> list[dict]:
+    orders = store.get("orders", [])
+    if current_admin_role() != "sales":
+        return orders
+    seller_id = session.get("admin_user_id", "")
+    assigned_client_ids = {
+        client.get("id", "")
+        for client in store.get("clients", [])
+        if client.get("assignedSellerId") == seller_id
+    }
+    return [
+        order
+        for order in orders
+        if order.get("sellerId") == seller_id or order.get("customerId") in assigned_client_ids
+    ]
+
+
+def can_access_order_record(order: dict | None, store: dict) -> bool:
+    if not order:
+        return False
+    if current_admin_role() != "sales":
+        return True
+    seller_id = session.get("admin_user_id", "")
+    if order.get("sellerId") == seller_id:
+        return True
+    client = find_by_id(store.get("clients", []), order.get("customerId", ""))
+    return bool(client and client.get("assignedSellerId") == seller_id)
 
 
 def login_attempt_key(scope: str, email: str) -> str:
@@ -246,6 +337,7 @@ def security_context():
         "current_admin_role": current_admin_role,
         "role_labels": ROLE_LABELS,
         "sale_type_label": sale_type_label,
+        "commission_status_label": commission_status_label,
     }
 
 
@@ -425,24 +517,54 @@ def mobile_token_serializer() -> URLSafeTimedSerializer:
 
 
 def issue_mobile_token(client: dict) -> str:
-    return mobile_token_serializer().dumps({"clientId": client["id"]})
+    return mobile_token_serializer().dumps(
+        {"type": "client", "clientId": client["id"], "id": client["id"], "role": "client"}
+    )
 
 
-def mobile_token_client_id() -> str:
+def issue_mobile_admin_token(user: dict) -> str:
+    return mobile_token_serializer().dumps(
+        {"type": "admin", "adminUserId": user["id"], "id": user["id"], "role": user.get("role", "")}
+    )
+
+
+def mobile_token_payload() -> dict:
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
-        return ""
+        return {}
 
     token = header.removeprefix("Bearer ").strip()
     if not token:
-        return ""
+        return {}
 
     try:
         payload = mobile_token_serializer().loads(token, max_age=60 * 60 * 24 * 7)
     except (BadSignature, SignatureExpired):
-        return ""
+        return {}
 
-    return payload.get("clientId", "") if isinstance(payload, dict) else ""
+    return payload if isinstance(payload, dict) else {}
+
+
+def mobile_token_client_id() -> str:
+    payload = mobile_token_payload()
+    if payload.get("type", "client") not in {"client", ""}:
+        return ""
+    return payload.get("clientId") or payload.get("id", "")
+
+
+def mobile_token_admin_id() -> str:
+    payload = mobile_token_payload()
+    if payload.get("type") != "admin":
+        return ""
+    return payload.get("adminUserId") or payload.get("id", "")
+
+
+def require_mobile_sales_user(store: dict) -> tuple[dict | None, object | None]:
+    admin_id = mobile_token_admin_id()
+    user = find_by_id(store.get("admin_users", []), admin_id)
+    if not user or user.get("status") != "active" or user.get("role") not in MOBILE_SALES_ROLES:
+        return None, jsonify({"error": "Token de vendedor requerido."})
+    return user, None
 
 
 def require_mobile_client_id() -> tuple[str, object | None]:
@@ -451,6 +573,147 @@ def require_mobile_client_id() -> tuple[str, object | None]:
     if require_token and not mobile_token_client_id():
         return "", jsonify({"error": "Token movil requerido."})
     return customer_id, None
+
+
+def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dict:
+    enriched = enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+    return {
+        "accessToken": access_token,
+        "tokenType": "Bearer",
+        "customer": {
+            "id": enriched["id"],
+            "businessName": enriched["businessName"],
+            "email": enriched["email"],
+            "clientType": enriched["clientType"],
+            "accountRole": "client",
+            "roleLabel": "Ferretero B2B",
+            "creditEnabled": enriched["creditEnabled"],
+            "creditLimitUsd": enriched["creditLimitUsd"],
+            "creditUsedUsd": enriched["creditUsedUsd"],
+            "creditOrdersUsd": enriched["creditOrdersUsd"],
+            "creditExposureUsd": enriched["creditExposureUsd"],
+            "creditAvailableUsd": enriched["creditAvailableUsd"],
+            "paymentTermsDays": enriched["paymentTermsDays"],
+            "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
+            "defaultSaleType": enriched.get("defaultSaleType", "cash"),
+            "assignedSeller": {
+                "id": enriched.get("assignedSellerId", ""),
+                "name": enriched.get("assignedSellerName", ""),
+            },
+            "mustChangePassword": bool(enriched.get("mustChangePassword")),
+        },
+    }
+
+
+def mobile_admin_payload(user: dict, access_token: str) -> dict:
+    role = user.get("role", "sales")
+    return {
+        "accessToken": access_token,
+        "tokenType": "Bearer",
+        "customer": {
+            "id": user["id"],
+            "businessName": user.get("name", "Vendedor Wulkan"),
+            "email": user.get("email", ""),
+            "clientType": role,
+            "accountRole": role,
+            "roleLabel": ROLE_LABELS.get(role, "Vendedor"),
+            "creditEnabled": False,
+            "creditLimitUsd": 0.0,
+            "creditUsedUsd": 0.0,
+            "creditOrdersUsd": 0.0,
+            "creditExposureUsd": 0.0,
+            "creditAvailableUsd": 0.0,
+            "paymentTermsDays": 0,
+            "allowedPaymentTermsDays": [0],
+            "defaultSaleType": "cash",
+            "assignedSeller": {
+                "id": user["id"] if role == "sales" else "",
+                "name": user.get("name", "") if role == "sales" else "",
+            },
+            "mustChangePassword": bool(user.get("mustChangePassword")),
+        },
+    }
+
+
+def seller_scope_clients(store: dict, user: dict) -> list[dict]:
+    if user.get("role") != "sales":
+        return store.get("clients", [])
+    return [client for client in store.get("clients", []) if client.get("assignedSellerId") == user.get("id")]
+
+
+def seller_scope_orders(store: dict, user: dict) -> list[dict]:
+    orders = store.get("orders", [])
+    if user.get("role") != "sales":
+        return orders
+    seller_id = user.get("id", "")
+    client_ids = {client.get("id", "") for client in seller_scope_clients(store, user)}
+    return [
+        order
+        for order in orders
+        if order.get("sellerId") == seller_id or order.get("customerId") in client_ids
+    ]
+
+
+def can_mobile_seller_access_client(store: dict, user: dict, client_id: str) -> bool:
+    client = find_by_id(store.get("clients", []), client_id)
+    if not client:
+        return False
+    if user.get("role") != "sales":
+        return True
+    return client.get("assignedSellerId") == user.get("id")
+
+
+def mobile_seller_client_payload(client: dict, store: dict) -> dict:
+    enriched = enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+    return {
+        "id": enriched.get("id", ""),
+        "businessName": enriched.get("businessName", ""),
+        "email": enriched.get("email", ""),
+        "phone": enriched.get("phone", ""),
+        "contactName": enriched.get("contactName", ""),
+        "taxId": enriched.get("taxId", ""),
+        "state": enriched.get("state", ""),
+        "city": enriched.get("city", ""),
+        "address": enriched.get("address", ""),
+        "creditEnabled": bool(enriched.get("creditEnabled")),
+        "creditStatus": enriched.get("creditStatus", "without_credit"),
+        "creditLimitUsd": enriched.get("creditLimitUsd", 0.0),
+        "creditAvailableUsd": enriched.get("creditAvailableUsd", 0.0),
+        "creditExposureUsd": enriched.get("creditExposureUsd", 0.0),
+        "creditRequestStatus": enriched.get("creditRequestStatus", "none"),
+        "assignedSeller": {
+            "id": enriched.get("assignedSellerId", ""),
+            "name": enriched.get("assignedSellerName", ""),
+        },
+    }
+
+
+def mobile_seller_order_payload(order: dict, store: dict) -> dict:
+    enriched = enrich_order(order, store.get("credit_movements", []))
+    return {
+        "id": enriched.get("orderId") or enriched.get("id", ""),
+        "orderId": enriched.get("orderId") or enriched.get("id", ""),
+        "customerId": enriched.get("customerId", ""),
+        "customerName": enriched.get("customerName", ""),
+        "sellerId": enriched.get("sellerId", ""),
+        "sellerName": enriched.get("sellerName", ""),
+        "status": enriched.get("status", ""),
+        "saleType": enriched.get("saleType", "cash"),
+        "saleTypeLabel": enriched.get("saleTypeLabel", ""),
+        "paymentTermDays": enriched.get("paymentTermDays", 0),
+        "dueDate": enriched.get("dueDate", ""),
+        "dueStatus": enriched.get("dueStatus", "without_due_date"),
+        "totalUsd": enriched.get("totalUsd", 0.0),
+        "paidUsd": enriched.get("paidUsd", 0.0),
+        "balanceUsd": enriched.get("balanceUsd", 0.0),
+        "itemsCount": enriched.get("itemsCount", 0),
+        "paymentStatus": enriched.get("paymentStatus", "pending"),
+        "stockStatus": enriched.get("stockStatus", "pending"),
+        "commissionUsd": enriched.get("commissionUsd", 0.0),
+        "commissionStatus": enriched.get("commissionStatus", "commission_pending"),
+        "commissionStatusLabel": enriched.get("commissionStatusLabel", "Pendiente"),
+        "createdAt": enriched.get("createdAt", ""),
+    }
 
 
 def enrich_product(product: dict) -> dict:
@@ -492,6 +755,189 @@ def find_order(orders: list[dict], order_id: str) -> dict | None:
         ),
         None,
     )
+
+
+def order_actor() -> dict:
+    return {
+        "id": session.get("admin_user_id", ""),
+        "name": session.get("admin_name", "Sistema"),
+        "role": session.get("admin_role", "system"),
+    }
+
+
+def normalize_order_items(store: dict, raw_items: list[dict]) -> tuple[list[dict], float, bool]:
+    items: list[dict] = []
+    total_usd = 0.0
+    requires_operator_review = False
+    for raw_item in raw_items:
+        product_id = str(raw_item.get("productId") or "").strip()
+        sku = str(raw_item.get("sku") or "").strip()
+        product = find_by_id(store.get("products", []), product_id) if product_id else None
+        if not product and sku:
+            product = next((item for item in store.get("products", []) if item.get("sku") == sku), None)
+        quantity = int(raw_item.get("quantity") or 0)
+        if quantity <= 0:
+            continue
+        if product:
+            product_id = product.get("id", product_id)
+            sku = product.get("sku", sku)
+            title = product.get("title", raw_item.get("title", sku))
+            unit_price = float(raw_item.get("unitPriceUsd") or product.get("b2bPriceUsd") or product.get("publicPriceUsd") or 0)
+            image_url = raw_item.get("imageUrl") or product.get("imageUrl", "")
+            requires_quote = bool(product.get("requiresQuote"))
+            requires_validation = bool(product.get("requiresTechnicalValidation"))
+        else:
+            title = str(raw_item.get("title") or sku or product_id or "Producto Wulkan")
+            unit_price = float(raw_item.get("unitPriceUsd") or 0)
+            image_url = raw_item.get("imageUrl", "")
+            requires_quote = bool(raw_item.get("requiresQuote"))
+            requires_validation = bool(raw_item.get("requiresTechnicalValidation"))
+        line_total = round(unit_price * quantity, 2)
+        total_usd += line_total
+        requires_operator_review = requires_operator_review or requires_quote or requires_validation
+        items.append(
+            {
+                "productId": product_id,
+                "sku": sku,
+                "title": title,
+                "quantity": quantity,
+                "unitPriceUsd": unit_price,
+                "lineTotalUsd": line_total,
+                "imageUrl": image_url,
+                "requiresQuote": requires_quote,
+                "requiresTechnicalValidation": requires_validation,
+            }
+        )
+    return items, round(total_usd, 2), requires_operator_review
+
+
+def build_commercial_order(
+    store: dict,
+    payload: dict,
+    *,
+    actor: dict | None = None,
+    default_channel: str = "mobile",
+) -> tuple[dict | None, str]:
+    actor = actor or {"id": "", "name": "Sistema", "role": "system"}
+    preview = payload.get("preview") or {}
+    customer_payload = payload.get("customer") or {}
+    customer_id = str(payload.get("customerId") or customer_payload.get("id") or "").strip()
+    client = find_by_id(store.get("clients", []), customer_id)
+    if not client:
+        return None, "Cliente no encontrado."
+    if client.get("mustChangePassword") and actor.get("role") == "client":
+        return None, "Debes cambiar la contrasena temporal antes de crear ordenes."
+
+    items, calculated_total_usd, requires_operator_review = normalize_order_items(
+        store,
+        payload.get("items") or [],
+    )
+    if not items:
+        return None, "La orden no tiene productos validos."
+
+    total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or calculated_total_usd)
+    exchange_rate = float(preview.get("exchangeRateUsdVes") or current_rate())
+    total_ves = float(preview.get("totalVes") or round(total_usd * exchange_rate, 2))
+    movements = store.get("credit_movements", [])
+    credit_before = credit_available(client, store.get("orders", []), movements)
+
+    requested_sale_type = (
+        payload.get("saleType")
+        or payload.get("paymentMethod")
+        or client.get("defaultSaleType")
+        or "cash"
+    )
+    sale_type = requested_sale_type if requested_sale_type in dict(SALE_TYPE_OPTIONS) else "cash"
+    allowed_terms = [
+        int(term)
+        for term in client.get("allowedPaymentTermsDays", [0])
+        if str(term).isdigit()
+    ] or [0]
+    payment_term_days = int(payload.get("paymentTermDays") or client.get("paymentTermsDays") or 0)
+    if sale_type == "term_credit" and payment_term_days not in allowed_terms:
+        return None, "El plazo solicitado no esta autorizado para este cliente."
+    if sale_type == "credit_line" and payment_term_days == 0:
+        payment_term_days = int(client.get("paymentTermsDays") or 0)
+    due_date = add_days_iso(utc_now(), payment_term_days) if payment_term_days > 0 else ""
+
+    seller_id = client.get("assignedSellerId", "")
+    seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
+    commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
+    commission_usd = round(total_usd * commission_rate / 100, 2)
+    can_use_credit = (
+        sale_type == "credit_line"
+        and client.get("status") == "active"
+        and client.get("creditEnabled")
+        and credit_before >= total_usd
+    )
+    credit_after = max(0.0, round(credit_before - total_usd, 2)) if can_use_credit else credit_before
+    credit_status = "approved" if can_use_credit else "manual_review"
+    if client.get("status") != "active":
+        credit_status = "client_not_active"
+    elif sale_type == "cash":
+        credit_status = "without_credit"
+    elif not client.get("creditEnabled"):
+        credit_status = "without_credit"
+
+    order_id = next_id("ord-mobile" if default_channel == "mobile" else "ord-assisted", client.get("businessName", "orden"))
+    status = "approved_with_credit" if can_use_credit and not requires_operator_review else "credit_review"
+    order = {
+        "id": order_id,
+        "orderId": order_id,
+        "customerId": client["id"],
+        "customer": {
+            "id": client["id"],
+            "name": client.get("businessName", "Cliente Wulkan"),
+            "businessName": client.get("businessName", "Cliente Wulkan"),
+            "taxId": client.get("taxId", ""),
+            "phone": client.get("phone", ""),
+            "sellerId": seller_id,
+            "sellerName": seller_name,
+        },
+        "items": items,
+        "totalUsd": total_usd,
+        "totalVes": total_ves,
+        "exchangeRateUsdVes": exchange_rate,
+        "saleType": sale_type,
+        "paymentTermDays": payment_term_days,
+        "dueDate": due_date,
+        "sellerId": seller_id,
+        "sellerName": seller_name,
+        "salesChannel": payload.get("salesChannel", default_channel),
+        "createdById": actor.get("id", ""),
+        "createdByName": actor.get("name", "Sistema"),
+        "createdByRole": actor.get("role", "system"),
+        "commissionRatePercent": commission_rate,
+        "commissionUsd": commission_usd,
+        "commissionStatus": "commission_pending" if commission_usd else "commission_cancelled",
+        "commissionPaidAt": "",
+        "commissionPaidBy": "",
+        "creditBeforeUsd": credit_before,
+        "creditAfterUsd": credit_after,
+        "creditStatus": credit_status,
+        "paidUsd": 0.0,
+        "balanceUsd": total_usd,
+        "paymentStatus": "pending",
+        "status": status,
+        "statusHistory": [
+            {
+                "status": status,
+                "note": f"Orden creada por {actor.get('name', 'Sistema')} con venta {sale_type_label(sale_type)}.",
+                "adminUserId": actor.get("id", ""),
+                "adminName": actor.get("name", "Sistema"),
+                "createdAt": utc_now(),
+            }
+        ],
+        "notes": str(payload.get("notes") or "").strip(),
+        "createdAt": utc_now(),
+        "updatedAt": utc_now(),
+    }
+    if status == "approved_with_credit" and not reserve_stock_for_order(store, order):
+        order["status"] = "credit_review"
+        order["creditStatus"] = "manual_review"
+        order["statusHistory"][0]["status"] = "credit_review"
+        order["statusHistory"][0]["note"] = "Orden creada; stock requiere revision operativa."
+    return order, ""
 
 
 def record_audit_event(
@@ -630,10 +1076,16 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["saleType"] = enriched.get("saleType", "cash")
     enriched["saleTypeLabel"] = sale_type_label(enriched["saleType"])
     enriched["paymentTermDays"] = int(enriched.get("paymentTermDays") or 0)
+    if not enriched.get("dueDate") and enriched["paymentTermDays"] > 0:
+        enriched["dueDate"] = add_days_iso(enriched.get("createdAt"), enriched["paymentTermDays"])
+    due_status, due_days = order_due_status(enriched)
+    enriched["dueStatus"] = due_status
+    enriched["dueDays"] = due_days
     enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
     enriched["commissionRatePercent"] = float(enriched.get("commissionRatePercent") or 0)
     enriched["commissionUsd"] = float(enriched.get("commissionUsd") or 0)
     enriched["commissionStatus"] = enriched.get("commissionStatus") or "commission_pending"
+    enriched["commissionStatusLabel"] = commission_status_label(enriched["commissionStatus"])
     customer = enriched.get("customer") or {}
     enriched["customerName"] = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
     enriched["itemsCount"] = len(enriched.get("items") or [])
@@ -1098,7 +1550,7 @@ def client_payload(existing: dict | None = None) -> dict:
 def clients_page_context(store: dict, error: str = "") -> dict:
     clients_list = [
         enrich_client(client, store["orders"], store.get("credit_movements", []))
-        for client in store["clients"]
+        for client in visible_clients_for_current_user(store)
     ]
     metrics = {
         "clients": len(clients_list),
@@ -1160,6 +1612,65 @@ def sellers_page_context(store: dict, error: str = "") -> dict:
         "sellers": sellers,
         "metrics": metrics,
         "error": error,
+    }
+
+
+def assisted_order_page_context(store: dict, error: str = "") -> dict:
+    clients_list = [
+        enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+        for client in visible_clients_for_current_user(store)
+        if client.get("status") == "active"
+    ]
+    products = [
+        enrich_inventory_product(product, store.get("orders", []))
+        for product in store.get("products", [])
+        if product.get("status") == "active"
+    ]
+    return {
+        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "products": sorted(products, key=lambda item: item.get("title", "")),
+        "sale_type_options": SALE_TYPE_OPTIONS,
+        "payment_terms": PAYMENT_TERM_OPTIONS,
+        "error": error,
+    }
+
+
+def assisted_order_payload_from_form() -> dict:
+    raw_items: list[dict] = []
+    for index in range(1, 7):
+        product_id = request.form.get(f"productId{index}", "").strip()
+        quantity = request.form.get(f"quantity{index}", "").strip()
+        if not product_id or not quantity:
+            continue
+        raw_items.append({"productId": product_id, "quantity": quantity})
+    return {
+        "customerId": request.form.get("customerId", "").strip(),
+        "items": raw_items,
+        "saleType": request.form.get("saleType", "cash"),
+        "paymentTermDays": request.form.get("paymentTermDays", "0"),
+        "salesChannel": "seller_assisted",
+        "notes": request.form.get("notes", "").strip(),
+        "preview": {"exchangeRateUsdVes": current_rate()},
+    }
+
+
+def commissions_page_context(store: dict) -> dict:
+    movements = store.get("credit_movements", [])
+    orders = [
+        enrich_order(order, movements)
+        for order in sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
+        if float(order.get("commissionUsd") or 0) > 0
+    ]
+    metrics = {
+        "pending": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_pending"),
+        "approved": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_approved"),
+        "paid": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_paid"),
+        "cancelled": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_cancelled"),
+    }
+    return {
+        "orders": orders,
+        "metrics": metrics,
+        "can_manage_commissions": role_allowed(COMMISSION_MANAGEMENT_ROLES),
     }
 
 
@@ -1375,6 +1886,8 @@ def clients():
 def client_edit(client_id: str):
     store = load_store()
     client = find_by_id(store["clients"], client_id)
+    if not can_access_client_record(client):
+        return forbidden_response()
     if client:
         error = client_form_error(store, client)
         if error:
@@ -1756,29 +2269,43 @@ def service_technician_delete(technician_id: str):
 def credit():
     store = load_store()
     movements = store.get("credit_movements", [])
+    visible_clients = visible_clients_for_current_user(store)
+    visible_client_ids = {client.get("id", "") for client in visible_clients}
+    visible_orders = visible_orders_for_current_user(store)
     clients_list = [
         enrich_client(client, store.get("orders", []), movements)
-        for client in store.get("clients", [])
+        for client in visible_clients
     ]
-    client_lookup = {client["id"]: client for client in store.get("clients", [])}
+    client_lookup = {client["id"]: client for client in visible_clients}
     payments = []
     for movement in movements:
         if movement.get("movementType") != "payment":
+            continue
+        if movement.get("clientId", "") not in visible_client_ids:
             continue
         enriched_movement = dict(movement)
         client = client_lookup.get(enriched_movement.get("clientId", ""))
         enriched_movement["clientName"] = client.get("businessName", "Cliente Wulkan") if client else "Cliente Wulkan"
         payments.append(enriched_movement)
+    due_orders = [
+        order
+        for order in [enrich_order(order, movements) for order in visible_orders]
+        if order.get("balanceUsd", 0) > 0
+        and order.get("saleType") in {"term_credit", "credit_line"}
+        and order.get("status") != "cancelled"
+    ]
     metrics = {
         "limit": sum(float(client.get("creditLimitUsd") or 0) for client in clients_list if client.get("creditEnabled")),
         "exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
         "available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
         "payments": sum(float(payment.get("amountUsd") or 0) for payment in payments),
+        "overdue": sum(float(order.get("balanceUsd") or 0) for order in due_orders if order.get("dueStatus") == "overdue"),
     }
     return render_template(
         "credit.html",
         clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
         payments=sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
+        due_orders=sorted(due_orders, key=lambda item: item.get("dueDate", "")),
         metrics=metrics,
         payment_terms=PAYMENT_TERM_OPTIONS,
         can_approve_credit=role_allowed(CREDIT_APPROVAL_ROLES),
@@ -1850,7 +2377,7 @@ def orders():
     movements = store.get("credit_movements", [])
     enriched_orders = [
         enrich_order(order, movements)
-        for order in sorted(store["orders"], key=lambda item: item.get("createdAt", ""), reverse=True)
+        for order in sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
     ]
     metrics = {
         "orders": len(enriched_orders),
@@ -1869,16 +2396,49 @@ def orders():
         status_options=ORDER_STATUS_OPTIONS,
         payment_methods=PAYMENT_METHOD_OPTIONS,
         sale_type_options=SALE_TYPE_OPTIONS,
+        can_manage_orders=role_allowed(COMMISSION_MANAGEMENT_ROLES),
+        can_create_assisted_order=role_allowed(SALES_ROLES),
         metrics=metrics,
     )
 
 
-@app.post("/orders/<order_id>/status")
+@app.route("/orders/new", methods=["GET", "POST"])
 @require_roles("super_admin", "commercial_manager", "operator", "sales")
+def order_new():
+    store = load_store()
+    if request.method == "POST":
+        payload = assisted_order_payload_from_form()
+        client = find_by_id(store.get("clients", []), payload.get("customerId", ""))
+        if not can_access_client_record(client):
+            return forbidden_response()
+        order, error = build_commercial_order(
+            store,
+            payload,
+            actor=order_actor(),
+            default_channel="seller_assisted",
+        )
+        if error:
+            return render_template("order_form.html", **assisted_order_page_context(store, error))
+        store["orders"].append(order)
+        record_audit_event(
+            store,
+            "create",
+            "order",
+            order["orderId"],
+            f"Pedido asistido creado para {order['customer'].get('name', 'Cliente Wulkan')}.",
+        )
+        save_store(store)
+        return redirect(url_for("orders"))
+
+    return render_template("order_form.html", **assisted_order_page_context(store))
+
+
+@app.post("/orders/<order_id>/status")
+@require_roles("super_admin", "commercial_manager", "operator")
 def order_status_update(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
-    if not order:
+    if not order or not can_access_order_record(order, store):
         return redirect(url_for("orders"))
 
     target_status = request.form.get("status", order.get("status", "credit_review"))
@@ -1932,11 +2492,11 @@ def order_status_update(order_id: str):
 
 
 @app.post("/orders/<order_id>/payments")
-@require_roles("super_admin", "commercial_manager", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator")
 def order_payment_create(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
-    if not order:
+    if not order or not can_access_order_record(order, store):
         return redirect(url_for("orders"))
 
     movements = store.setdefault("credit_movements", [])
@@ -1980,6 +2540,43 @@ def order_payment_create(order_id: str):
     record_audit_event(store, "payment", "order", order_id, f"Abono registrado por {money_usd(amount_usd)}.")
     save_store(store)
     return redirect(url_for("orders"))
+
+
+@app.get("/commissions")
+@require_roles("super_admin", "commercial_manager", "operator", "sales", "readonly")
+def commissions():
+    store = load_store()
+    return render_template("commissions.html", **commissions_page_context(store))
+
+
+@app.post("/commissions/<order_id>/status")
+@require_roles("super_admin", "commercial_manager", "operator")
+def commission_status_update(order_id: str):
+    store = load_store()
+    order = find_order(store.get("orders", []), order_id)
+    if not order:
+        return redirect(url_for("commissions"))
+    status = request.form.get("commissionStatus", order.get("commissionStatus", "commission_pending"))
+    if status not in {"commission_pending", "commission_approved", "commission_paid", "commission_cancelled"}:
+        return redirect(url_for("commissions"))
+    order["commissionStatus"] = status
+    order["updatedAt"] = utc_now()
+    if status == "commission_paid":
+        order["commissionPaidAt"] = utc_now()
+        order["commissionPaidBy"] = session.get("admin_name", "Admin")
+    elif status != "commission_paid":
+        order["commissionPaidAt"] = ""
+        order["commissionPaidBy"] = ""
+    append_order_history(order, order.get("status", "credit_review"), f"Comision marcada como {commission_status_label(status)}.")
+    record_audit_event(
+        store,
+        "commission_update",
+        "order",
+        order_id,
+        f"Comision actualizada a {commission_status_label(status)} por {session.get('admin_name', 'Admin')}.",
+    )
+    save_store(store)
+    return redirect(url_for("commissions"))
 
 
 @app.route("/announcements", methods=["GET", "POST"])
@@ -2068,106 +2665,41 @@ def announcement_delete(announcement_id: str):
 def api_create_order():
     store = load_store()
     payload = request.get_json(silent=True) or {}
-    preview = payload.get("preview") or {}
     customer_payload = payload.get("customer") or {}
     customer_id = mobile_token_client_id() or customer_payload.get("id", "")
     if app.config.get("REQUIRE_MOBILE_TOKEN") and not mobile_token_client_id():
         return jsonify({"error": "Token movil requerido."}), 401
-    client = find_by_id(store.get("clients", []), customer_id)
-    if client and not customer_payload:
-        customer_payload = {"id": client["id"], "name": client.get("businessName", "Cliente Wulkan")}
-    if client and client.get("mustChangePassword"):
-        return jsonify({"error": "Debes cambiar la contrasena temporal antes de crear ordenes."}), 403
-    order_id = next_id("ord-mobile", "checkout")
-    total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or 0)
-    movements = store.get("credit_movements", [])
-    credit_before = credit_available(client, store["orders"], movements) if client else 0.0
-    requested_sale_type = payload.get("saleType") or payload.get("paymentMethod") or (client or {}).get("defaultSaleType") or "cash"
-    sale_type = requested_sale_type if requested_sale_type in dict(SALE_TYPE_OPTIONS) else "cash"
-    allowed_terms = [
-        int(term)
-        for term in (client or {}).get("allowedPaymentTermsDays", [0])
-        if str(term).isdigit()
-    ] or [0]
-    payment_term_days = int(payload.get("paymentTermDays") or (client or {}).get("paymentTermsDays") or 0)
-    if sale_type == "term_credit" and payment_term_days not in allowed_terms:
-        payment_term_days = 0
-
-    seller_id = (client or {}).get("assignedSellerId", "")
-    seller_name = (client or {}).get("assignedSellerName", "") or seller_name_for(store, seller_id)
-    commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
-    commission_usd = round(total_usd * commission_rate / 100, 2)
-    credit_after = max(0.0, round(credit_before - total_usd, 2)) if sale_type == "credit_line" and client and client.get("creditEnabled") else credit_before
-    can_use_credit = (
-        sale_type == "credit_line"
-        and client is not None
-        and client.get("status") == "active"
-        and client.get("creditEnabled")
-        and credit_before >= total_usd
+    payload["customerId"] = customer_id
+    order, error = build_commercial_order(
+        store,
+        payload,
+        actor={"id": customer_id, "name": customer_payload.get("name", "Cliente Wulkan"), "role": "client"},
+        default_channel="mobile",
     )
-    credit_status = "approved" if can_use_credit else "manual_review"
-    if client and client.get("status") != "active":
-        credit_status = "client_not_active"
-    elif sale_type == "cash":
-        credit_status = "without_credit"
-    elif client and not client.get("creditEnabled"):
-        credit_status = "without_credit"
-    elif sale_type == "term_credit":
-        credit_status = "manual_review"
-    order = {
-        "id": order_id,
-        "orderId": order_id,
-        "customerId": customer_id,
-        "customer": customer_payload or {"name": "Cliente Wulkan"},
-        "items": payload.get("items") or [],
-        "totalUsd": total_usd,
-        "totalVes": float(preview.get("totalVes") or 0),
-        "exchangeRateUsdVes": float(preview.get("exchangeRateUsdVes") or current_rate()),
-        "saleType": sale_type,
-        "paymentTermDays": payment_term_days,
-        "sellerId": seller_id,
-        "sellerName": seller_name,
-        "salesChannel": payload.get("salesChannel", "mobile"),
-        "commissionRatePercent": commission_rate,
-        "commissionUsd": commission_usd,
-        "commissionStatus": "commission_pending" if commission_usd else "commission_cancelled",
-        "creditBeforeUsd": credit_before,
-        "creditAfterUsd": credit_after,
-        "creditStatus": credit_status,
-        "paidUsd": 0.0,
-        "balanceUsd": total_usd,
-        "paymentStatus": "pending",
-        "status": "approved_with_credit" if can_use_credit else "credit_review",
-        "statusHistory": [
-            {
-                "status": "approved_with_credit" if can_use_credit else "credit_review",
-                "note": f"Orden creada desde app movil con venta {sale_type_label(sale_type)}.",
-                "adminUserId": "",
-                "adminName": "Sistema",
-                "createdAt": utc_now(),
-            }
-        ],
-        "createdAt": utc_now(),
-        "updatedAt": utc_now(),
-    }
-    if can_use_credit and not reserve_stock_for_order(store, order):
-        order["status"] = "credit_review"
-        order["creditStatus"] = "manual_review"
-        order["statusHistory"][0]["status"] = "credit_review"
-        order["statusHistory"][0]["note"] = "Orden creada desde app movil; stock requiere revision."
+    if error:
+        return jsonify({"error": error}), 400
     store["orders"].append(order)
+    record_audit_event(
+        store,
+        "create",
+        "order",
+        order["orderId"],
+        f"Orden movil creada por {order['customer'].get('name', 'Cliente Wulkan')}.",
+        actor={"id": customer_id, "name": order["customer"].get("name", ""), "role": "client"},
+    )
     save_store(store)
     return jsonify(
         {
-            "orderId": order_id,
+            "orderId": order["orderId"],
             "status": order["status"],
-            "creditBeforeUsd": credit_before,
-            "creditAfterUsd": credit_after,
-            "balanceUsd": total_usd,
-            "saleType": sale_type,
-            "paymentTermDays": payment_term_days,
-            "sellerId": seller_id,
-            "sellerName": seller_name,
+            "creditBeforeUsd": order["creditBeforeUsd"],
+            "creditAfterUsd": order["creditAfterUsd"],
+            "balanceUsd": order["balanceUsd"],
+            "saleType": order["saleType"],
+            "paymentTermDays": order["paymentTermDays"],
+            "dueDate": order["dueDate"],
+            "sellerId": order["sellerId"],
+            "sellerName": order["sellerName"],
         }
     ), 201
 
@@ -2192,6 +2724,190 @@ def api_orders():
             )
         }
     )
+
+
+@app.get("/api/mobile/seller/summary")
+def api_mobile_seller_summary():
+    store = load_store()
+    user, auth_error = require_mobile_sales_user(store)
+    if auth_error:
+        return auth_error, 401
+
+    clients = seller_scope_clients(store, user)
+    orders = [enrich_order(order, store.get("credit_movements", [])) for order in seller_scope_orders(store, user)]
+    pending_credit = [
+        client for client in clients if client.get("creditRequestStatus") == "pending"
+    ]
+    return jsonify(
+        {
+            "summary": {
+                "sellerId": user["id"],
+                "sellerName": user.get("name", "Vendedor Wulkan"),
+                "role": user.get("role", ""),
+                "roleLabel": ROLE_LABELS.get(user.get("role", ""), "Vendedor"),
+                "clientsCount": len(clients),
+                "ordersCount": len(orders),
+                "pendingCreditRequests": len(pending_credit),
+                "salesUsd": round(sum(float(order.get("totalUsd") or 0) for order in orders), 2),
+                "openBalanceUsd": round(sum(float(order.get("balanceUsd") or 0) for order in orders), 2),
+                "pendingCommissionUsd": round(
+                    sum(
+                        float(order.get("commissionUsd") or 0)
+                        for order in orders
+                        if order.get("commissionStatus") == "commission_pending"
+                    ),
+                    2,
+                ),
+                "approvedCommissionUsd": round(
+                    sum(
+                        float(order.get("commissionUsd") or 0)
+                        for order in orders
+                        if order.get("commissionStatus") == "commission_approved"
+                    ),
+                    2,
+                ),
+                "paidCommissionUsd": round(
+                    sum(
+                        float(order.get("commissionUsd") or 0)
+                        for order in orders
+                        if order.get("commissionStatus") == "commission_paid"
+                    ),
+                    2,
+                ),
+            }
+        }
+    )
+
+
+@app.route("/api/mobile/seller/clients", methods=["GET", "POST"])
+def api_mobile_seller_clients():
+    store = load_store()
+    user, auth_error = require_mobile_sales_user(store)
+    if auth_error:
+        return auth_error, 401
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        email = str(payload.get("email") or "").strip().lower()
+        business_name = str(payload.get("businessName") or payload.get("name") or "").strip()
+        if not email or not business_name:
+            return jsonify({"error": "Nombre comercial y email son obligatorios."}), 400
+        duplicated = any(client.get("email", "").lower() == email for client in store.get("clients", []))
+        if duplicated:
+            return jsonify({"error": f"Ya existe un cliente con el email {email}."}), 409
+
+        seller_id = user["id"] if user.get("role") == "sales" else str(payload.get("assignedSellerId") or "").strip()
+        seller_name = user.get("name", "") if user.get("role") == "sales" else seller_name_for(store, seller_id)
+        requested_credit = float(payload.get("creditRequestedUsd") or 0)
+        raw_terms = payload.get("allowedPaymentTermsDays") or [0]
+        terms = [
+            int(term)
+            for term in raw_terms
+            if str(term).strip().isdigit() and int(term) in PAYMENT_TERM_OPTIONS
+        ] or [0]
+        temporary_password = str(payload.get("password") or secrets.token_urlsafe(10))
+        client = {
+            "id": next_id("client", email or business_name),
+            "businessName": business_name,
+            "taxId": str(payload.get("taxId") or "").strip(),
+            "contactName": str(payload.get("contactName") or "").strip(),
+            "phone": str(payload.get("phone") or "").strip(),
+            "email": email,
+            "clientType": "ferretero",
+            "status": "active",
+            "address": str(payload.get("address") or "").strip(),
+            "state": str(payload.get("state") or "").strip(),
+            "city": str(payload.get("city") or "").strip(),
+            "deliveryZone": str(payload.get("deliveryZone") or "").strip(),
+            "assignedSellerId": seller_id,
+            "assignedSellerName": seller_name,
+            "defaultSaleType": str(payload.get("defaultSaleType") or "cash"),
+            "allowedPaymentTermsDays": terms,
+            "creditRequestStatus": "pending" if requested_credit > 0 else "none",
+            "creditRequestedUsd": requested_credit,
+            "creditEnabled": False,
+            "creditLimitUsd": 0.0,
+            "creditUsedUsd": 0.0,
+            "paymentTermsDays": 0,
+            "notes": str(payload.get("notes") or "").strip(),
+            "passwordHash": generate_password_hash(temporary_password),
+            "mustChangePassword": True,
+            "createdAt": utc_now(),
+            "updatedAt": utc_now(),
+        }
+        store["clients"].append(client)
+        record_audit_event(
+            store,
+            "create",
+            "client",
+            client["id"],
+            f"Cliente creado desde app movil vendedor: {client['businessName']}.",
+            actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
+        )
+        save_store(store)
+        response = mobile_seller_client_payload(client, store)
+        response["temporaryPassword"] = temporary_password
+        return jsonify({"client": response}), 201
+
+    clients = [
+        mobile_seller_client_payload(client, store)
+        for client in sorted(seller_scope_clients(store, user), key=lambda item: item.get("businessName", ""))
+    ]
+    return jsonify({"items": clients})
+
+
+@app.route("/api/mobile/seller/orders", methods=["GET", "POST"])
+def api_mobile_seller_orders():
+    store = load_store()
+    user, auth_error = require_mobile_sales_user(store)
+    if auth_error:
+        return auth_error, 401
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        customer_id = str(payload.get("customerId") or (payload.get("customer") or {}).get("id") or "").strip()
+        if not can_mobile_seller_access_client(store, user, customer_id):
+            return jsonify({"error": "Cliente fuera de tu cartera."}), 403
+        payload["customerId"] = customer_id
+        order, error = build_commercial_order(
+            store,
+            payload,
+            actor={"id": user["id"], "name": user.get("name", "Vendedor Wulkan"), "role": user.get("role", "sales")},
+            default_channel="seller_mobile",
+        )
+        if error:
+            return jsonify({"error": error}), 400
+        store["orders"].append(order)
+        record_audit_event(
+            store,
+            "create",
+            "order",
+            order["orderId"],
+            f"Pedido asistido movil creado por {user.get('name', 'Vendedor Wulkan')}.",
+            actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
+        )
+        save_store(store)
+        return jsonify({"order": mobile_seller_order_payload(order, store), "orderId": order["orderId"]}), 201
+
+    orders = [
+        mobile_seller_order_payload(order, store)
+        for order in sorted(seller_scope_orders(store, user), key=lambda item: item.get("createdAt", ""), reverse=True)
+    ]
+    return jsonify({"items": orders})
+
+
+@app.get("/api/mobile/seller/commissions")
+def api_mobile_seller_commissions():
+    store = load_store()
+    user, auth_error = require_mobile_sales_user(store)
+    if auth_error:
+        return auth_error, 401
+    orders = [
+        mobile_seller_order_payload(order, store)
+        for order in sorted(seller_scope_orders(store, user), key=lambda item: item.get("createdAt", ""), reverse=True)
+        if float(order.get("commissionUsd") or 0) > 0
+    ]
+    return jsonify({"items": orders})
 
 
 @app.get("/api/mobile/credit")
@@ -2260,58 +2976,57 @@ def api_client_login():
         ),
         None,
     )
-    if not client or not check_password_hash(client.get("passwordHash", ""), password):
-        register_login_failure("mobile", email)
+    if client and check_password_hash(client.get("passwordHash", ""), password):
+        reset_login_attempts("mobile", email)
+        client["lastLoginAt"] = utc_now()
+        access_token = issue_mobile_token(client)
         record_audit_event(
             store,
-            "login_failed",
+            "login",
             "client",
-            email,
-            "Intento fallido de inicio de sesion movil.",
-            actor={"id": email, "name": email or "desconocido", "role": "mobile"},
+            client["id"],
+            "Inicio de sesion movil.",
+            actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
         )
         save_store(store)
-        return jsonify({"error": "Credenciales invalidas."}), 401
+        return jsonify(mobile_customer_payload(client, store, access_token))
 
-    reset_login_attempts("mobile", email)
-    client["lastLoginAt"] = utc_now()
-    enriched = enrich_client(client, store["orders"], store.get("credit_movements", []))
-    access_token = issue_mobile_token(client)
+    admin_user = next(
+        (
+            user
+            for user in store.get("admin_users", [])
+            if user.get("email", "").lower() == email
+            and user.get("status") == "active"
+            and user.get("role") in MOBILE_SALES_ROLES
+        ),
+        None,
+    )
+    if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
+        reset_login_attempts("mobile", email)
+        admin_user["lastMobileLoginAt"] = utc_now()
+        access_token = issue_mobile_admin_token(admin_user)
+        record_audit_event(
+            store,
+            "login",
+            "admin_user",
+            admin_user["id"],
+            "Inicio de sesion movil operativo.",
+            actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": admin_user.get("role", "")},
+        )
+        save_store(store)
+        return jsonify(mobile_admin_payload(admin_user, access_token))
+
+    register_login_failure("mobile", email)
     record_audit_event(
         store,
-        "login",
-        "client",
-        client["id"],
-        "Inicio de sesion movil.",
-        actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
+        "login_failed",
+        "mobile_user",
+        email,
+        "Intento fallido de inicio de sesion movil.",
+        actor={"id": email, "name": email or "desconocido", "role": "mobile"},
     )
     save_store(store)
-    return jsonify(
-        {
-            "accessToken": access_token,
-            "tokenType": "Bearer",
-            "customer": {
-                "id": enriched["id"],
-                "businessName": enriched["businessName"],
-                "email": enriched["email"],
-                "clientType": enriched["clientType"],
-                "creditEnabled": enriched["creditEnabled"],
-                "creditLimitUsd": enriched["creditLimitUsd"],
-                "creditUsedUsd": enriched["creditUsedUsd"],
-                "creditOrdersUsd": enriched["creditOrdersUsd"],
-                "creditExposureUsd": enriched["creditExposureUsd"],
-                "creditAvailableUsd": enriched["creditAvailableUsd"],
-                "paymentTermsDays": enriched["paymentTermsDays"],
-                "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
-                "defaultSaleType": enriched.get("defaultSaleType", "cash"),
-                "assignedSeller": {
-                    "id": enriched.get("assignedSellerId", ""),
-                    "name": enriched.get("assignedSellerName", ""),
-                },
-                "mustChangePassword": bool(enriched.get("mustChangePassword")),
-            }
-        }
-    )
+    return jsonify({"error": "Credenciales invalidas."}), 401
 
 
 @app.post("/api/mobile/auth/change-password")

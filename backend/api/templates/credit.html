@@ -30,10 +30,10 @@
   </div>
   <div class="col-12 col-md-3">
     <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
-      <span>Abonos</span>
-      <strong>{{ money_usd(metrics.payments) }}</strong>
-      <em>Manual</em>
+      <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
+      <span>Vencido</span>
+      <strong>{{ money_usd(metrics.overdue) }}</strong>
+      <em>Cobranza</em>
     </article>
   </div>
 </section>
@@ -155,6 +155,52 @@
 </div>
 {% endfor %}
 {% endif %}
+
+<section class="panel category-panel mb-3">
+  <div class="panel-header">
+    <div>
+      <h2>Vencimientos por cobrar</h2>
+      <span>Ordenes a credito o linea aprobada con saldo pendiente.</span>
+    </div>
+    <span>{{ due_orders | length }} ordenes</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Vence</th>
+          <th>Orden</th>
+          <th>Cliente</th>
+          <th>Vendedor</th>
+          <th>Condicion</th>
+          <th>Saldo</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in due_orders %}
+        <tr>
+          <td>
+            <span class="badge {{ order.dueStatus | badge_class }}">{{ order.dueStatus }}</span>
+            <small class="d-block text-secondary">{{ order.dueDate or 'Sin fecha' }}</small>
+          </td>
+          <td><strong>{{ order.orderId }}</strong></td>
+          <td>{{ order.customerName }}</td>
+          <td>{{ order.sellerName }}</td>
+          <td>
+            <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
+            <small class="d-block text-secondary">{{ order.paymentTermDays }} dias</small>
+          </td>
+          <td><strong>{{ money_usd(order.balanceUsd) }}</strong></td>
+          <td><span class="badge {{ order.status | badge_class }}">{{ order.status }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-secondary">Sin vencimientos abiertos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
 <section class="panel category-panel">
   <div class="panel-header">

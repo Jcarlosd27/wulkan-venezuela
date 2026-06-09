@@ -14,6 +14,7 @@ class MobileUserSession {
     required this.email,
     required this.roleLabel,
     required this.isAuthenticated,
+    this.accountRole = "client",
     this.accessToken = "",
     this.mustChangePassword = false,
     this.allowedPaymentTermsDays = const [0],
@@ -26,11 +27,17 @@ class MobileUserSession {
   final String email;
   final String roleLabel;
   final bool isAuthenticated;
+  final String accountRole;
   final String accessToken;
   final bool mustChangePassword;
   final List<int> allowedPaymentTermsDays;
   final String defaultSaleType;
   final MobileSellerSnapshot assignedSeller;
+
+  bool get isClient => accountRole == "client";
+  bool get isSeller => accountRole == "sales";
+  bool get isCommercialManager => accountRole == "commercial_manager";
+  bool get isMobileSalesUser => isSeller || isCommercialManager || accountRole == "super_admin";
 }
 
 abstract class MobileAuthRepository {
@@ -70,16 +77,24 @@ class MockMobileAuthRepository implements MobileAuthRepository {
       throw StateError("Ingresa correo y contrasena.");
     }
 
+    final normalizedEmail = email.trim().toLowerCase();
+    final isSeller = normalizedEmail.contains("vendedor") ||
+        normalizedEmail.contains("seller") ||
+        normalizedEmail.contains("ventas");
+
     _session = MobileUserSession(
-      id: "client-ferreteria-valencia",
-      name: email.trim().toLowerCase() == "ferreteria@wulkan.local"
-          ? "Ferreteria Demo Valencia"
-          : "Cliente Wulkan",
-      email: email.trim().toLowerCase(),
-      roleLabel: "Ferretero B2B",
+      id: isSeller ? "admin-seller-demo" : "client-ferreteria-valencia",
+      name: isSeller
+          ? "Vendedor Wulkan"
+          : (normalizedEmail == "ferreteria@wulkan.local"
+              ? "Ferreteria Demo Valencia"
+              : "Cliente Wulkan"),
+      email: normalizedEmail,
+      roleLabel: isSeller ? "Vendedor" : "Ferretero B2B",
       isAuthenticated: true,
+      accountRole: isSeller ? "sales" : "client",
       allowedPaymentTermsDays: const [0, 15, 30],
-      defaultSaleType: "term_credit",
+      defaultSaleType: isSeller ? "cash" : "term_credit",
       assignedSeller: const MobileSellerSnapshot(
         id: "seller-demo",
         name: "Vendedor Wulkan",
@@ -164,13 +179,19 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
       final sellerData = assignedSeller is Map<String, dynamic>
           ? assignedSeller
           : <String, dynamic>{};
+      final accountRole = data["accountRole"]?.toString() ??
+          data["clientType"]?.toString() ??
+          "client";
+      final roleLabel = data["roleLabel"]?.toString() ??
+          (accountRole == "sales" ? "Vendedor" : "Ferretero B2B");
 
       _session = MobileUserSession(
         id: data["id"]?.toString() ?? "",
         name: data["businessName"]?.toString() ?? "Cliente Wulkan",
         email: data["email"]?.toString() ?? email,
-        roleLabel: "Ferretero B2B",
+        roleLabel: roleLabel,
         isAuthenticated: true,
+        accountRole: accountRole,
         accessToken: token,
         mustChangePassword: data["mustChangePassword"] == true,
         allowedPaymentTermsDays:
@@ -226,6 +247,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         email: session.email,
         roleLabel: session.roleLabel,
         isAuthenticated: session.isAuthenticated,
+        accountRole: session.accountRole,
         accessToken: session.accessToken,
         mustChangePassword: false,
         allowedPaymentTermsDays: session.allowedPaymentTermsDays,
@@ -252,6 +274,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         "name": session.name,
         "email": session.email,
         "roleLabel": session.roleLabel,
+        "accountRole": session.accountRole,
         "accessToken": session.accessToken,
         "mustChangePassword": session.mustChangePassword,
         "allowedPaymentTermsDays": session.allowedPaymentTermsDays,
@@ -292,6 +315,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         email: payload["email"]?.toString() ?? "",
         roleLabel: payload["roleLabel"]?.toString() ?? "Ferretero B2B",
         isAuthenticated: true,
+        accountRole: payload["accountRole"]?.toString() ?? "client",
         accessToken: token,
         mustChangePassword: payload["mustChangePassword"] == true,
         allowedPaymentTermsDays: _asIntList(
@@ -340,6 +364,7 @@ class FirebaseMobileAuthRepository implements MobileAuthRepository {
       email: user.email ?? "",
       roleLabel: role ?? "Usuario autenticado",
       isAuthenticated: true,
+      accountRole: role ?? "client",
     );
   }
 

@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% set heading = "Comisiones" %}
+{% set description = "Controla comisiones por vendedor, orden, estado de venta y liquidacion comercial." %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
+      <span>Pendientes</span>
+      <strong>{{ money_usd(metrics.pending) }}</strong>
+      <em>Por validar</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Aprobadas</span>
+      <strong>{{ money_usd(metrics.approved) }}</strong>
+      <em>Liquidables</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
+      <span>Pagadas</span>
+      <strong>{{ money_usd(metrics.paid) }}</strong>
+      <em>Historial</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-x-circle"></i></div>
+      <span>Anuladas</span>
+      <strong>{{ money_usd(metrics.cancelled) }}</strong>
+      <em>No paga</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Liquidacion por orden</h2>
+      <span>La comision se aprueba al entregar o pagar; se liquida manualmente cuando Wulkan la pague.</span>
+    </div>
+    <span>{{ orders | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Orden</th>
+          <th>Vendedor</th>
+          <th>Cliente</th>
+          <th>Venta</th>
+          <th>Comision</th>
+          <th>Estado</th>
+          <th>Liquidacion</th>
+          {% if can_manage_commissions %}<th class="text-end">Accion</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in orders %}
+        <tr>
+          <td>
+            <strong class="d-block">{{ order.orderId }}</strong>
+            <small class="text-secondary">{{ order.createdAt }}</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ order.sellerName }}</strong>
+            <small class="text-secondary">{{ order.commissionRatePercent }}%</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ order.customerName }}</strong>
+            <small class="text-secondary">{{ order.customerId }}</small>
+          </td>
+          <td>
+            <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
+            <small class="d-block text-secondary">{{ money_usd(order.totalUsd) }}</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(order.commissionUsd) }}</strong>
+            <small class="d-block text-secondary">Saldo {{ money_usd(order.balanceUsd) }}</small>
+          </td>
+          <td>
+            <span class="badge {{ order.commissionStatus | badge_class }}">{{ order.commissionStatusLabel }}</span>
+            <small class="d-block text-secondary">{{ order.status }}</small>
+          </td>
+          <td>
+            {% if order.commissionPaidAt %}
+            <strong class="d-block">{{ order.commissionPaidBy }}</strong>
+            <small class="text-secondary">{{ order.commissionPaidAt }}</small>
+            {% else %}
+            <span class="text-secondary">Sin liquidar</span>
+            {% endif %}
+          </td>
+          {% if can_manage_commissions %}
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#commissionModal{{ loop.index }}">
+              <i class="bi bi-pencil"></i> Estado
+            </button>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="{{ 8 if can_manage_commissions else 7 }}">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-percent"></i></div>
+              <strong>Sin comisiones registradas</strong>
+              <span>Las ordenes con vendedor y porcentaje de comision apareceran aqui.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if can_manage_commissions %}
+{% for order in orders %}
+<div class="modal fade" id="commissionModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" action="{{ url_for('commission_status_update', order_id=order.orderId) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Actualizar comision</h2>
+          <p class="mb-0 text-secondary">{{ order.orderId }} - {{ order.sellerName }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-semibold">Estado de comision</label>
+        <select class="form-select" name="commissionStatus">
+          <option value="commission_pending" {% if order.commissionStatus == 'commission_pending' %}selected{% endif %}>Pendiente</option>
+          <option value="commission_approved" {% if order.commissionStatus == 'commission_approved' %}selected{% endif %}>Aprobada</option>
+          <option value="commission_paid" {% if order.commissionStatus == 'commission_paid' %}selected{% endif %}>Pagada</option>
+          <option value="commission_cancelled" {% if order.commissionStatus == 'commission_cancelled' %}selected{% endif %}>Anulada</option>
+        </select>
+        <div class="form-text">Marcar como pagada registra usuario y fecha de liquidacion.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

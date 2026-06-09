@@ -436,6 +436,13 @@ class _WulkanShellState extends State<WulkanShell> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.session.isMobileSalesUser) {
+      return _SellerShell(
+        session: widget.session,
+        onSignOut: widget.onSignOut,
+      );
+    }
+
     final screens = [
       HomeScreen(
         session: widget.session,
@@ -532,6 +539,118 @@ class _WulkanShellState extends State<WulkanShell> {
   }
 }
 
+class _SellerShell extends StatefulWidget {
+  const _SellerShell({
+    required this.session,
+    required this.onSignOut,
+  });
+
+  final MobileUserSession session;
+  final Future<void> Function() onSignOut;
+
+  @override
+  State<_SellerShell> createState() => _SellerShellState();
+}
+
+class _SellerShellState extends State<_SellerShell> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      SellerHomeScreen(
+        session: widget.session,
+        onOpenCatalog: () => setState(() => _index = 1),
+        onOpenOrder: () => setState(() => _index = 2),
+        onOpenClients: () => setState(() => _index = 3),
+      ),
+      const CatalogScreen(),
+      SellerCartScreen(
+        session: widget.session,
+        onOpenCatalog: () => setState(() => _index = 1),
+      ),
+      const SellerClientsScreen(),
+      const SellerCommissionsScreen(),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const WulkanLogo(compact: true),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Ventas Wulkan',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  ),
+                  Text(
+                    widget.session.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _wulkanMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        centerTitle: false,
+        toolbarHeight: 64,
+        actions: [
+          ValueListenableBuilder<List<MobileCartItem>>(
+            valueListenable: mobileCartController,
+            builder: (context, items, _) {
+              final count =
+                  items.fold<int>(0, (total, item) => total + item.quantity);
+              return IconButton(
+                tooltip: 'Pedido asistido',
+                onPressed: () => setState(() => _index = 2),
+                icon: Badge(
+                  isLabelVisible: count > 0,
+                  backgroundColor: _wulkanOrange,
+                  label: Text(count.toString()),
+                  child: const Icon(Icons.assignment_add),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Cerrar sesion',
+            onPressed: widget.onSignOut,
+            icon: const Icon(Icons.logout),
+          ),
+        ],
+      ),
+      body: screens[_index],
+      bottomNavigationBar: NavigationBar(
+        height: 72,
+        selectedIndex: _index,
+        onDestinationSelected: (value) => setState(() => _index = value),
+        destinations: const [
+          NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined), label: 'Inicio'),
+          NavigationDestination(
+              icon: Icon(Icons.grid_view_outlined), label: 'Catalogo'),
+          NavigationDestination(
+              icon: Icon(Icons.assignment_add), label: 'Pedido'),
+          NavigationDestination(
+              icon: Icon(Icons.storefront_outlined), label: 'Clientes'),
+          NavigationDestination(
+              icon: Icon(Icons.payments_outlined), label: 'Comisiones'),
+        ],
+      ),
+    );
+  }
+}
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
@@ -580,6 +699,683 @@ class HomeScreen extends StatelessWidget {
           onOpenCart: onOpenCart,
         ),
       ],
+    );
+  }
+}
+
+class SellerHomeScreen extends StatelessWidget {
+  const SellerHomeScreen({
+    super.key,
+    required this.session,
+    required this.onOpenCatalog,
+    required this.onOpenOrder,
+    required this.onOpenClients,
+  });
+
+  final MobileUserSession session;
+  final VoidCallback onOpenCatalog;
+  final VoidCallback onOpenOrder;
+  final VoidCallback onOpenClients;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+      children: [
+        _SearchBox(
+          labelText: 'Buscar producto para pedido asistido',
+          readOnly: true,
+          onTap: onOpenCatalog,
+        ),
+        const SizedBox(height: 14),
+        _SellerSummaryCard(
+          session: session,
+          onOpenOrder: onOpenOrder,
+          onOpenClients: onOpenClients,
+        ),
+        const SizedBox(height: 18),
+        _SectionTitle(
+          title: 'Ordenes de cartera',
+          actionLabel: 'Tomar pedido',
+          onAction: onOpenOrder,
+        ),
+        const _SellerOrdersPreview(),
+      ],
+    );
+  }
+}
+
+class _SellerSummaryCard extends StatelessWidget {
+  const _SellerSummaryCard({
+    required this.session,
+    required this.onOpenOrder,
+    required this.onOpenClients,
+  });
+
+  final MobileUserSession session;
+  final VoidCallback onOpenOrder;
+  final VoidCallback onOpenClients;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<MobileSellerSummary>(
+      future: mobileRepository.getSellerSummary(),
+      builder: (context, snapshot) {
+        final summary = snapshot.data;
+        final isLoading = snapshot.connectionState != ConnectionState.done;
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            color: _wulkanBlack,
+            boxShadow: [
+              BoxShadow(
+                color: _wulkanBlack.withValues(alpha: 0.14),
+                blurRadius: 28,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const _SoftIcon(
+                    icon: Icons.badge_outlined,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          session.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleLarge
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                              ),
+                        ),
+                        Text(
+                          summary?.roleLabel ?? session.roleLabel,
+                          style: const TextStyle(
+                            color: Color(0xFFD4D4D4),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _StatusPill(
+                    label: isLoading ? 'Sync' : 'Cartera',
+                    color: Colors.white,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DarkMetric(
+                      label: 'Clientes',
+                      value: isLoading
+                          ? '...'
+                          : '${summary?.clientsCount ?? 0}',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DarkMetric(
+                      label: 'Ventas',
+                      value: isLoading
+                          ? '...'
+                          : 'USD ${(summary?.salesUsd ?? 0).toStringAsFixed(0)}',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DarkMetric(
+                      label: 'Comision pend.',
+                      value: isLoading
+                          ? '...'
+                          : 'USD ${(summary?.pendingCommissionUsd ?? 0).toStringAsFixed(2)}',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DarkMetric(
+                      label: 'Credito por aprobar',
+                      value: isLoading
+                          ? '...'
+                          : '${summary?.pendingCreditRequests ?? 0}',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onOpenOrder,
+                      icon: const Icon(Icons.assignment_add),
+                      label: const Text('Pedido'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onOpenClients,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white54),
+                      ),
+                      icon: const Icon(Icons.storefront_outlined),
+                      label: const Text('Clientes'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DarkMetric extends StatelessWidget {
+  const _DarkMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.08),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFFD4D4D4),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerOrdersPreview extends StatelessWidget {
+  const _SellerOrdersPreview();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<MobileOrderSummary>>(
+      future: mobileRepository.listSellerOrders(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const _LoadingState();
+        }
+
+        final orders = snapshot.data ?? [];
+        if (orders.isEmpty) {
+          return const _EmptyState(message: 'Sin ordenes de cartera todavia');
+        }
+
+        return Column(
+          children: [
+            for (final order in orders.take(4))
+              _SellerOrderCard(order: order, showCommission: false),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class SellerCartScreen extends StatefulWidget {
+  const SellerCartScreen({
+    super.key,
+    required this.session,
+    required this.onOpenCatalog,
+  });
+
+  final MobileUserSession session;
+  final VoidCallback onOpenCatalog;
+
+  @override
+  State<SellerCartScreen> createState() => _SellerCartScreenState();
+}
+
+class _SellerCartScreenState extends State<SellerCartScreen> {
+  String _selectedClientId = "";
+  String _saleType = "cash";
+  int _paymentTermDays = 10;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<MobileCartItem>>(
+      valueListenable: mobileCartController,
+      builder: (context, items, _) {
+        if (items.isEmpty) {
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _SectionTitle(title: 'Pedido asistido'),
+              const _EmptyState(
+                message: 'Agrega productos del catalogo para tomar un pedido',
+              ),
+              FilledButton.icon(
+                onPressed: widget.onOpenCatalog,
+                icon: const Icon(Icons.search),
+                label: const Text('Explorar catalogo'),
+              ),
+            ],
+          );
+        }
+
+        final preview = mobileCartService.calculatePreview(items);
+
+        return FutureBuilder<List<MobileSellerClient>>(
+          future: mobileRepository.listSellerClients(),
+          builder: (context, snapshot) {
+            final clients = snapshot.data ?? [];
+            if (_selectedClientId.isEmpty && clients.isNotEmpty) {
+              _selectedClientId = clients.first.id;
+            }
+
+            final selectedTerm =
+                _saleType == "term_credit" ? _paymentTermDays : 0;
+            final draft = MobileSecureOrderDraft(
+              items: items,
+              preview: preview,
+              customerId: _selectedClientId,
+              saleType: _saleType,
+              paymentTermDays: selectedTerm,
+            );
+
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Row(
+                  children: [
+                    const Expanded(child: _SectionTitle(title: 'Pedido asistido')),
+                    TextButton.icon(
+                      onPressed: mobileCartController.clear,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Vaciar'),
+                    ),
+                  ],
+                ),
+                if (snapshot.connectionState != ConnectionState.done)
+                  const _InfoPanel(
+                    title: 'Cliente',
+                    lines: ['Cargando cartera comercial...'],
+                  )
+                else if (clients.isEmpty)
+                  const _InfoPanel(
+                    title: 'Cliente',
+                    lines: ['No tienes clientes asignados para tomar pedidos.'],
+                  )
+                else
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Cliente ferretero',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: 12),
+                          DropdownButtonFormField<String>(
+                            initialValue: _selectedClientId,
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.storefront_outlined),
+                            ),
+                            items: [
+                              for (final client in clients)
+                                DropdownMenuItem(
+                                  value: client.id,
+                                  child: Text(client.businessName),
+                                ),
+                            ],
+                            onChanged: (value) => setState(
+                              () => _selectedClientId = value ?? "",
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                for (final item in items)
+                  _CartItemTile(
+                    item: item,
+                    onIncrement: () =>
+                        mobileCartController.increment(item.productId),
+                    onDecrement: () =>
+                        mobileCartController.decrement(item.productId),
+                    onRemove: () => mobileCartController.remove(item.productId),
+                  ),
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Condicion de venta',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _SaleTypeChip(
+                              label: 'Efectivo',
+                              selected: _saleType == "cash",
+                              onSelected: () =>
+                                  setState(() => _saleType = "cash"),
+                            ),
+                            _SaleTypeChip(
+                              label: 'Credito dias',
+                              selected: _saleType == "term_credit",
+                              onSelected: () =>
+                                  setState(() => _saleType = "term_credit"),
+                            ),
+                            _SaleTypeChip(
+                              label: 'Linea de credito',
+                              selected: _saleType == "credit_line",
+                              onSelected: () =>
+                                  setState(() => _saleType = "credit_line"),
+                            ),
+                          ],
+                        ),
+                        if (_saleType == "term_credit") ...[
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final term in const [10, 15, 20, 30, 40])
+                                _SaleTypeChip(
+                                  label: '$term dias',
+                                  selected: _paymentTermDays == term,
+                                  onSelected: () => setState(
+                                    () => _paymentTermDays = term,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+                        _InfoPanel(
+                          title: 'Resumen',
+                          compact: true,
+                          lines: [
+                            'Total USD ${preview.totalUsd.toStringAsFixed(2)}',
+                            'Referencia VES ${preview.totalVes.toStringAsFixed(2)}',
+                            'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        _CreateOrderButton(
+                          draft: draft,
+                          session: widget.session,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class SellerClientsScreen extends StatelessWidget {
+  const SellerClientsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<MobileSellerClient>>(
+      future: mobileRepository.listSellerClients(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const _LoadingState();
+        }
+
+        final clients = snapshot.data ?? [];
+        if (clients.isEmpty) {
+          return const _EmptyState(message: 'Sin clientes asignados');
+        }
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const _SectionTitle(title: 'Clientes asignados'),
+            for (final client in clients) _SellerClientCard(client: client),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SellerClientCard extends StatelessWidget {
+  const _SellerClientCard({required this.client});
+
+  final MobileSellerClient client;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _sellerCreditStatus(client);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SoftIcon(icon: Icons.storefront_outlined, color: status.color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    client.businessName,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [client.city, client.state]
+                        .where((item) => item.isNotEmpty)
+                        .join(' - '),
+                    style: const TextStyle(
+                      color: _wulkanMuted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Disponible USD ${client.creditAvailableUsd.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  Text(
+                    client.email,
+                    style: const TextStyle(color: _wulkanMuted),
+                  ),
+                ],
+              ),
+            ),
+            _StatusPill(label: status.label, color: status.color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+({String label, Color color}) _sellerCreditStatus(MobileSellerClient client) {
+  if (client.creditRequestStatus == "pending") {
+    return (label: 'Por aprobar', color: const Color(0xFFFFC107));
+  }
+  if (!client.creditEnabled) {
+    return (label: 'Contado', color: _wulkanMuted);
+  }
+  if (client.creditAvailableUsd <= 0) {
+    return (label: 'Sin cupo', color: const Color(0xFFDC3545));
+  }
+  return (label: 'Credito', color: const Color(0xFF198754));
+}
+
+class SellerCommissionsScreen extends StatelessWidget {
+  const SellerCommissionsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<MobileOrderSummary>>(
+      future: mobileRepository.listSellerCommissions(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const _LoadingState();
+        }
+
+        final orders = snapshot.data ?? [];
+        if (orders.isEmpty) {
+          return const _EmptyState(message: 'Sin comisiones registradas');
+        }
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const _SectionTitle(title: 'Comisiones'),
+            for (final order in orders)
+              _SellerOrderCard(order: order, showCommission: true),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SellerOrderCard extends StatelessWidget {
+  const _SellerOrderCard({
+    required this.order,
+    required this.showCommission,
+  });
+
+  final MobileOrderSummary order;
+  final bool showCommission;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _customerOrderStatus(order.status, order.paymentStatus);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SoftIcon(icon: status.icon, color: status.color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    order.customerName.isEmpty
+                        ? order.id
+                        : order.customerName,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${order.saleTypeLabel} - ${status.label}',
+                    style: const TextStyle(
+                      color: _wulkanMuted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Total USD ${order.totalUsd.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  if (showCommission)
+                    Text(
+                      'Comision USD ${order.commissionUsd.toStringAsFixed(2)} - ${order.commissionStatusLabel}',
+                      style: const TextStyle(
+                        color: _wulkanMuted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    )
+                  else
+                    Text(
+                      'Saldo USD ${order.balanceUsd.toStringAsFixed(2)}',
+                      style: const TextStyle(color: _wulkanMuted),
+                    ),
+                ],
+              ),
+            ),
+            _StatusPill(label: status.label, color: status.color),
+          ],
+        ),
+      ),
     );
   }
 }

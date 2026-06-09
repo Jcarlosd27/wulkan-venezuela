@@ -299,6 +299,18 @@ class MobileOrderSummary {
     required this.createdAt,
     required this.paymentStatus,
     required this.stockStatus,
+    this.customerId = "",
+    this.customerName = "",
+    this.sellerId = "",
+    this.sellerName = "",
+    this.saleType = "cash",
+    this.saleTypeLabel = "Contado",
+    this.paymentTermDays = 0,
+    this.dueDate,
+    this.dueStatus = "without_due_date",
+    this.commissionUsd = 0,
+    this.commissionStatus = "",
+    this.commissionStatusLabel = "",
   });
 
   final String id;
@@ -310,4 +322,74 @@ class MobileOrderSummary {
   final DateTime createdAt;
   final String paymentStatus;
   final String stockStatus;
+  final String customerId;
+  final String customerName;
+  final String sellerId;
+  final String sellerName;
+  final String saleType;
+  final String saleTypeLabel;
+  final int paymentTermDays;
+  final DateTime? dueDate;
+  final String dueStatus;
+  final double commissionUsd;
+  final String commissionStatus;
+  final String commissionStatusLabel;
+}
+
+class MobileSellerSummary {
+  const MobileSellerSummary({
+    required this.sellerId,
+    required this.sellerName,
+    required this.roleLabel,
+    required this.clientsCount,
+    required this.ordersCount,
+    required this.pendingCreditRequests,
+    required this.salesUsd,
+    required this.openBalanceUsd,
+    required this.pendingCommissionUsd,
+    required this.approvedCommissionUsd,
+    required this.paidCommissionUsd,
+  });
+
+  final String sellerId;
+  final String sellerName;
+  final String roleLabel;
+  final int clientsCount;
+  final int ordersCount;
+  final int pendingCreditRequests;
+  final double salesUsd;
+  final double openBalanceUsd;
+  final double pendingCommissionUsd;
+  final double approvedCommissionUsd;
+  final double paidCommissionUsd;
+}
+
+class MobileSellerClient {
+  const MobileSellerClient({
+    required this.id,
+    required this.businessName,
+    required this.email,
+    required this.phone,
+    required this.city,
+    required this.state,
+    required this.creditEnabled,
+    required this.creditStatus,
+    required this.creditLimitUsd,
+    required this.creditAvailableUsd,
+    required this.creditExposureUsd,
+    required this.creditRequestStatus,
+  });
+
+  final String id;
+  final String businessName;
+  final String email;
+  final String phone;
+  final String city;
+  final String state;
+  final bool creditEnabled;
+  final String creditStatus;
+  final double creditLimitUsd;
+  final double creditAvailableUsd;
+  final double creditExposureUsd;
+  final String creditRequestStatus;
 }

@@ -17,6 +17,10 @@ abstract class MobileRepository {
   Future<List<MobileAnnouncement>> listAnnouncements(String placement);
   Future<MobileCreditSnapshot> getCredit(String customerId);
   Future<List<MobileOrderSummary>> listOrders(String customerId);
+  Future<MobileSellerSummary> getSellerSummary();
+  Future<List<MobileSellerClient>> listSellerClients();
+  Future<List<MobileOrderSummary>> listSellerOrders();
+  Future<List<MobileOrderSummary>> listSellerCommissions();
 }
 
 class MockMobileRepository implements MobileRepository {
@@ -229,6 +233,53 @@ class MockMobileRepository implements MobileRepository {
       ),
     ];
   }
+
+  @override
+  Future<MobileSellerSummary> getSellerSummary() async {
+    return const MobileSellerSummary(
+      sellerId: "admin-seller-demo",
+      sellerName: "Vendedor Wulkan",
+      roleLabel: "Vendedor",
+      clientsCount: 1,
+      ordersCount: 1,
+      pendingCreditRequests: 1,
+      salesUsd: 185,
+      openBalanceUsd: 85,
+      pendingCommissionUsd: 7.4,
+      approvedCommissionUsd: 0,
+      paidCommissionUsd: 0,
+    );
+  }
+
+  @override
+  Future<List<MobileSellerClient>> listSellerClients() async {
+    return const [
+      MobileSellerClient(
+        id: "client-ferreteria-valencia",
+        businessName: "Ferreteria Demo Valencia",
+        email: "ferreteria@wulkan.local",
+        phone: "+58 000-0000000",
+        city: "Valencia",
+        state: "Carabobo",
+        creditEnabled: true,
+        creditStatus: "in_use",
+        creditLimitUsd: 1000,
+        creditAvailableUsd: 915,
+        creditExposureUsd: 85,
+        creditRequestStatus: "approved",
+      ),
+    ];
+  }
+
+  @override
+  Future<List<MobileOrderSummary>> listSellerOrders() async {
+    return listOrders("client-ferreteria-valencia");
+  }
+
+  @override
+  Future<List<MobileOrderSummary>> listSellerCommissions() async {
+    return listSellerOrders();
+  }
 }
 
 class FirestoreMobileRepository implements MobileRepository {
@@ -357,6 +408,32 @@ class FirestoreMobileRepository implements MobileRepository {
   Future<List<MobileOrderSummary>> listOrders(String customerId) async {
     return const [];
   }
+
+  @override
+  Future<MobileSellerSummary> getSellerSummary() async {
+    return const MobileSellerSummary(
+      sellerId: "",
+      sellerName: "Vendedor Wulkan",
+      roleLabel: "Vendedor",
+      clientsCount: 0,
+      ordersCount: 0,
+      pendingCreditRequests: 0,
+      salesUsd: 0,
+      openBalanceUsd: 0,
+      pendingCommissionUsd: 0,
+      approvedCommissionUsd: 0,
+      paidCommissionUsd: 0,
+    );
+  }
+
+  @override
+  Future<List<MobileSellerClient>> listSellerClients() async => const [];
+
+  @override
+  Future<List<MobileOrderSummary>> listSellerOrders() async => const [];
+
+  @override
+  Future<List<MobileOrderSummary>> listSellerCommissions() async => const [];
 }
 
 class ApiMobileRepository implements MobileRepository {
@@ -482,6 +559,33 @@ class ApiMobileRepository implements MobileRepository {
       "/orders",
       queryParameters: {"customerId": customerId},
     );
+    return items.map(mapApiOrder).toList();
+  }
+
+  @override
+  Future<MobileSellerSummary> getSellerSummary() async {
+    final payload = await _getPayload("/seller/summary");
+    final data = payload["summary"];
+    return mapApiSellerSummary(
+      data is Map<String, dynamic> ? data : <String, dynamic>{},
+    );
+  }
+
+  @override
+  Future<List<MobileSellerClient>> listSellerClients() async {
+    final items = await _getItems("/seller/clients");
+    return items.map(mapApiSellerClient).toList();
+  }
+
+  @override
+  Future<List<MobileOrderSummary>> listSellerOrders() async {
+    final items = await _getItems("/seller/orders");
+    return items.map(mapApiOrder).toList();
+  }
+
+  @override
+  Future<List<MobileOrderSummary>> listSellerCommissions() async {
+    final items = await _getItems("/seller/commissions");
     return items.map(mapApiOrder).toList();
   }
 
@@ -703,6 +807,52 @@ MobileOrderSummary mapApiOrder(Map<String, dynamic> data) {
     createdAt: _asDateTime(data["createdAt"]),
     paymentStatus: _asString(data["paymentStatus"], fallback: "pending"),
     stockStatus: _asString(data["stockStatus"], fallback: "pending"),
+    customerId: _asString(data["customerId"]),
+    customerName: _asString(data["customerName"]),
+    sellerId: _asString(data["sellerId"]),
+    sellerName: _asString(data["sellerName"]),
+    saleType: _asString(data["saleType"], fallback: "cash"),
+    saleTypeLabel: _asString(data["saleTypeLabel"], fallback: "Contado"),
+    paymentTermDays: _asInt(data["paymentTermDays"]),
+    dueDate: _asNullableDateTime(data["dueDate"]),
+    dueStatus: _asString(data["dueStatus"], fallback: "without_due_date"),
+    commissionUsd: _asDouble(data["commissionUsd"]),
+    commissionStatus: _asString(data["commissionStatus"]),
+    commissionStatusLabel: _asString(data["commissionStatusLabel"]),
+  );
+}
+
+MobileSellerSummary mapApiSellerSummary(Map<String, dynamic> data) {
+  return MobileSellerSummary(
+    sellerId: _asString(data["sellerId"]),
+    sellerName: _asString(data["sellerName"], fallback: "Vendedor Wulkan"),
+    roleLabel: _asString(data["roleLabel"], fallback: "Vendedor"),
+    clientsCount: _asInt(data["clientsCount"]),
+    ordersCount: _asInt(data["ordersCount"]),
+    pendingCreditRequests: _asInt(data["pendingCreditRequests"]),
+    salesUsd: _asDouble(data["salesUsd"]),
+    openBalanceUsd: _asDouble(data["openBalanceUsd"]),
+    pendingCommissionUsd: _asDouble(data["pendingCommissionUsd"]),
+    approvedCommissionUsd: _asDouble(data["approvedCommissionUsd"]),
+    paidCommissionUsd: _asDouble(data["paidCommissionUsd"]),
+  );
+}
+
+MobileSellerClient mapApiSellerClient(Map<String, dynamic> data) {
+  return MobileSellerClient(
+    id: _asString(data["id"]),
+    businessName: _asString(data["businessName"], fallback: "Cliente Wulkan"),
+    email: _asString(data["email"]),
+    phone: _asString(data["phone"]),
+    city: _asString(data["city"]),
+    state: _asString(data["state"]),
+    creditEnabled: data["creditEnabled"] == true,
+    creditStatus: _asString(data["creditStatus"], fallback: "without_credit"),
+    creditLimitUsd: _asDouble(data["creditLimitUsd"]),
+    creditAvailableUsd: _asDouble(data["creditAvailableUsd"]),
+    creditExposureUsd: _asDouble(data["creditExposureUsd"]),
+    creditRequestStatus:
+        _asString(data["creditRequestStatus"], fallback: "none"),
   );
 }
 

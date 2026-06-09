@@ -44,6 +44,10 @@ STATUS_BADGES = {
     "commission_approved": "text-bg-success",
     "commission_paid": "text-bg-primary",
     "commission_cancelled": "text-bg-danger",
+    "current": "text-bg-success",
+    "due_soon": "text-bg-warning",
+    "overdue": "text-bg-danger",
+    "without_due_date": "text-bg-secondary",
     "visible": "text-bg-success",
     "hidden": "text-bg-secondary",
 }

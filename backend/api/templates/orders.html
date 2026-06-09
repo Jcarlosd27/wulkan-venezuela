@@ -2,6 +2,14 @@
 {% set heading = "Ordenes B2B" %}
 {% set description = "Gestiona compras de ferreteros, aprobacion de credito, despacho y abonos externos." %}
 
+{% block top_action %}
+{% if can_create_assisted_order %}
+<a class="btn btn-primary" href="{{ url_for('order_new') }}">
+  <i class="bi bi-plus-lg"></i> Pedido asistido
+</a>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <section class="row g-3 mb-3">
   <div class="col-12 col-md-3">
@@ -57,6 +65,7 @@
           <th>Total</th>
           <th>Abonado</th>
           <th>Saldo</th>
+          <th>Vence</th>
           <th>Credito</th>
           <th>Inventario</th>
           <th>Estado</th>
@@ -89,6 +98,14 @@
           <td>{{ money_usd(order.paidUsd) }}</td>
           <td><strong>{{ money_usd(order.balanceUsd) }}</strong></td>
           <td>
+            {% if order.dueDate %}
+            <span class="badge {{ order.dueStatus | badge_class }}">{{ order.dueStatus }}</span>
+            <small class="d-block text-secondary">{{ order.dueDate }}</small>
+            {% else %}
+            <span class="badge text-bg-secondary">Sin plazo</span>
+            {% endif %}
+          </td>
+          <td>
             <span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatus }}</span>
             <small class="d-block text-secondary">Reserva {{ money_usd(order.creditReservedUsd) }}</small>
           </td>
@@ -102,6 +119,7 @@
             <small class="d-block text-secondary">{{ order.commissionStatus }}</small>
           </td>
           <td class="text-end">
+            {% if can_manage_orders %}
             <div class="btn-group btn-group-sm">
               <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#statusModal{{ loop.index }}">
                 <i class="bi bi-arrow-repeat"></i> Estado
@@ -110,11 +128,14 @@
                 <i class="bi bi-cash-coin"></i> Abono
               </button>
             </div>
+            {% else %}
+            <span class="text-secondary small">Seguimiento</span>
+            {% endif %}
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="11">
+          <td colspan="12">
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-receipt"></i></div>
               <strong>Sin ordenes B2B todavia</strong>
@@ -129,6 +150,7 @@
 </section>
 
 {% for order in orders %}
+{% if can_manage_orders %}
 <div class="modal fade" id="statusModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content" method="post" action="{{ url_for('order_status_update', order_id=order.orderId) }}">
@@ -208,6 +230,7 @@
     </form>
   </div>
 </div>
+{% endif %}
 {% endfor %}
 {% endblock %}
 

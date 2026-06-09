@@ -39,8 +39,13 @@
           </a>
           {% endif %}
           {% if can_access_module('orders') %}
-          <a class="nav-link {% if request.endpoint in ['orders', 'order_status_update', 'order_payment_create'] %}active{% endif %}" href="{{ url_for('orders') }}">
+          <a class="nav-link {% if request.endpoint in ['orders', 'order_new', 'order_status_update', 'order_payment_create'] %}active{% endif %}" href="{{ url_for('orders') }}">
             <i class="bi bi-receipt"></i> Ordenes
+          </a>
+          {% endif %}
+          {% if can_access_module('commissions') %}
+          <a class="nav-link {% if request.endpoint in ['commissions', 'commission_status_update'] %}active{% endif %}" href="{{ url_for('commissions') }}">
+            <i class="bi bi-percent"></i> Comisiones
           </a>
           {% endif %}
           {% if can_access_module('products') %}

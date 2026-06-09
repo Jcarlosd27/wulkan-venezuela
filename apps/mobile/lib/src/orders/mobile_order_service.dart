@@ -11,12 +11,14 @@ class MobileSecureOrderDraft {
   const MobileSecureOrderDraft({
     required this.items,
     required this.preview,
+    this.customerId = "",
     this.saleType = "cash",
     this.paymentTermDays = 0,
   });
 
   final List<MobileCartItem> items;
   final MobileCheckoutPreview preview;
+  final String customerId;
   final String saleType;
   final int paymentTermDays;
 
@@ -31,6 +33,7 @@ class MobileSecureOrderDraft {
           },
       ],
       "exchangeRateUsdVes": preview.exchangeRateUsdVes,
+      if (customerId.isNotEmpty) "customerId": customerId,
       "saleType": saleType,
       "paymentTermDays": paymentTermDays,
     };
@@ -64,9 +67,16 @@ class ApiMobileOrderService implements MobileOrderService {
     final client = HttpClient();
 
     try {
-      final request = await client.postUrl(endpoint);
-      request.headers.contentType = ContentType.json;
       final session = await mobileAuthRepository.getCurrentSession();
+      final targetEndpoint = session.isMobileSalesUser
+          ? endpoint.replace(path: endpoint.path.replaceFirst('/orders', '/seller/orders'))
+          : endpoint;
+      if (session.isMobileSalesUser && draft.customerId.isEmpty) {
+        throw StateError("Selecciona el cliente antes de crear el pedido.");
+      }
+
+      final request = await client.postUrl(targetEndpoint);
+      request.headers.contentType = ContentType.json;
       if (session.accessToken.isNotEmpty) {
         request.headers.set("Authorization", "Bearer ${session.accessToken}");
       }
@@ -101,11 +111,12 @@ class ApiMobileOrderService implements MobileOrderService {
   ) {
     return {
       "source": "mobile_app",
-      "salesChannel": "mobile",
+      "salesChannel": session.isMobileSalesUser ? "seller_mobile" : "mobile",
+      if (draft.customerId.isNotEmpty) "customerId": draft.customerId,
       "saleType": draft.saleType,
       "paymentTermDays": draft.paymentTermDays,
       "customer": {
-        "id": session.id,
+        "id": draft.customerId.isNotEmpty ? draft.customerId : session.id,
         "name": session.name,
         "sellerId": session.assignedSeller.id,
         "sellerName": session.assignedSeller.name,
