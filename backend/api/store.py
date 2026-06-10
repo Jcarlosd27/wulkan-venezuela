@@ -22,6 +22,12 @@ INSECURE_PRODUCTION_PRODUCT_IDS = {"prod-motosierra-45cc", "prod-cadena-18", "pr
 INSECURE_PRODUCTION_ANNOUNCEMENT_IDS = {"ann-home-launch", "ann-checkout-payment"}
 INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS = {"svc-caracas-central"}
 INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS = {"mov-001", "mov-002", "mov-003"}
+INSECURE_PRODUCTION_TEXT_MARKERS = ("demo", "@wulkan.local")
+
+
+def has_insecure_production_marker(*values: Any) -> bool:
+    text = " ".join(str(value or "").strip().lower() for value in values)
+    return any(marker in text for marker in INSECURE_PRODUCTION_TEXT_MARKERS)
 
 
 def is_insecure_production_client(client: dict[str, Any]) -> bool:
@@ -32,18 +38,32 @@ def is_insecure_production_client(client: dict[str, Any]) -> bool:
         client_id in INSECURE_PRODUCTION_CLIENT_IDS
         or email in INSECURE_PRODUCTION_CLIENT_EMAILS
         or email.endswith("@wulkan.local")
-        or "demo" in business_name
+        or has_insecure_production_marker(business_name, email)
     )
 
 
 def is_insecure_production_order(order: dict[str, Any], removed_client_ids: set[str]) -> bool:
-    order_id = order.get("id", "") or order.get("orderId", "")
+    order_id = str(order.get("id", "") or "")
+    order_number = str(order.get("orderId", "") or "")
     customer = order.get("customer") or {}
     customer_name = str(customer.get("name", "")).strip().lower()
+    customer_email = str(customer.get("email", "")).strip().lower()
     return (
         order.get("customerId", "").strip().lower() in removed_client_ids
-        or any(order_id.startswith(prefix) for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES)
-        or "demo" in customer_name
+        or any(order_id.startswith(prefix) or order_number.startswith(prefix) for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES)
+        or has_insecure_production_marker(order_id, order_number, customer_name, customer_email)
+    )
+
+
+def is_insecure_production_stock_movement(movement: dict[str, Any]) -> bool:
+    note = movement.get("note", "")
+    movement_id = movement.get("id", "").strip().lower()
+    product_id = movement.get("productId", "").strip().lower()
+    return (
+        movement_id in INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS
+        or product_id in INSECURE_PRODUCTION_PRODUCT_IDS
+        or any(str(note).startswith(prefix) or prefix in str(note) for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES)
+        or has_insecure_production_marker(note, movement.get("createdBy", ""))
     )
 
 
@@ -334,7 +354,7 @@ def production_safe_seed(store: dict[str, list[dict[str, Any]]]) -> dict[str, li
     sanitized["stock_movements"] = [
         movement
         for movement in sanitized.get("stock_movements", [])
-        if movement.get("id", "").strip().lower() not in INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS
+        if not is_insecure_production_stock_movement(movement)
     ]
     return sanitized
 

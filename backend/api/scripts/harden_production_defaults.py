@@ -43,6 +43,7 @@ from store import (
 
 DEFAULT_ADMIN_EMAILS = INSECURE_PRODUCTION_ADMIN_EMAILS
 DEFAULT_CLIENT_EMAILS = INSECURE_PRODUCTION_CLIENT_EMAILS
+DEFAULT_ORDER_MARKERS = ("%demo%", "%@wulkan.local%")
 
 
 def utc_now() -> datetime:
@@ -82,6 +83,14 @@ def disable_status_rows(session, model, ids: set[str], status: str, label: str) 
     return disabled
 
 
+def delete_matching(session, model, filters: list, label: str) -> list[str]:
+    if not filters:
+        return []
+
+    deleted = session.query(model).filter(or_(*filters)).delete(synchronize_session=False)
+    return [f"{label}:{deleted}"] if deleted else []
+
+
 def main() -> None:
     if str(Config.ENV).strip().lower() != "production":
         print("Skipping production hardening outside production.")
@@ -114,7 +123,8 @@ def main() -> None:
                 or_(
                     Client.id.in_(INSECURE_PRODUCTION_CLIENT_IDS),
                     Client.email.in_(DEFAULT_CLIENT_EMAILS),
-                    Client.business_name.ilike("Ferreteria Demo Valencia"),
+                    Client.email.ilike("%@wulkan.local"),
+                    Client.business_name.ilike("%demo%"),
                 )
             )
             .all()
@@ -128,6 +138,13 @@ def main() -> None:
         ]
         if demo_client_ids:
             demo_order_filters.append(Order.customer_id.in_(demo_client_ids))
+        for marker in DEFAULT_ORDER_MARKERS:
+            demo_order_filters.extend(
+                [
+                    Order.id.ilike(marker),
+                    Order.order_number.ilike(marker),
+                ]
+            )
 
         demo_orders = (
             session.query(Order)
@@ -139,40 +156,59 @@ def main() -> None:
         demo_order_ids = {order.id for order in demo_orders} | {order.order_number for order in demo_orders}
 
         if demo_client_ids or demo_order_ids:
-            credit_deleted = (
-                session.query(CreditMovement)
-                .filter(
-                    or_(
-                        CreditMovement.client_id.in_(demo_client_ids or {""}),
-                        CreditMovement.order_id.in_(demo_order_ids or {""}),
-                    )
-                )
-                .delete(synchronize_session=False)
+            credit_filters = []
+            if demo_client_ids:
+                credit_filters.append(CreditMovement.client_id.in_(demo_client_ids))
+            if demo_order_ids:
+                credit_filters.append(CreditMovement.order_id.in_(demo_order_ids))
+            credit_filters.extend(
+                CreditMovement.order_id.startswith(prefix)
+                for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
             )
-            if credit_deleted:
-                disabled.append(f"credit-movement-demo:{credit_deleted}")
+            disabled.extend(delete_matching(session, CreditMovement, credit_filters, "credit-movement-demo"))
 
-            audit_deleted = (
-                session.query(AuditEvent)
-                .filter(
-                    or_(
-                        AuditEvent.entity_id.in_((demo_client_ids | demo_order_ids) or {""}),
-                        AuditEvent.detail.ilike("%Ferreteria Demo Valencia%"),
-                        AuditEvent.detail.ilike("%demo%"),
-                    )
-                )
-                .delete(synchronize_session=False)
+            audit_filters = []
+            entity_ids = demo_client_ids | demo_order_ids
+            if entity_ids:
+                audit_filters.append(AuditEvent.entity_id.in_(entity_ids))
+            audit_filters.extend(
+                [
+                    AuditEvent.detail.ilike("%Ferreteria Demo Valencia%"),
+                    AuditEvent.detail.ilike("%demo%"),
+                    AuditEvent.detail.ilike("%@wulkan.local%"),
+                ]
             )
-            if audit_deleted:
-                disabled.append(f"audit-demo:{audit_deleted}")
+            disabled.extend(delete_matching(session, AuditEvent, audit_filters, "audit-demo"))
 
-            for order in demo_orders:
-                session.delete(order)
-                disabled.append(f"order-demo:{order.order_number}")
+            stock_filters = [
+                StockMovement.id.in_(INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS),
+                StockMovement.product_id.in_(INSECURE_PRODUCTION_PRODUCT_IDS),
+            ]
+            stock_filters.extend(
+                StockMovement.note.ilike(f"%{prefix}%")
+                for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
+            )
+            disabled.extend(delete_matching(session, StockMovement, stock_filters, "stock-movement-demo"))
 
-            for client in demo_clients:
-                session.delete(client)
-                disabled.append(f"client-demo:{client.email}")
+            order_filters = []
+            if demo_order_ids:
+                order_filters.extend([Order.id.in_(demo_order_ids), Order.order_number.in_(demo_order_ids)])
+            if demo_client_ids:
+                order_filters.append(Order.customer_id.in_(demo_client_ids))
+            order_filters.extend(
+                Order.id.startswith(prefix) for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
+            )
+            order_filters.extend(
+                Order.order_number.startswith(prefix) for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
+            )
+            disabled.extend(delete_matching(session, Order, order_filters, "order-demo"))
+            session.flush()
+
+            if demo_client_ids:
+                disabled.extend(
+                    delete_matching(session, Client, [Client.id.in_(demo_client_ids)], "client-demo")
+                )
+                session.flush()
 
         disabled.extend(disable_status_rows(session, Product, INSECURE_PRODUCTION_PRODUCT_IDS, "deleted", "product"))
         disabled.extend(disable_status_rows(session, Category, INSECURE_PRODUCTION_CATEGORY_IDS, "deleted", "category"))
@@ -193,13 +229,17 @@ def main() -> None:
             technician.payload["visibleInApp"] = False
             disabled.append(f"service-technician:{technician.id}")
 
-        stock_deleted = (
-            session.query(StockMovement)
-            .filter(StockMovement.id.in_(INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS))
-            .delete(synchronize_session=False)
+        disabled.extend(
+            delete_matching(
+                session,
+                StockMovement,
+                [
+                    StockMovement.id.in_(INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS),
+                    StockMovement.product_id.in_(INSECURE_PRODUCTION_PRODUCT_IDS),
+                ],
+                "stock-movement",
+            )
         )
-        if stock_deleted:
-            disabled.append(f"stock-movement:{stock_deleted}")
 
         session.commit()
 
