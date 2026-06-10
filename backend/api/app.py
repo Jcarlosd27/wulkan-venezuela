@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import copy
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -102,8 +103,9 @@ WEB_ADMIN_ROLES = {"super_admin", "commercial_manager", "operator", "inventory",
 WRITE_ROLES = {"super_admin", "commercial_manager", "operator"}
 SALES_ROLES = {"super_admin", "commercial_manager", "operator"}
 INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
-CREDIT_APPROVAL_ROLES = {"super_admin", "commercial_manager", "operator"}
-COMMISSION_MANAGEMENT_ROLES = {"super_admin", "commercial_manager", "operator"}
+CREDIT_APPROVAL_ROLES = {"super_admin", "commercial_manager"}
+ORDER_MANAGEMENT_ROLES = {"super_admin", "commercial_manager", "operator"}
+COMMISSION_MANAGEMENT_ROLES = {"super_admin", "commercial_manager"}
 MOBILE_SALES_ROLES = {"super_admin", "commercial_manager", "sales"}
 ADMIN_ONLY_ROLES = {"super_admin"}
 MODULE_ACCESS = {
@@ -111,9 +113,9 @@ MODULE_ACCESS = {
     "audit": ADMIN_ONLY_ROLES,
     "sellers": {"super_admin", "commercial_manager", "operator", "readonly"},
     "clients": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "credit": {"super_admin", "commercial_manager", "operator"},
+    "credit": {"super_admin", "commercial_manager"},
     "orders": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "commissions": {"super_admin", "commercial_manager", "operator", "readonly"},
+    "commissions": {"super_admin", "commercial_manager"},
     "products": WEB_ADMIN_ROLES,
     "media_library": WEB_ADMIN_ROLES,
     "categories": WEB_ADMIN_ROLES,
@@ -1034,6 +1036,63 @@ def record_audit_event(
     store["audit_events"] = store["audit_events"][-1000:]
 
 
+AUDIT_REDACTED_KEYS = {
+    "password",
+    "passwordHash",
+    "currentPassword",
+    "newPassword",
+    "accessToken",
+    "secret",
+    "token",
+}
+
+
+def audit_snapshot(value):
+    if isinstance(value, dict):
+        snapshot = {}
+        for key, item in value.items():
+            if key in AUDIT_REDACTED_KEYS or key.lower().endswith("secret"):
+                snapshot[key] = "[redacted]"
+            else:
+                snapshot[key] = audit_snapshot(item)
+        return snapshot
+    if isinstance(value, list):
+        return [audit_snapshot(item) for item in value[:50]]
+    return value
+
+
+def changed_fields(before: dict | None, after: dict | None) -> list[str]:
+    before_snapshot = audit_snapshot(before or {})
+    after_snapshot = audit_snapshot(after or {})
+    keys = set(before_snapshot) | set(after_snapshot)
+    return sorted(key for key in keys if before_snapshot.get(key) != after_snapshot.get(key))
+
+
+def record_change_event(
+    store: dict,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    detail: str,
+    before: dict | None,
+    after: dict | None,
+    actor: dict | None = None,
+) -> None:
+    record_audit_event(
+        store,
+        action,
+        entity_type,
+        entity_id,
+        detail,
+        metadata={
+            "changedFields": changed_fields(before, after),
+            "before": audit_snapshot(before or {}),
+            "after": audit_snapshot(after or {}),
+        },
+        actor=actor,
+    )
+
+
 def order_payments(movements: list[dict] | None, order_id: str) -> list[dict]:
     return [
         movement
@@ -1872,9 +1931,18 @@ def admin_user_edit(user_id: str):
                 users=web_admin_users(store),
                 error=error,
             )
+        before = copy.deepcopy(user)
         updated = admin_user_payload(user)
         store["admin_users"] = [updated if item["id"] == user_id else item for item in store["admin_users"]]
-        record_audit_event(store, "update", "admin_user", user_id, f"Usuario admin actualizado: {updated['email']}.")
+        record_change_event(
+            store,
+            "update",
+            "admin_user",
+            user_id,
+            f"Usuario admin actualizado: {updated['email']}.",
+            before,
+            updated,
+        )
         save_store(store)
     return redirect(url_for("admin_users"))
 
@@ -1910,6 +1978,7 @@ def seller_edit(seller_id: str):
         error = seller_form_error(store, seller)
         if error:
             return render_template("sellers.html", **sellers_page_context(store, error))
+        before = copy.deepcopy(seller)
         updated = admin_user_payload(seller)
         updated["role"] = "sales"
         store["admin_users"] = [
@@ -1922,7 +1991,15 @@ def seller_edit(seller_id: str):
         for order in store.get("orders", []):
             if order.get("sellerId") == seller_id:
                 order["sellerName"] = updated.get("name", "")
-        record_audit_event(store, "update", "seller", seller_id, f"Vendedor actualizado: {updated['name']}.")
+        record_change_event(
+            store,
+            "update",
+            "seller",
+            seller_id,
+            f"Vendedor actualizado: {updated['name']}.",
+            before,
+            updated,
+        )
         save_store(store)
     return redirect(url_for("sellers"))
 
@@ -1958,9 +2035,18 @@ def client_edit(client_id: str):
         error = client_form_error(store, client)
         if error:
             return render_template("clients.html", **clients_page_context(store, error))
+        before = copy.deepcopy(client)
         updated = client_payload(client)
         store["clients"] = [updated if item["id"] == client_id else item for item in store["clients"]]
-        record_audit_event(store, "update", "client", client_id, f"Cliente actualizado: {updated['businessName']}.")
+        record_change_event(
+            store,
+            "update",
+            "client",
+            client_id,
+            f"Cliente actualizado: {updated['businessName']}.",
+            before,
+            updated,
+        )
         save_store(store)
     return redirect(url_for("clients"))
 
@@ -2034,9 +2120,18 @@ def product_edit(product_id: str):
                 error=error,
             )
 
+        before = copy.deepcopy(product)
         updated = product_payload(store, product)
         store["products"] = [updated if item["id"] == product_id else item for item in store["products"]]
-        record_audit_event(store, "update", "product", product_id, f"Producto actualizado: {updated['sku']}.")
+        record_change_event(
+            store,
+            "update",
+            "product",
+            product_id,
+            f"Producto actualizado: {updated['sku']}.",
+            before,
+            updated,
+        )
         save_store(store)
         return redirect(url_for("products"))
 
@@ -2056,12 +2151,14 @@ def product_delete(product_id: str):
     store = load_store()
     product = find_by_id(store["products"], product_id)
     store["products"] = [product for product in store["products"] if product["id"] != product_id]
-    record_audit_event(
+    record_change_event(
         store,
         "delete",
         "product",
         product_id,
         f"Producto eliminado: {(product or {}).get('sku', product_id)}.",
+        product,
+        None,
     )
     save_store(store)
     return redirect(url_for("products"))
@@ -2073,6 +2170,13 @@ def stock():
     if request.method == "POST":
         if not role_allowed(INVENTORY_ROLES):
             return forbidden_response()
+        stock_before = {
+            product["id"]: {
+                "sku": product.get("sku", ""),
+                "stock": int(product.get("stock") or 0),
+            }
+            for product in store.get("products", [])
+        }
         bulk_payload = request.form.get("bulkStock", "").strip()
         movement_type = request.form.get("type", "entry")
         reserved_by_product = stock_reserved_quantities(store.get("orders", []))
@@ -2131,7 +2235,22 @@ def stock():
                         }
                     )
                     break
-        record_audit_event(store, "update", "stock", "", "Stock actualizado desde panel.")
+        stock_after = {
+            product["id"]: {
+                "sku": product.get("sku", ""),
+                "stock": int(product.get("stock") or 0),
+            }
+            for product in store.get("products", [])
+        }
+        record_change_event(
+            store,
+            "update",
+            "stock",
+            "",
+            "Stock actualizado desde panel.",
+            stock_before,
+            stock_after,
+        )
         save_store(store)
         return redirect(url_for("stock"))
 
@@ -2174,6 +2293,7 @@ def category_edit(category_id: str):
     store = load_store()
     category = find_by_id(store["categories"], category_id)
     if category:
+        before = copy.deepcopy(category)
         image_url = request.form.get("imageUrl", "").strip() or category.get("imageUrl", "")
         uploaded = save_upload(request.files.get("imageFile"), "categories")
         category.update(
@@ -2188,7 +2308,15 @@ def category_edit(category_id: str):
         for product in store["products"]:
             if product.get("categoryId") == category_id:
                 product["categoryName"] = category["name"]
-        record_audit_event(store, "update", "category", category_id, f"Categoria actualizada: {category['name']}.")
+        record_change_event(
+            store,
+            "update",
+            "category",
+            category_id,
+            f"Categoria actualizada: {category['name']}.",
+            before,
+            category,
+        )
         save_store(store)
     return redirect(url_for("categories"))
 
@@ -2200,12 +2328,14 @@ def category_delete(category_id: str):
     if not any(product.get("categoryId") == category_id for product in store["products"]):
         category = find_by_id(store["categories"], category_id)
         store["categories"] = [category for category in store["categories"] if category["id"] != category_id]
-        record_audit_event(
+        record_change_event(
             store,
             "delete",
             "category",
             category_id,
             f"Categoria eliminada: {(category or {}).get('name', category_id)}.",
+            category,
+            None,
         )
         save_store(store)
     return redirect(url_for("categories"))
@@ -2294,17 +2424,20 @@ def service_technician_edit(technician_id: str):
     store = load_store()
     technician = find_by_id(store.get("service_technicians", []), technician_id)
     if technician:
+        before = copy.deepcopy(technician)
         updated = service_technician_payload(technician)
         store["service_technicians"] = [
             updated if item["id"] == technician_id else item
             for item in store.get("service_technicians", [])
         ]
-        record_audit_event(
+        record_change_event(
             store,
             "update",
             "service_technician",
             technician_id,
             f"Servicio tecnico actualizado: {updated['name']}.",
+            before,
+            updated,
         )
         save_store(store)
     return redirect(url_for("service_technicians"))
@@ -2316,22 +2449,25 @@ def service_technician_delete(technician_id: str):
     store = load_store()
     technician = find_by_id(store.get("service_technicians", []), technician_id)
     if technician:
+        before = copy.deepcopy(technician)
         technician["status"] = "deleted"
         technician["visibleInApp"] = False
         technician["updatedAt"] = utc_now()
-        record_audit_event(
+        record_change_event(
             store,
             "delete",
             "service_technician",
             technician_id,
             f"Servicio tecnico eliminado: {technician.get('name', technician_id)}.",
+            before,
+            technician,
         )
         save_store(store)
     return redirect(url_for("service_technicians"))
 
 
 @app.get("/credit")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles("super_admin", "commercial_manager")
 def credit():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -2379,13 +2515,14 @@ def credit():
 
 
 @app.post("/credit/<client_id>/decision")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles("super_admin", "commercial_manager")
 def credit_decision(client_id: str):
     store = load_store()
     client = find_by_id(store.get("clients", []), client_id)
     if not client:
         return redirect(url_for("credit"))
 
+    before = copy.deepcopy(client)
     decision = request.form.get("decision", "approved")
     now = utc_now()
     if decision == "approved":
@@ -2411,7 +2548,15 @@ def credit_decision(client_id: str):
         detail = "Solicitud de credito rechazada."
 
     client["updatedAt"] = now
-    record_audit_event(store, "credit_decision", "client", client_id, detail)
+    record_change_event(
+        store,
+        "credit_decision",
+        "client",
+        client_id,
+        detail,
+        before,
+        client,
+    )
     save_store(store)
     return redirect(url_for("credit"))
 
@@ -2421,7 +2566,16 @@ def credit_decision(client_id: str):
 def audit():
     store = load_store()
     events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)[:200]
-    write_actions = {"create", "update", "delete", "payment", "update_status"}
+    write_actions = {
+        "create",
+        "update",
+        "delete",
+        "payment",
+        "update_status",
+        "credit_decision",
+        "commission_update",
+        "password_change",
+    }
     metrics = {
         "total": len(store.get("audit_events", [])),
         "actors": len({event.get("actorId") or event.get("actorName") for event in store.get("audit_events", [])}),
@@ -2462,7 +2616,7 @@ def orders():
         status_options=ORDER_STATUS_OPTIONS,
         payment_methods=PAYMENT_METHOD_OPTIONS,
         sale_type_options=SALE_TYPE_OPTIONS,
-        can_manage_orders=role_allowed(COMMISSION_MANAGEMENT_ROLES),
+        can_manage_orders=role_allowed(ORDER_MANAGEMENT_ROLES),
         can_create_assisted_order=role_allowed(SALES_ROLES),
         metrics=metrics,
     )
@@ -2507,6 +2661,7 @@ def order_status_update(order_id: str):
     if not order or not can_access_order_record(order, store):
         return redirect(url_for("orders"))
 
+    before = copy.deepcopy(order)
     target_status = request.form.get("status", order.get("status", "credit_review"))
     allowed_statuses = {status for status, _label in ORDER_STATUS_OPTIONS}
     if target_status not in allowed_statuses:
@@ -2552,7 +2707,15 @@ def order_status_update(order_id: str):
     order["balanceUsd"] = order_balance_usd(order, movements)
     order["paidUsd"] = order_paid_usd(order, movements)
     append_order_history(order, target_status, note)
-    record_audit_event(store, "update_status", "order", order_id, f"Orden movida a {target_status}.")
+    record_change_event(
+        store,
+        "update_status",
+        "order",
+        order_id,
+        f"Orden movida a {target_status}.",
+        before,
+        order,
+    )
     save_store(store)
     return redirect(url_for("orders"))
 
@@ -2565,6 +2728,7 @@ def order_payment_create(order_id: str):
     if not order or not can_access_order_record(order, store):
         return redirect(url_for("orders"))
 
+    before = copy.deepcopy(order)
     movements = store.setdefault("credit_movements", [])
     balance_before = order_balance_usd(order, movements)
     amount_usd = min(float(request.form.get("amountUsd") or 0), balance_before)
@@ -2603,25 +2767,34 @@ def order_payment_create(order_id: str):
     order["managedAt"] = utc_now()
     order["updatedAt"] = utc_now()
     append_order_history(order, order["status"], f"Abono externo registrado por {money_usd(amount_usd)}.")
-    record_audit_event(store, "payment", "order", order_id, f"Abono registrado por {money_usd(amount_usd)}.")
+    record_change_event(
+        store,
+        "payment",
+        "order",
+        order_id,
+        f"Abono registrado por {money_usd(amount_usd)}.",
+        before,
+        order,
+    )
     save_store(store)
     return redirect(url_for("orders"))
 
 
 @app.get("/commissions")
-@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+@require_roles("super_admin", "commercial_manager")
 def commissions():
     store = load_store()
     return render_template("commissions.html", **commissions_page_context(store))
 
 
 @app.post("/commissions/<order_id>/status")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles("super_admin", "commercial_manager")
 def commission_status_update(order_id: str):
     store = load_store()
     order = find_order(store.get("orders", []), order_id)
     if not order:
         return redirect(url_for("commissions"))
+    before = copy.deepcopy(order)
     status = request.form.get("commissionStatus", order.get("commissionStatus", "commission_pending"))
     if status not in {"commission_pending", "commission_approved", "commission_paid", "commission_cancelled"}:
         return redirect(url_for("commissions"))
@@ -2634,12 +2807,14 @@ def commission_status_update(order_id: str):
         order["commissionPaidAt"] = ""
         order["commissionPaidBy"] = ""
     append_order_history(order, order.get("status", "credit_review"), f"Comision marcada como {commission_status_label(status)}.")
-    record_audit_event(
+    record_change_event(
         store,
         "commission_update",
         "order",
         order_id,
         f"Comision actualizada a {commission_status_label(status)} por {session.get('admin_name', 'Admin')}.",
+        before,
+        order,
     )
     save_store(store)
     return redirect(url_for("commissions"))
@@ -2685,6 +2860,7 @@ def announcement_edit(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)
     if announcement:
+        before = copy.deepcopy(announcement)
         image_url = request.form.get("imageUrl", "").strip() or announcement.get("imageUrl", "")
         uploaded = save_upload(request.files.get("imageFile"), "announcements")
         if uploaded:
@@ -2704,7 +2880,15 @@ def announcement_edit(announcement_id: str):
                 "updatedAt": utc_now(),
             }
         )
-        record_audit_event(store, "update", "announcement", announcement_id, f"Anuncio actualizado: {announcement['title']}.")
+        record_change_event(
+            store,
+            "update",
+            "announcement",
+            announcement_id,
+            f"Anuncio actualizado: {announcement['title']}.",
+            before,
+            announcement,
+        )
         save_store(store)
     return redirect(url_for("announcements"))
 
@@ -2717,12 +2901,14 @@ def announcement_delete(announcement_id: str):
     store["announcements"] = [
         announcement for announcement in store["announcements"] if announcement["id"] != announcement_id
     ]
-    record_audit_event(
+    record_change_event(
         store,
         "delete",
         "announcement",
         announcement_id,
         f"Anuncio eliminado: {(announcement or {}).get('title', announcement_id)}.",
+        announcement,
+        None,
     )
     save_store(store)
     return redirect(url_for("announcements"))
@@ -3218,40 +3404,23 @@ def api_locations():
         for technician in store.get("service_technicians", [])
         if technician.get("status") == "active" and technician.get("visibleInApp")
     ]
-    if technicians:
-        return jsonify(
-            {
-                "items": [
-                    {
-                        "id": technician.get("id", ""),
-                        "name": technician.get("name", ""),
-                        "subtitle": " - ".join(
-                            part
-                            for part in [technician.get("city", ""), technician.get("coverage", "")]
-                            if part
-                        ),
-                        "phone": technician.get("phone", ""),
-                        "whatsapp": technician.get("whatsapp", ""),
-                        "address": technician.get("address", ""),
-                        "specialties": technician.get("specialties", []),
-                    }
-                    for technician in technicians
-                ]
-            }
-        )
     return jsonify(
         {
             "items": [
                 {
-                    "id": "loc-caracas",
-                    "name": "Punto autorizado Caracas",
-                    "subtitle": "Retiro, soporte tecnico y entregas Wulkan",
-                },
-                {
-                    "id": "loc-valencia",
-                    "name": "Ferreteria Demo Valencia",
-                    "subtitle": "Venta retail y retiro",
-                },
+                    "id": technician.get("id", ""),
+                    "name": technician.get("name", ""),
+                    "subtitle": " - ".join(
+                        part
+                        for part in [technician.get("city", ""), technician.get("coverage", "")]
+                        if part
+                    ),
+                    "phone": technician.get("phone", ""),
+                    "whatsapp": technician.get("whatsapp", ""),
+                    "address": technician.get("address", ""),
+                    "specialties": technician.get("specialties", []),
+                }
+                for technician in technicians
             ]
         }
     )

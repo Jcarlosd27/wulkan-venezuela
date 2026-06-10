@@ -940,6 +940,8 @@ DateTime? _asNullableDateTime(Object? value) {
 }
 
 MobileRepository createMobileRepository() {
+  mobileEnvironment.validateRuntime();
+
   if (mobileEnvironment.usesApi) {
     return ApiMobileRepository(baseUrl: mobileEnvironment.adminApiUrl);
   }

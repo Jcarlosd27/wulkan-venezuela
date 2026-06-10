@@ -395,6 +395,8 @@ class FirebaseMobileAuthRepository implements MobileAuthRepository {
 }
 
 MobileAuthRepository createMobileAuthRepository() {
+  mobileEnvironment.validateRuntime();
+
   if (mobileEnvironment.usesApiAuth) {
     return ApiMobileAuthRepository(baseUrl: mobileEnvironment.adminApiUrl);
   }

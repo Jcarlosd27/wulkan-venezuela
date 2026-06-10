@@ -1,4 +1,6 @@
 {
+  "WULKAN_APP_ENV": "development",
+  "WULKAN_ALLOW_MOCK": "false",
   "WULKAN_FIREBASE_PROJECT_ID": "wulkan-dev",
   "WULKAN_MOBILE_DATA_SOURCE": "api",
   "WULKAN_MOBILE_AUTH_MODE": "api",

@@ -84,7 +84,14 @@
             <strong>{{ event.entityType }}</strong>
             <small class="d-block text-secondary">{{ event.entityId }}</small>
           </td>
-          <td class="audit-detail">{{ event.detail }}</td>
+          <td class="audit-detail">
+            {{ event.detail }}
+            {% if event.metadata and event.metadata.changedFields %}
+              <small class="d-block text-secondary mt-1">
+                Cambios: {{ event.metadata.changedFields | join(', ') }}
+              </small>
+            {% endif %}
+          </td>
           <td>
             <small class="d-block text-secondary">{{ event.method }} {{ event.path }}</small>
             <small class="d-block text-secondary">{{ event.ipAddress }}</small>
