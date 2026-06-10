@@ -136,6 +136,8 @@ ADMIN_MENU_GROUPS = [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
             {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "clients_import", "client_delete"]},
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision"]},
+            {"module": "credit", "endpoint": "credit_due", "label": "Vencimientos", "icon": "bi-calendar2-week", "active": ["credit_due"]},
+            {"module": "credit", "endpoint": "credit_history", "label": "Historial credito", "icon": "bi-clock-history", "active": ["credit_history"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
         ],
@@ -3399,10 +3401,7 @@ def service_technician_delete(technician_id: str):
     return redirect(url_for("service_technicians"))
 
 
-@app.get("/credit")
-@require_roles("super_admin", "commercial_manager")
-def credit():
-    store = load_store()
+def credit_dashboard_context(store: dict) -> dict:
     movements = store.get("credit_movements", [])
     visible_clients = visible_clients_for_current_user(store)
     visible_client_ids = {client.get("id", "") for client in visible_clients}
@@ -3436,14 +3435,49 @@ def credit():
         "payments": sum(float(payment.get("amountUsd") or 0) for payment in payments),
         "overdue": sum(float(order.get("balanceUsd") or 0) for order in due_orders if order.get("dueStatus") == "overdue"),
     }
+    return {
+        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "payments": sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
+        "due_orders": sorted(due_orders, key=lambda item: item.get("dueDate", "")),
+        "metrics": metrics,
+    }
+
+
+@app.get("/credit")
+@require_roles("super_admin", "commercial_manager")
+def credit():
+    store = load_store()
+    context = credit_dashboard_context(store)
     return render_template(
         "credit.html",
-        clients=sorted(clients_list, key=lambda item: item.get("businessName", "")),
-        payments=sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
-        due_orders=sorted(due_orders, key=lambda item: item.get("dueDate", "")),
-        metrics=metrics,
+        clients=context["clients"],
+        metrics=context["metrics"],
         payment_terms=PAYMENT_TERM_OPTIONS,
         can_approve_credit=role_allowed(CREDIT_APPROVAL_ROLES),
+    )
+
+
+@app.get("/credit/vencimientos")
+@require_roles("super_admin", "commercial_manager")
+def credit_due():
+    store = load_store()
+    context = credit_dashboard_context(store)
+    return render_template(
+        "credit_due.html",
+        due_orders=context["due_orders"],
+        metrics=context["metrics"],
+    )
+
+
+@app.get("/credit/historial")
+@require_roles("super_admin", "commercial_manager")
+def credit_history():
+    store = load_store()
+    context = credit_dashboard_context(store)
+    return render_template(
+        "credit_history.html",
+        payments=context["payments"],
+        metrics=context["metrics"],
     )
 
 

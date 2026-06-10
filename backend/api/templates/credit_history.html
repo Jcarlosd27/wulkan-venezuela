@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% set heading = "Historial de credito" %}
+{% set description = "Abonos externos registrados por Wulkan, trazabilidad y referencias de cobranza." %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
+      <span>Abonos registrados</span>
+      <strong>{{ money_usd(metrics.payments) }}</strong>
+      <em>Historial</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-activity"></i></div>
+      <span>Comprometido</span>
+      <strong>{{ money_usd(metrics.exposure) }}</strong>
+      <em>Ordenes</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
+      <span>Disponible</span>
+      <strong>{{ money_usd(metrics.available) }}</strong>
+      <em>Credito</em>
+    </article>
+  </div>
+</section>
+
+{% include "partials/credit_subnav.html" %}
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Historial de abonos externos</h2>
+      <span>Pagos manuales registrados por Wulkan, sin pasarela online.</span>
+    </div>
+    <span>{{ payments | length }} movimientos</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Orden</th>
+          <th>Cliente</th>
+          <th>Metodo</th>
+          <th>Referencia</th>
+          <th>Monto</th>
+          <th>Usuario</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for payment in payments %}
+        <tr>
+          <td>{{ payment.createdAt }}</td>
+          <td><strong>{{ payment.orderId }}</strong></td>
+          <td>
+            <strong>{{ payment.clientName }}</strong>
+            <small class="d-block text-secondary">{{ payment.clientId }}</small>
+          </td>
+          <td><span class="badge text-bg-light">{{ payment.method }}</span></td>
+          <td>{{ payment.reference or 'Sin referencia' }}</td>
+          <td>
+            <strong>{{ money_usd(payment.amountUsd) }}</strong>
+            <small class="d-block text-secondary">VES {{ payment.amountVes }}</small>
+          </td>
+          <td>{{ payment.createdBy }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-cash-coin"></i></div>
+              <strong>Sin abonos registrados</strong>
+              <span>Los pagos externos que registre el admin apareceran aqui.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,14 @@
+<nav class="module-tabs mb-3" aria-label="Submodulos de credito B2B">
+  <a class="module-tab {% if request.endpoint == 'credit' %}active{% endif %}" href="{{ url_for('credit') }}">
+    <i class="bi bi-credit-card-2-front"></i>
+    Lineas de credito
+  </a>
+  <a class="module-tab {% if request.endpoint == 'credit_due' %}active{% endif %}" href="{{ url_for('credit_due') }}">
+    <i class="bi bi-calendar2-week"></i>
+    Vencimientos
+  </a>
+  <a class="module-tab {% if request.endpoint == 'credit_history' %}active{% endif %}" href="{{ url_for('credit_history') }}">
+    <i class="bi bi-clock-history"></i>
+    Historial
+  </a>
+</nav>
