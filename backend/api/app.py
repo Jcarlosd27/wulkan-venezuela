@@ -103,6 +103,7 @@ ROLE_LABELS = {
 }
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
+IMPORT_DRAFT_TTL_SECONDS = 60 * 60
 WEB_ADMIN_ROLES = {"super_admin", "commercial_manager", "operator", "inventory", "readonly"}
 WRITE_ROLES = {"super_admin", "commercial_manager", "operator"}
 SALES_ROLES = {"super_admin", "commercial_manager", "operator"}
@@ -1258,6 +1259,14 @@ def parse_import_specs(value) -> dict[str, str]:
     return specs
 
 
+def import_cell_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value).strip()
+
+
 def read_tabular_upload(file_storage) -> list[dict]:
     if not file_storage or not file_storage.filename:
         raise BadRequest("Selecciona un archivo .xlsx, .xlsm o .csv para la carga masiva.")
@@ -1276,7 +1285,7 @@ def read_tabular_upload(file_storage) -> list[dict]:
         headers = [normalize_import_key(header) for header in raw_rows[0]]
         for raw_row in raw_rows[1:]:
             row = {
-                headers[index]: raw_row[index]
+                headers[index]: import_cell_value(raw_row[index])
                 for index in range(min(len(headers), len(raw_row)))
                 if headers[index]
             }
@@ -1291,7 +1300,7 @@ def read_tabular_upload(file_storage) -> list[dict]:
         reader = csv.DictReader(io.StringIO(text))
         for raw_row in reader:
             row = {
-                normalize_import_key(key): value
+                normalize_import_key(key): import_cell_value(value)
                 for key, value in (raw_row or {}).items()
                 if key
             }
@@ -1303,11 +1312,22 @@ def read_tabular_upload(file_storage) -> list[dict]:
 
 
 def blank_bulk_result() -> dict:
-    return {"created": 0, "updated": 0, "skipped": 0, "errors": []}
+    return {
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+        "createdRows": [],
+        "updatedRows": [],
+        "skippedRows": [],
+        "errorRows": [],
+    }
 
 
 def remember_bulk_result(module: str, result: dict) -> None:
     result["errors"] = result.get("errors", [])[:8]
+    for key in ("createdRows", "updatedRows", "skippedRows", "errorRows"):
+        result[key] = result.get(key, [])[:12]
     session[f"bulk_import_{module}"] = result
 
 
@@ -1317,7 +1337,91 @@ def consume_bulk_result(module: str) -> dict | None:
 
 def bulk_error(result: dict, row_number: int, message: str) -> None:
     result.setdefault("errors", []).append(f"Fila {row_number}: {message}")
+    result.setdefault("errorRows", []).append({"row": row_number, "label": message})
     result["skipped"] = int(result.get("skipped", 0)) + 1
+
+
+def bulk_row(result: dict, action: str, row_number: int, label: str) -> None:
+    bucket = {
+        "created": "createdRows",
+        "updated": "updatedRows",
+        "skipped": "skippedRows",
+    }.get(action)
+    if bucket:
+        result.setdefault(bucket, []).append({"row": row_number, "label": label})
+
+
+def purge_expired_import_drafts() -> None:
+    from db import SessionLocal, init_database
+    from models import ImportDraft
+
+    init_database()
+    with SessionLocal() as db_session:
+        db_session.query(ImportDraft).filter(ImportDraft.expires_at < datetime.now(timezone.utc)).delete()
+        db_session.commit()
+
+
+def create_import_draft(module: str, entity_type: str, rows: list[dict], result: dict) -> str:
+    from db import SessionLocal, init_database
+    from models import ImportDraft
+
+    init_database()
+    purge_expired_import_drafts()
+    draft_id = f"import-{secrets.token_urlsafe(18)}"
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db_session:
+        db_session.add(
+            ImportDraft(
+                id=draft_id,
+                module=module,
+                entity_type=entity_type,
+                status="preview",
+                created_by_id=session.get("admin_user_id", ""),
+                created_by_name=session.get("admin_name", "Admin"),
+                rows=rows,
+                result=result,
+                created_at=now,
+                expires_at=now + timedelta(seconds=IMPORT_DRAFT_TTL_SECONDS),
+            )
+        )
+        db_session.commit()
+    return draft_id
+
+
+def load_import_draft(module: str, draft_id: str):
+    from db import SessionLocal, init_database
+    from models import ImportDraft
+
+    init_database()
+    purge_expired_import_drafts()
+    with SessionLocal() as db_session:
+        draft = db_session.get(ImportDraft, draft_id)
+        if not draft or draft.module != module or draft.status != "preview":
+            return None
+        return {
+            "id": draft.id,
+            "module": draft.module,
+            "entityType": draft.entity_type,
+            "rows": list(draft.rows or []),
+            "result": dict(draft.result or {}),
+        }
+
+
+def finish_import_draft(module: str, draft_id: str, status: str) -> bool:
+    from db import SessionLocal, init_database
+    from models import ImportDraft
+
+    init_database()
+    with SessionLocal() as db_session:
+        draft = db_session.get(ImportDraft, draft_id)
+        if not draft or draft.module != module:
+            return False
+        if status == "discarded":
+            db_session.delete(draft)
+        else:
+            draft.status = status
+        db_session.commit()
+        return True
 
 
 def find_product_by_sku(store: dict, sku: str) -> dict | None:
@@ -1418,12 +1522,14 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
                 if product.get("categoryId") == category.get("id"):
                     product["categoryName"] = category["name"]
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, name)
             if before_name != category["name"]:
                 result.setdefault("warnings", []).append(f"Fila {row_number}: categoria renombrada.")
         else:
             payload["id"] = next_id("cat", name)
             store.setdefault("categories", []).append(payload)
             result["created"] += 1
+            bulk_row(result, "created", row_number, name)
     return result
 
 
@@ -1519,11 +1625,13 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             payload["createdAt"] = existing.get("createdAt", utc_now())
             store["products"] = [payload if item["id"] == existing["id"] else item for item in store.get("products", [])]
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, f"{sku} - {title}")
         else:
             payload["id"] = next_id("prod", sku)
             payload["createdAt"] = utc_now()
             store.setdefault("products", []).append(payload)
             result["created"] += 1
+            bulk_row(result, "created", row_number, f"{sku} - {title}")
     return result
 
 
@@ -1556,7 +1664,9 @@ def import_stock_rows(store: dict, rows: list[dict]) -> dict:
                 "createdAt": utc_now(),
             }
         )
-        result["updated" if before != quantity else "skipped"] += 1
+        action = "updated" if before != quantity else "skipped"
+        result[action] += 1
+        bulk_row(result, action, row_number, f"{sku}: {before} -> {quantity}")
     return result
 
 
@@ -1603,6 +1713,7 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             payload["mustChangePassword"] = True if password else bool(user.get("mustChangePassword"))
             store["admin_users"] = [payload if item["id"] == user["id"] else item for item in store.get("admin_users", [])]
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, f"{name} - {email}")
         else:
             payload["id"] = next_id("admin", email)
             payload["createdAt"] = utc_now()
@@ -1610,6 +1721,7 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             payload["mustChangePassword"] = True
             store.setdefault("admin_users", []).append(payload)
             result["created"] += 1
+            bulk_row(result, "created", row_number, f"{name} - {email}")
     return result
 
 
@@ -1684,6 +1796,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             payload["mustChangePassword"] = True if password else bool(client.get("mustChangePassword"))
             store["clients"] = [payload if item["id"] == client["id"] else item for item in store.get("clients", [])]
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, f"{business_name} - {email}")
         else:
             payload["id"] = next_id("client", email)
             payload["createdAt"] = utc_now()
@@ -1691,6 +1804,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             payload["mustChangePassword"] = True
             store.setdefault("clients", []).append(payload)
             result["created"] += 1
+            bulk_row(result, "created", row_number, f"{business_name} - {email}")
     return result
 
 
@@ -1727,10 +1841,12 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
             payload["id"] = announcement["id"]
             store["announcements"] = [payload if item["id"] == announcement["id"] else item for item in store.get("announcements", [])]
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, title)
         else:
             payload["id"] = next_id("ann", title)
             store.setdefault("announcements", []).append(payload)
             result["created"] += 1
+            bulk_row(result, "created", row_number, title)
     return result
 
 
@@ -1760,6 +1876,7 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
         if duplicate:
             duplicate.update({"title": title, "assetType": asset_type, "createdAt": duplicate.get("createdAt", utc_now())})
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, f"{title} - {asset_type}")
         else:
             asset = {
                 "id": next_id("asset", title),
@@ -1771,6 +1888,7 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
             }
             store.setdefault("media_assets", []).append(asset)
             result["created"] += 1
+            bulk_row(result, "created", row_number, f"{title} - {asset_type}")
         if product:
             if asset_type == "pdf":
                 append_unique(product.setdefault("pdfUrls", []), [asset_url])
@@ -1823,18 +1941,76 @@ def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
                 for item in store.get("service_technicians", [])
             ]
             result["updated"] += 1
+            bulk_row(result, "updated", row_number, name)
         else:
             payload["id"] = next_id("svc", name)
             payload["createdAt"] = utc_now()
             store.setdefault("service_technicians", []).append(payload)
             result["created"] += 1
+            bulk_row(result, "created", row_number, name)
     return result
 
 
 def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoint: str):
+    import_mode = request.form.get("importMode", "import")
     store = load_store()
+
+    if import_mode == "discard":
+        draft_id = request.form.get("draftId", "")
+        result = blank_bulk_result()
+        if finish_import_draft(module, draft_id, "discarded"):
+            result["discarded"] = True
+            result["message"] = "Previsualizacion descartada."
+        else:
+            result["errors"] = ["No se pudo descartar la previsualizacion."]
+        remember_bulk_result(module, result)
+        return redirect(url_for(redirect_endpoint))
+
+    if import_mode == "confirm":
+        draft_id = request.form.get("draftId", "")
+        draft = load_import_draft(module, draft_id)
+        if not draft:
+            result = blank_bulk_result()
+            result["errors"] = ["La previsualizacion ya expiro o no existe. Vuelve a subir el archivo."]
+            remember_bulk_result(module, result)
+            return redirect(url_for(redirect_endpoint))
+
+        rows = draft["rows"]
+        result = importer(store, rows)
+        record_audit_event(
+            store,
+            "bulk_import_confirm",
+            entity_type,
+            draft_id,
+            f"Carga confirmada {module}: {result['created']} creados, {result['updated']} actualizados.",
+            metadata={
+                "module": module,
+                "draftId": draft_id,
+                "created": result.get("created", 0),
+                "updated": result.get("updated", 0),
+                "skipped": result.get("skipped", 0),
+                "errors": result.get("errors", [])[:8],
+            },
+        )
+        save_store(store)
+        finish_import_draft(module, draft_id, "confirmed")
+        result["confirmed"] = True
+        remember_bulk_result(module, result)
+        return redirect(url_for(redirect_endpoint))
+
     try:
         rows = read_tabular_upload(request.files.get("importFile"))
+        if import_mode == "preview":
+            preview_store = copy.deepcopy(store)
+            result = importer(preview_store, rows)
+            result["preview"] = True
+            result["draftId"] = create_import_draft(module, entity_type, rows, result)
+            result["confirmEndpoint"] = request.endpoint
+            result["discardEndpoint"] = request.endpoint
+            result["expiresInMinutes"] = max(1, IMPORT_DRAFT_TTL_SECONDS // 60)
+            remember_bulk_result(module, result)
+            return redirect(url_for(redirect_endpoint))
+
         result = importer(store, rows)
         record_audit_event(
             store,

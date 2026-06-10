@@ -220,3 +220,18 @@ class AuditEvent(Base):
     method: Mapped[str] = mapped_column(String(20), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class ImportDraft(Base):
+    __tablename__ = "import_drafts"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    module: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="preview", nullable=False)
+    created_by_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    created_by_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    rows: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

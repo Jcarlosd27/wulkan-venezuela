@@ -1,22 +1,102 @@
 {% if bulk_result %}
-<div class="alert alert-{{ 'warning' if bulk_result.errors else 'success' }} border-0 shadow-sm d-flex align-items-start gap-3" role="alert">
-  <div class="fs-5">
-    <i class="bi bi-{{ 'exclamation-triangle' if bulk_result.errors else 'check-circle' }}"></i>
+{% set has_errors = bulk_result.errors %}
+{% set is_preview = bulk_result.preview %}
+{% set title = "Previsualizacion de carga" if is_preview else ("Previsualizacion descartada" if bulk_result.discarded else "Carga masiva procesada") %}
+{% set icon = "eye" if is_preview else ("x-circle" if bulk_result.discarded else ("exclamation-triangle" if has_errors else "check-circle")) %}
+{% set alert_class = "info" if is_preview else ("secondary" if bulk_result.discarded else ("warning" if has_errors else "success")) %}
+<div class="alert alert-{{ alert_class }} border-0 shadow-sm bulk-result" role="alert">
+  <div class="bulk-result-head">
+    <div class="fs-5"><i class="bi bi-{{ icon }}"></i></div>
+    <div>
+      <strong class="d-block">{{ title }}</strong>
+      <span>
+        {{ "Se crearan" if is_preview else "Creados" }} {{ bulk_result.created }} ·
+        {{ "Se actualizaran" if is_preview else "Actualizados" }} {{ bulk_result.updated }} ·
+        {{ bulk_result.skipped }} omitidos
+      </span>
+      {% if is_preview %}
+      <small class="d-block mt-1">
+        El archivo aun no modifica datos. Confirma esta previsualizacion dentro de {{ bulk_result.expiresInMinutes }} min.
+      </small>
+      {% elif bulk_result.message %}
+      <small class="d-block mt-1">{{ bulk_result.message }}</small>
+      {% endif %}
+    </div>
   </div>
-  <div>
-    <strong class="d-block">Carga masiva procesada</strong>
-    <span>
-      {{ bulk_result.created }} creados ·
-      {{ bulk_result.updated }} actualizados ·
-      {{ bulk_result.skipped }} omitidos
-    </span>
-    {% if bulk_result.errors %}
-    <ul class="mb-0 mt-2 ps-3">
-      {% for error in bulk_result.errors %}
-      <li>{{ error }}</li>
-      {% endfor %}
-    </ul>
+
+  {% if bulk_result.createdRows or bulk_result.updatedRows or bulk_result.errorRows or bulk_result.skippedRows %}
+  <div class="bulk-result-grid">
+    {% if bulk_result.createdRows %}
+    <div>
+      <strong>{{ "Filas por crear" if is_preview else "Filas creadas" }}</strong>
+      <ul>
+        {% for row in bulk_result.createdRows %}
+        <li>Fila {{ row.row }}: {{ row.label }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if bulk_result.updatedRows %}
+    <div>
+      <strong>{{ "Filas por actualizar" if is_preview else "Filas actualizadas" }}</strong>
+      <ul>
+        {% for row in bulk_result.updatedRows %}
+        <li>Fila {{ row.row }}: {{ row.label }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if bulk_result.errorRows %}
+    <div>
+      <strong>Filas con error</strong>
+      <ul>
+        {% for row in bulk_result.errorRows %}
+        <li>Fila {{ row.row }}: {{ row.label }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% elif bulk_result.errors %}
+    <div>
+      <strong>Errores</strong>
+      <ul>
+        {% for error in bulk_result.errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if bulk_result.skippedRows %}
+    <div>
+      <strong>Filas omitidas</strong>
+      <ul>
+        {% for row in bulk_result.skippedRows %}
+        <li>Fila {{ row.row }}: {{ row.label }}</li>
+        {% endfor %}
+      </ul>
+    </div>
     {% endif %}
   </div>
+  {% endif %}
+
+  {% if is_preview and bulk_result.draftId %}
+  <div class="bulk-result-actions">
+    {% if bulk_result.created or bulk_result.updated %}
+    <form method="post" action="{{ url_for(bulk_result.confirmEndpoint) }}">
+      {{ csrf_field() }}
+      <input type="hidden" name="importMode" value="confirm">
+      <input type="hidden" name="draftId" value="{{ bulk_result.draftId }}">
+      <button class="btn btn-primary" type="submit">
+        <i class="bi bi-check2-circle"></i> Confirmar importacion
+      </button>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for(bulk_result.discardEndpoint) }}">
+      {{ csrf_field() }}
+      <input type="hidden" name="importMode" value="discard">
+      <input type="hidden" name="draftId" value="{{ bulk_result.draftId }}">
+      <button class="btn btn-light" type="submit">Descartar</button>
+    </form>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
