@@ -56,9 +56,17 @@
             {% endif %}
           </td>
           <td class="text-end">
-            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editAdminUser{{ loop.index }}">
-              <i class="bi bi-pencil"></i> Editar
-            </button>
+            <div class="d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editAdminUser{{ loop.index }}">
+                <i class="bi bi-pencil"></i> Editar
+              </button>
+              {% if can_delete_data() and session.get('admin_user_id') != user.id %}
+              <form method="post" action="{{ url_for('admin_user_delete', user_id=user.id) }}">
+                {{ csrf_field() }}
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+              </form>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% endfor %}

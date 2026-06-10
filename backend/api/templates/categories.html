@@ -171,10 +171,12 @@
           <button class="btn btn-primary" type="submit">Guardar cambios</button>
         </div>
       </form>
+      {% if can_delete_data() %}
       <form class="px-3 pb-3 text-end" method="post" action="{{ url_for('category_delete', category_id=category.id) }}">
         {{ csrf_field() }}
         <button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Eliminar categoria</button>
       </form>
+      {% endif %}
     </div>
   </div>
 </div>

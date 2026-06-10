@@ -122,9 +122,17 @@
             {% endif %}
           </td>
           <td class="text-end">
-            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}">
-              <i class="bi bi-pencil"></i> Editar
-            </button>
+            <div class="d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}">
+                <i class="bi bi-pencil"></i> Editar
+              </button>
+              {% if can_delete_data() %}
+              <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}">
+                {{ csrf_field() }}
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+              </form>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% endfor %}

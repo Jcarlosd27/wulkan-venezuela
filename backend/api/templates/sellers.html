@@ -112,9 +112,17 @@
           <td><span class="badge {{ seller.status | badge_class }}">{{ seller.status }}</span></td>
           <td class="text-end">
             {% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
-            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editSeller{{ loop.index }}">
-              <i class="bi bi-pencil"></i> Editar
-            </button>
+            <div class="d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editSeller{{ loop.index }}">
+                <i class="bi bi-pencil"></i> Editar
+              </button>
+              {% if can_delete_data() %}
+              <form method="post" action="{{ url_for('seller_delete', seller_id=seller.id) }}">
+                {{ csrf_field() }}
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+              </form>
+              {% endif %}
+            </div>
             {% endif %}
           </td>
         </tr>

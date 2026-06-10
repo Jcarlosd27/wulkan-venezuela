@@ -103,9 +103,17 @@
           <td>{{ "Archivo / URL" if asset.url else "Pendiente" }}</td>
           <td>{{ asset.createdAt }}</td>
           <td class="text-end">
+            <div class="d-flex justify-content-end gap-2">
             {% if asset.url %}
             <a class="btn btn-sm btn-light" href="{{ asset.url }}" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Abrir</a>
             {% endif %}
+            {% if can_delete_data() %}
+            <form method="post" action="{{ url_for('media_asset_delete', asset_id=asset.id) }}">
+              {{ csrf_field() }}
+              <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+            </form>
+            {% endif %}
+            </div>
           </td>
         </tr>
         {% else %}

@@ -93,10 +93,12 @@
               <a class="btn btn-sm btn-outline-dark" href="{{ url_for('product_edit', product_id=product.id) }}">
                 <i class="bi bi-pencil"></i>
               </a>
+              {% if can_delete_data() %}
               <form method="post" action="{{ url_for('product_delete', product_id=product.id) }}">
                 {{ csrf_field() }}
                 <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
               </form>
+              {% endif %}
             </div>
           </td>
         </tr>

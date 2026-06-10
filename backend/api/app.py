@@ -112,6 +112,7 @@ ORDER_MANAGEMENT_ROLES = {"super_admin", "commercial_manager", "operator"}
 COMMISSION_MANAGEMENT_ROLES = {"super_admin", "commercial_manager"}
 MOBILE_SALES_ROLES = {"super_admin", "commercial_manager", "sales"}
 ADMIN_ONLY_ROLES = {"super_admin"}
+DELETE_ROLES = {"super_admin"}
 MODULE_ACCESS = {
     "admin_users": ADMIN_ONLY_ROLES,
     "audit": ADMIN_ONLY_ROLES,
@@ -120,13 +121,52 @@ MODULE_ACCESS = {
     "credit": {"super_admin", "commercial_manager"},
     "orders": {"super_admin", "commercial_manager", "operator", "readonly"},
     "commissions": {"super_admin", "commercial_manager"},
-    "products": WEB_ADMIN_ROLES,
-    "media_library": WEB_ADMIN_ROLES,
-    "categories": WEB_ADMIN_ROLES,
-    "stock": WEB_ADMIN_ROLES,
-    "announcements": WEB_ADMIN_ROLES,
-    "service_technicians": WEB_ADMIN_ROLES,
+    "products": {"super_admin", "commercial_manager", "operator", "inventory", "readonly"},
+    "media_library": {"super_admin", "operator", "inventory", "readonly"},
+    "categories": {"super_admin", "operator", "inventory", "readonly"},
+    "stock": {"super_admin", "operator", "inventory", "readonly"},
+    "announcements": {"super_admin", "commercial_manager", "operator", "readonly"},
+    "service_technicians": {"super_admin", "commercial_manager", "operator", "readonly"},
 }
+ADMIN_MENU_GROUPS = [
+    {
+        "label": "Comercial",
+        "icon": "bi-briefcase",
+        "items": [
+            {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
+            {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "clients_import", "client_delete"]},
+            {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision"]},
+            {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "order_new", "order_status_update", "order_payment_create"]},
+            {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
+        ],
+    },
+    {
+        "label": "Catalogo",
+        "icon": "bi-box-seam",
+        "items": [
+            {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "product_delete"]},
+            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "category_delete"]},
+            {"module": "media_library", "endpoint": "media_library", "label": "Biblioteca tecnica", "icon": "bi-folder2-open", "active": ["media_library", "media_library_import", "media_asset_delete"]},
+            {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import"]},
+        ],
+    },
+    {
+        "label": "App movil",
+        "icon": "bi-phone",
+        "items": [
+            {"module": "announcements", "endpoint": "announcements", "label": "Anuncios app", "icon": "bi-megaphone", "active": ["announcements", "announcements_import", "announcement_edit", "announcement_delete"]},
+            {"module": "service_technicians", "endpoint": "service_technicians", "label": "Servicios tecnicos", "icon": "bi-tools", "active": ["service_technicians", "service_technicians_import", "service_technician_edit", "service_technician_delete"]},
+        ],
+    },
+    {
+        "label": "Sistema",
+        "icon": "bi-shield-lock",
+        "items": [
+            {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit"]},
+            {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete"]},
+        ],
+    },
+]
 
 
 def csrf_token() -> str:
@@ -335,6 +375,29 @@ def can_access_module(module: str) -> bool:
     return role_allowed(MODULE_ACCESS.get(module, WEB_ADMIN_ROLES))
 
 
+def can_delete_data() -> bool:
+    return role_allowed(DELETE_ROLES)
+
+
+def admin_menu_groups() -> list[dict]:
+    current_endpoint = request.endpoint or ""
+    groups: list[dict] = []
+    for group in ADMIN_MENU_GROUPS:
+        visible_items = []
+        for item in group["items"]:
+            if not can_access_module(item["module"]):
+                continue
+            visible_item = dict(item)
+            visible_item["active"] = current_endpoint in item["active"]
+            visible_items.append(visible_item)
+        if visible_items:
+            visible_group = dict(group)
+            visible_group["items"] = visible_items
+            visible_group["active"] = any(item["active"] for item in visible_items)
+            groups.append(visible_group)
+    return groups
+
+
 def forbidden_response():
     return render_template(
         "forbidden.html",
@@ -370,7 +433,9 @@ def security_context():
         "csrf_token": csrf_token,
         "csrf_field": csrf_field,
         "can_access_module": can_access_module,
+        "can_delete_data": can_delete_data,
         "current_admin_role": current_admin_role,
+        "admin_menu_groups": admin_menu_groups,
         "role_labels": ROLE_LABELS,
         "sale_type_label": sale_type_label,
         "commission_status_label": commission_status_label,
@@ -2625,6 +2690,28 @@ def admin_user_edit(user_id: str):
     return redirect(url_for("admin_users"))
 
 
+@app.post("/admin-users/<user_id>/delete")
+@require_roles("super_admin")
+def admin_user_delete(user_id: str):
+    store = load_store()
+    user = find_by_id(store.get("admin_users", []), user_id)
+    if not user or user.get("role") == "sales" or user_id == session.get("admin_user_id"):
+        return redirect(url_for("admin_users"))
+    before = copy.deepcopy(user)
+    store["admin_users"] = [item for item in store.get("admin_users", []) if item.get("id") != user_id]
+    record_change_event(
+        store,
+        "delete",
+        "admin_user",
+        user_id,
+        f"Usuario admin eliminado: {user.get('email', user_id)}.",
+        before,
+        None,
+    )
+    save_store(store)
+    return redirect(url_for("admin_users"))
+
+
 @app.route("/sellers", methods=["GET", "POST"])
 @require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def sellers():
@@ -2688,6 +2775,36 @@ def seller_edit(seller_id: str):
     return redirect(url_for("sellers"))
 
 
+@app.post("/sellers/<seller_id>/delete")
+@require_roles("super_admin")
+def seller_delete(seller_id: str):
+    store = load_store()
+    seller = find_by_id(store.get("admin_users", []), seller_id)
+    if not seller or seller.get("role") != "sales":
+        return redirect(url_for("sellers"))
+    before = copy.deepcopy(seller)
+    has_clients = any(client.get("assignedSellerId") == seller_id for client in store.get("clients", []))
+    has_orders = any(order.get("sellerId") == seller_id for order in store.get("orders", []))
+    if has_clients or has_orders:
+        seller["status"] = "inactive"
+        seller["updatedAt"] = utc_now()
+        after = seller
+    else:
+        store["admin_users"] = [item for item in store.get("admin_users", []) if item.get("id") != seller_id]
+        after = None
+    record_change_event(
+        store,
+        "delete",
+        "seller",
+        seller_id,
+        f"Vendedor {'desactivado' if after else 'eliminado'}: {before.get('name', seller_id)}.",
+        before,
+        after,
+    )
+    save_store(store)
+    return redirect(url_for("sellers"))
+
+
 @app.route("/clients", methods=["GET", "POST"])
 @require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def clients():
@@ -2741,7 +2858,37 @@ def client_edit(client_id: str):
     return redirect(url_for("clients"))
 
 
+@app.post("/clients/<client_id>/delete")
+@require_roles("super_admin")
+def client_delete(client_id: str):
+    store = load_store()
+    client = find_by_id(store.get("clients", []), client_id)
+    if not client:
+        return redirect(url_for("clients"))
+    before = copy.deepcopy(client)
+    has_orders = any(order.get("customerId") == client_id for order in store.get("orders", []))
+    if has_orders:
+        client["status"] = "inactive"
+        client["updatedAt"] = utc_now()
+        after = client
+    else:
+        store["clients"] = [item for item in store.get("clients", []) if item.get("id") != client_id]
+        after = None
+    record_change_event(
+        store,
+        "delete",
+        "client",
+        client_id,
+        f"Cliente {'desactivado' if after else 'eliminado'}: {before.get('businessName', client_id)}.",
+        before,
+        after,
+    )
+    save_store(store)
+    return redirect(url_for("clients"))
+
+
 @app.get("/products")
+@require_roles("super_admin", "commercial_manager", "operator", "inventory", "readonly")
 def products():
     store = load_store()
     query = request.args.get("q", "").strip().lower()
@@ -2842,7 +2989,7 @@ def product_edit(product_id: str):
 
 
 @app.post("/products/<product_id>/delete")
-@require_roles("super_admin", "operator", "inventory")
+@require_roles("super_admin")
 def product_delete(product_id: str):
     store = load_store()
     product = find_by_id(store["products"], product_id)
@@ -2861,6 +3008,7 @@ def product_delete(product_id: str):
 
 
 @app.route("/stock", methods=["GET", "POST"])
+@require_roles("super_admin", "operator", "inventory", "readonly")
 def stock():
     store = load_store()
     if request.method == "POST":
@@ -2967,6 +3115,7 @@ def stock_import():
 
 
 @app.route("/categories", methods=["GET", "POST"])
+@require_roles("super_admin", "operator", "inventory", "readonly")
 def categories():
     store = load_store()
     if request.method == "POST":
@@ -3031,7 +3180,7 @@ def category_edit(category_id: str):
 
 
 @app.post("/categories/<category_id>/delete")
-@require_roles("super_admin", "operator", "inventory")
+@require_roles("super_admin")
 def category_delete(category_id: str):
     store = load_store()
     if not any(product.get("categoryId") == category_id for product in store["products"]):
@@ -3051,6 +3200,7 @@ def category_delete(category_id: str):
 
 
 @app.route("/media-library", methods=["GET", "POST"])
+@require_roles("super_admin", "operator", "inventory", "readonly")
 def media_library():
     store = load_store()
     if request.method == "POST":
@@ -3106,8 +3256,39 @@ def media_library_import():
     return handle_bulk_import("media_library", "media_asset", import_media_assets_rows, "media_library")
 
 
+@app.post("/media-library/<asset_id>/delete")
+@require_roles("super_admin")
+def media_asset_delete(asset_id: str):
+    store = load_store()
+    asset = find_by_id(store.get("media_assets", []), asset_id)
+    if asset:
+        before = copy.deepcopy(asset)
+        store["media_assets"] = [item for item in store.get("media_assets", []) if item.get("id") != asset_id]
+        product = find_by_id(store.get("products", []), asset.get("productId", ""))
+        if product:
+            url = asset.get("url", "")
+            if asset.get("assetType") == "pdf":
+                product["pdfUrls"] = [item for item in product.get("pdfUrls", []) if item != url]
+            else:
+                product["imageUrls"] = [item for item in product.get("imageUrls", []) if item != url]
+                if product.get("imageUrl") == url:
+                    product["imageUrl"] = (product.get("imageUrls") or [""])[0]
+            product["updatedAt"] = utc_now()
+        record_change_event(
+            store,
+            "delete",
+            "media_asset",
+            asset_id,
+            f"Recurso tecnico eliminado: {asset.get('title', asset_id)}.",
+            before,
+            None,
+        )
+        save_store(store)
+    return redirect(url_for("media_library"))
+
+
 @app.route("/service-technicians", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "inventory", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def service_technicians():
     store = load_store()
     if request.method == "POST":
@@ -3166,7 +3347,7 @@ def service_technician_edit(technician_id: str):
 
 
 @app.post("/service-technicians/<technician_id>/delete")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles("super_admin")
 def service_technician_delete(technician_id: str):
     store = load_store()
     technician = find_by_id(store.get("service_technicians", []), technician_id)
@@ -3544,7 +3725,7 @@ def commission_status_update(order_id: str):
 
 
 @app.route("/announcements", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "inventory", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def announcements():
     store = load_store()
     if request.method == "POST":
@@ -3624,7 +3805,7 @@ def announcement_edit(announcement_id: str):
 
 
 @app.post("/announcements/<announcement_id>/delete")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles("super_admin")
 def announcement_delete(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)

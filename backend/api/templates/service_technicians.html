@@ -116,10 +116,12 @@
               <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editTechnician{{ loop.index }}">
                 <i class="bi bi-pencil"></i> Editar
               </button>
+              {% if can_delete_data() %}
               <form method="post" action="{{ url_for('service_technician_delete', technician_id=technician.id) }}">
                 {{ csrf_field() }}
                 <button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
               </form>
+              {% endif %}
             </div>
             {% endif %}
           </td>

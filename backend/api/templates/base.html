@@ -18,77 +18,25 @@
             <strong>Wulkan Venezuela</strong>
           </div>
         </div>
-        <nav class="nav sidebar-nav flex-column gap-1">
-          <span class="nav-section">Operacion</span>
+        <nav class="nav sidebar-nav flex-column gap-1" aria-label="Menu principal">
           <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
             <i class="bi bi-grid-1x2"></i> Dashboard
           </a>
-          {% if can_access_module('sellers') %}
-          <a class="nav-link {% if request.endpoint in ['sellers', 'seller_edit'] %}active{% endif %}" href="{{ url_for('sellers') }}">
-            <i class="bi bi-person-badge"></i> Vendedores
-          </a>
-          {% endif %}
-          {% if can_access_module('clients') %}
-          <a class="nav-link {% if request.endpoint in ['clients', 'client_edit'] %}active{% endif %}" href="{{ url_for('clients') }}">
-            <i class="bi bi-shop"></i> Clientes
-          </a>
-          {% endif %}
-          {% if can_access_module('credit') %}
-          <a class="nav-link {% if request.endpoint == 'credit' %}active{% endif %}" href="{{ url_for('credit') }}">
-            <i class="bi bi-credit-card-2-front"></i> Credito B2B
-          </a>
-          {% endif %}
-          {% if can_access_module('orders') %}
-          <a class="nav-link {% if request.endpoint in ['orders', 'order_new', 'order_status_update', 'order_payment_create'] %}active{% endif %}" href="{{ url_for('orders') }}">
-            <i class="bi bi-receipt"></i> Ordenes
-          </a>
-          {% endif %}
-          {% if can_access_module('commissions') %}
-          <a class="nav-link {% if request.endpoint in ['commissions', 'commission_status_update'] %}active{% endif %}" href="{{ url_for('commissions') }}">
-            <i class="bi bi-percent"></i> Comisiones
-          </a>
-          {% endif %}
-          {% if can_access_module('products') %}
-          <a class="nav-link {% if request.endpoint in ['products', 'product_new'] %}active{% endif %}" href="{{ url_for('products') }}">
-            <i class="bi bi-box-seam"></i> Productos
-          </a>
-          {% endif %}
-          {% if can_access_module('media_library') %}
-          <a class="nav-link {% if request.endpoint == 'media_library' %}active{% endif %}" href="{{ url_for('media_library') }}">
-            <i class="bi bi-folder2-open"></i> Biblioteca tecnica
-          </a>
-          {% endif %}
-          {% if can_access_module('categories') %}
-          <a class="nav-link {% if request.endpoint in ['categories', 'category_edit'] %}active{% endif %}" href="{{ url_for('categories') }}">
-            <i class="bi bi-tags"></i> Categorias
-          </a>
-          {% endif %}
-          {% if can_access_module('stock') %}
-          <a class="nav-link {% if request.endpoint == 'stock' %}active{% endif %}" href="{{ url_for('stock') }}">
-            <i class="bi bi-boxes"></i> Stock masivo
-          </a>
-          {% endif %}
-          {% if can_access_module('announcements') %}
-          <a class="nav-link {% if request.endpoint == 'announcements' %}active{% endif %}" href="{{ url_for('announcements') }}">
-            <i class="bi bi-megaphone"></i> Anuncios app
-          </a>
-          {% endif %}
-          {% if can_access_module('service_technicians') %}
-          <a class="nav-link {% if request.endpoint in ['service_technicians', 'service_technician_edit'] %}active{% endif %}" href="{{ url_for('service_technicians') }}">
-            <i class="bi bi-tools"></i> Servicios tecnicos
-          </a>
-          {% endif %}
-          <span class="nav-section mt-2">Sistema</span>
-          {% if can_access_module('audit') %}
-          <a class="nav-link {% if request.endpoint == 'audit' %}active{% endif %}" href="{{ url_for('audit') }}">
-            <i class="bi bi-shield-check"></i> Auditoria
-          </a>
-          {% endif %}
-          {% if can_access_module('admin_users') %}
-          <a class="nav-link {% if request.endpoint in ['admin_users', 'admin_user_edit'] %}active{% endif %}" href="{{ url_for('admin_users') }}">
-            <i class="bi bi-people"></i> Usuarios admin
-          </a>
-          {% endif %}
+          {% for group in admin_menu_groups() %}
+          <details class="nav-group" {% if group["active"] %}open{% endif %}>
+            <summary class="nav-group-title">
+              <span><i class="bi {{ group["icon"] }}"></i> {{ group["label"] }}</span>
+              <i class="bi bi-chevron-down nav-group-caret"></i>
+            </summary>
+            <div class="nav-submenu">
+              {% for item in group["items"] %}
+              <a class="nav-link nav-sub-link {% if item["active"] %}active{% endif %}" href="{{ url_for(item["endpoint"]) }}">
+                <i class="bi {{ item["icon"] }}"></i> {{ item["label"] }}
+              </a>
+              {% endfor %}
+            </div>
+          </details>
+          {% endfor %}
         </nav>
       </aside>
       <main class="content">
@@ -98,8 +46,12 @@
             <strong>Wulkan Venezuela</strong>
           </div>
           <div class="top-actions">
+            {% if can_access_module('announcements') %}
             <a class="btn btn-light btn-sm" href="{{ url_for('announcements') }}"><i class="bi bi-megaphone"></i> Anuncios</a>
+            {% endif %}
+            {% if can_access_module('stock') %}
             <a class="icon-btn" href="{{ url_for('stock') }}" aria-label="Stock"><i class="bi bi-bell"></i></a>
+            {% endif %}
             <div class="user-pill">
               <span>{{ session.get('admin_name', 'Admin') }}</span>
               <i class="bi bi-person-circle"></i>
