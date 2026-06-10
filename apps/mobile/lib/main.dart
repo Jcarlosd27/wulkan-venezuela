@@ -163,6 +163,7 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isSigningIn = false;
+  bool _showPassword = false;
   String _errorMessage = "";
 
   @override
@@ -253,6 +254,12 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
               passwordController: _passwordController,
               errorMessage: _errorMessage,
               isSigningIn: _isSigningIn,
+              showPassword: _showPassword,
+              onTogglePassword: () {
+                setState(() {
+                  _showPassword = !_showPassword;
+                });
+              },
               onSubmit: _signIn,
             ),
             const SizedBox(height: 18),
@@ -270,6 +277,8 @@ class _LoginAccessCard extends StatelessWidget {
     required this.passwordController,
     required this.errorMessage,
     required this.isSigningIn,
+    required this.showPassword,
+    required this.onTogglePassword,
     required this.onSubmit,
   });
 
@@ -277,6 +286,8 @@ class _LoginAccessCard extends StatelessWidget {
   final TextEditingController passwordController;
   final String errorMessage;
   final bool isSigningIn;
+  final bool showPassword;
+  final VoidCallback onTogglePassword;
   final VoidCallback onSubmit;
 
   @override
@@ -322,13 +333,22 @@ class _LoginAccessCard extends StatelessWidget {
             TextField(
               key: const Key('mobile-login-password'),
               controller: passwordController,
-              obscureText: true,
+              obscureText: !showPassword,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => onSubmit(),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Clave',
-                prefixIcon: Icon(Icons.key_outlined),
-                border: OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.key_outlined),
+                suffixIcon: IconButton(
+                  tooltip: showPassword ? 'Ocultar clave' : 'Ver clave',
+                  onPressed: onTogglePassword,
+                  icon: Icon(
+                    showPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                ),
+                border: const OutlineInputBorder(),
               ),
             ),
             if (errorMessage.isNotEmpty) ...[
@@ -795,13 +815,11 @@ class _SellerSummaryCard extends StatelessWidget {
                           session.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                  ),
                         ),
                         Text(
                           summary?.roleLabel ?? session.roleLabel,
@@ -825,9 +843,8 @@ class _SellerSummaryCard extends StatelessWidget {
                   Expanded(
                     child: _DarkMetric(
                       label: 'Clientes',
-                      value: isLoading
-                          ? '...'
-                          : '${summary?.clientsCount ?? 0}',
+                      value:
+                          isLoading ? '...' : '${summary?.clientsCount ?? 0}',
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1033,7 +1050,8 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
               children: [
                 Row(
                   children: [
-                    const Expanded(child: _SectionTitle(title: 'Pedido asistido')),
+                    const Expanded(
+                        child: _SectionTitle(title: 'Pedido asistido')),
                     TextButton.icon(
                       onPressed: mobileCartController.clear,
                       icon: const Icon(Icons.delete_outline),
@@ -1181,28 +1199,380 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
   }
 }
 
-class SellerClientsScreen extends StatelessWidget {
+class SellerClientsScreen extends StatefulWidget {
   const SellerClientsScreen({super.key});
+
+  @override
+  State<SellerClientsScreen> createState() => _SellerClientsScreenState();
+}
+
+class _SellerClientsScreenState extends State<SellerClientsScreen> {
+  late Future<List<MobileSellerClient>> _clientsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _clientsFuture = mobileRepository.listSellerClients();
+  }
+
+  void _reloadClients() {
+    setState(() {
+      _clientsFuture = mobileRepository.listSellerClients();
+    });
+  }
+
+  Future<void> _showCreateClientSheet() async {
+    final formKey = GlobalKey<FormState>();
+    final businessNameController = TextEditingController();
+    final emailController = TextEditingController();
+    final phoneController = TextEditingController();
+    final taxIdController = TextEditingController();
+    final contactNameController = TextEditingController();
+    final stateController = TextEditingController();
+    final cityController = TextEditingController();
+    final addressController = TextEditingController();
+    final creditController = TextEditingController();
+    final notesController = TextEditingController();
+
+    Future<void> disposeControllers() async {
+      businessNameController.dispose();
+      emailController.dispose();
+      phoneController.dispose();
+      taxIdController.dispose();
+      contactNameController.dispose();
+      stateController.dispose();
+      cityController.dispose();
+      addressController.dispose();
+      creditController.dispose();
+      notesController.dispose();
+    }
+
+    final created = await showModalBottomSheet<MobileSellerClientCreated>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        var isSaving = false;
+
+        Future<void> submit(StateSetter setSheetState) async {
+          if (isSaving || formKey.currentState?.validate() != true) {
+            return;
+          }
+          setSheetState(() => isSaving = true);
+          try {
+            final requestedCredit = double.tryParse(
+                  creditController.text.trim().replaceAll(',', '.'),
+                ) ??
+                0;
+            final result = await mobileRepository.createSellerClient(
+              MobileSellerClientDraft(
+                businessName: businessNameController.text.trim(),
+                email: emailController.text.trim().toLowerCase(),
+                phone: phoneController.text.trim(),
+                taxId: taxIdController.text.trim(),
+                contactName: contactNameController.text.trim(),
+                state: stateController.text.trim(),
+                city: cityController.text.trim(),
+                address: addressController.text.trim(),
+                notes: notesController.text.trim(),
+                creditRequestedUsd: requestedCredit,
+                defaultSaleType: requestedCredit > 0 ? 'term_credit' : 'cash',
+                allowedPaymentTermsDays: requestedCredit > 0
+                    ? const [0, 10, 15, 20, 30, 40]
+                    : const [0],
+              ),
+            );
+            if (sheetContext.mounted) {
+              Navigator.of(sheetContext).pop(result);
+            }
+          } catch (error) {
+            if (!sheetContext.mounted) {
+              return;
+            }
+            setSheetState(() => isSaving = false);
+            ScaffoldMessenger.of(sheetContext).showSnackBar(
+              SnackBar(
+                content: Text(
+                  error.toString().replaceFirst('Bad state: ', ''),
+                ),
+              ),
+            );
+          }
+        }
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 18,
+                right: 18,
+                top: 12,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+              ),
+              child: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: _wulkanLine,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Nuevo cliente ferretero',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Quedara asignado a tu cartera y el credito pasara a aprobacion comercial.',
+                        style: TextStyle(
+                          color: _wulkanMuted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: businessNameController,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Razon social / ferreteria',
+                          prefixIcon: Icon(Icons.storefront_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                                ? 'Ingresa el nombre comercial'
+                                : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Correo de acceso',
+                          prefixIcon: Icon(Icons.mail_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          final email = value?.trim() ?? '';
+                          if (email.isEmpty) {
+                            return 'Ingresa el correo';
+                          }
+                          if (!email.contains('@')) {
+                            return 'Correo no valido';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: phoneController,
+                              keyboardType: TextInputType.phone,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Telefono',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextFormField(
+                              controller: taxIdController,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'RIF',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: contactNameController,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Contacto principal',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: stateController,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Estado',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextFormField(
+                              controller: cityController,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Ciudad',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: addressController,
+                        minLines: 2,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Direccion comercial',
+                          prefixIcon: Icon(Icons.location_on_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: creditController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Cupo solicitado USD',
+                          helperText:
+                              'Opcional. El gerente lo aprueba en el panel.',
+                          prefixIcon: Icon(Icons.credit_card_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: notesController,
+                        minLines: 2,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Notas comerciales',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed:
+                              isSaving ? null : () => submit(setSheetState),
+                          icon: isSaving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.person_add_alt_1),
+                          label: Text(
+                            isSaving ? 'Creando cliente' : 'Crear cliente',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(disposeControllers);
+
+    if (created == null || !mounted) {
+      return;
+    }
+
+    _reloadClients();
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cliente creado'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(created.client.businessName),
+            const SizedBox(height: 10),
+            const Text(
+              'Clave temporal',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+            SelectableText(created.temporaryPassword),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<MobileSellerClient>>(
-      future: mobileRepository.listSellerClients(),
+      future: _clientsFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const _LoadingState();
         }
 
         final clients = snapshot.data ?? [];
-        if (clients.isEmpty) {
-          return const _EmptyState(message: 'Sin clientes asignados');
-        }
-
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const _SectionTitle(title: 'Clientes asignados'),
-            for (final client in clients) _SellerClientCard(client: client),
+            Row(
+              children: [
+                const Expanded(child: _SectionTitle(title: 'Clientes')),
+                FilledButton.icon(
+                  onPressed: _showCreateClientSheet,
+                  icon: const Icon(Icons.person_add_alt_1),
+                  label: const Text('Nuevo'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const _InlineNotice(
+              icon: Icons.assignment_ind_outlined,
+              title: 'Cartera comercial',
+              message:
+                  'Los clientes creados aqui quedan asignados a tu usuario vendedor.',
+              color: _wulkanOrange,
+            ),
+            const SizedBox(height: 12),
+            if (clients.isEmpty)
+              const _EmptyState(message: 'Sin clientes asignados')
+            else
+              for (final client in clients) _SellerClientCard(client: client),
           ],
         );
       },
@@ -1336,9 +1706,7 @@ class _SellerOrderCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    order.customerName.isEmpty
-                        ? order.id
-                        : order.customerName,
+                    order.customerName.isEmpty ? order.id : order.customerName,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w900,
                         ),
@@ -4283,15 +4651,29 @@ class _InlineNotice extends StatelessWidget {
   }
 }
 
-class _AnnouncementsStrip extends StatelessWidget {
+class _AnnouncementsStrip extends StatefulWidget {
   const _AnnouncementsStrip({required this.placement});
 
   final String placement;
 
   @override
+  State<_AnnouncementsStrip> createState() => _AnnouncementsStripState();
+}
+
+class _AnnouncementsStripState extends State<_AnnouncementsStrip> {
+  final _controller = PageController();
+  int _index = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<MobileAnnouncement>>(
-      future: mobileRepository.listAnnouncements(placement),
+      future: mobileRepository.listAnnouncements(widget.placement),
       builder: (context, snapshot) {
         final announcements = snapshot.data ?? [];
 
@@ -4300,10 +4682,43 @@ class _AnnouncementsStrip extends StatelessWidget {
           return const SizedBox.shrink();
         }
 
+        if (announcements.length == 1) {
+          return _AnnouncementCard(announcement: announcements.first);
+        }
+
         return Column(
           children: [
-            for (final announcement in announcements)
-              _AnnouncementCard(announcement: announcement),
+            SizedBox(
+              height: 178,
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: announcements.length,
+                onPageChanged: (value) => setState(() => _index = value),
+                itemBuilder: (context, index) {
+                  return _AnnouncementCard(announcement: announcements[index]);
+                },
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var index = 0; index < announcements.length; index++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: _index == index ? 18 : 7,
+                    height: 7,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: _index == index
+                          ? _wulkanOrange
+                          : _wulkanMuted.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
           ],
         );
       },

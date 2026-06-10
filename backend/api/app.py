@@ -472,7 +472,17 @@ def require_admin_session():
     if not session.get("admin_authenticated"):
         return redirect(url_for("login", next=request.path))
 
-    if session.get("admin_role") == "sales":
+    store = load_store()
+    admin_user = current_admin_user(store)
+    if not admin_user or admin_user.get("status") != "active":
+        session.clear()
+        return redirect(url_for("login", next=request.path))
+
+    session["admin_name"] = admin_user.get("name", "Admin Wulkan")
+    session["admin_role"] = admin_user.get("role", "operator")
+    session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
+
+    if admin_user.get("role") == "sales":
         session.clear()
         return redirect(url_for("login", mobile_only="1"))
 
@@ -708,6 +718,26 @@ def require_mobile_client_id() -> tuple[str, object | None]:
     if require_token and not mobile_token_client_id():
         return "", jsonify({"error": "Token movil requerido."})
     return customer_id, None
+
+
+def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | None]:
+    if not app.config.get("REQUIRE_MOBILE_TOKEN"):
+        return None, None
+
+    payload = mobile_token_payload()
+    if not payload:
+        return None, jsonify({"error": "Token movil requerido."})
+
+    if payload.get("type") == "admin":
+        user = find_by_id(store.get("admin_users", []), payload.get("adminUserId") or payload.get("id", ""))
+        if user and user.get("status") == "active" and user.get("role") in MOBILE_SALES_ROLES:
+            return user, None
+        return None, jsonify({"error": "Token movil invalido."})
+
+    client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
+    if client and client.get("status") == "active":
+        return client, None
+    return None, jsonify({"error": "Token movil invalido."})
 
 
 def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dict:
@@ -2587,8 +2617,8 @@ def service_technicians_page_context(store: dict, error: str = "") -> dict:
     }
 
 
-def active_announcements(placement: str | None = None) -> list[dict]:
-    store = load_store()
+def active_announcements(placement: str | None = None, store: dict | None = None) -> list[dict]:
+    store = store or load_store()
     announcements = [
         announcement
         for announcement in store["announcements"]
@@ -4111,9 +4141,13 @@ def api_client_credit():
 
 @app.get("/api/mobile/categories")
 def api_categories():
+    store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
     categories = [
         category
-        for category in load_store()["categories"]
+        for category in store["categories"]
         if category.get("status", "active") == "active"
     ]
     return jsonify({"items": categories})
@@ -4213,24 +4247,37 @@ def api_client_login():
 @app.post("/api/mobile/auth/change-password")
 def api_client_change_password():
     store = load_store()
-    customer_id, auth_error = require_mobile_client_id()
-    if auth_error:
-        return auth_error, 401
-    client = find_by_id(store.get("clients", []), customer_id)
-    if not client:
+    token_payload = mobile_token_payload()
+    if not token_payload:
+        return jsonify({"error": "Token movil requerido."}), 401
+
+    subject_type = "client"
+    subject = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    subject_name_key = "businessName"
+    if token_payload.get("type") == "admin":
+        subject_type = "admin_user"
+        subject = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        subject_name_key = "name"
+        if not subject or subject.get("status") != "active" or subject.get("role") not in MOBILE_SALES_ROLES:
+            return jsonify({"error": "Token movil invalido."}), 401
+    elif not subject or subject.get("status") != "active":
         return jsonify({"error": "Cliente no encontrado."}), 404
 
     payload = request.get_json(silent=True) or {}
     current_password = payload.get("currentPassword", "")
     new_password = payload.get("newPassword", "")
-    if not check_password_hash(client.get("passwordHash", ""), current_password):
+    if not check_password_hash(subject.get("passwordHash", ""), current_password):
         record_audit_event(
             store,
             "password_change_failed",
-            "client",
-            client["id"],
+            subject_type,
+            subject["id"],
             "Cambio de contrasena movil fallido por clave actual invalida.",
-            actor={"id": client["id"], "name": client.get("businessName", ""), "role": "client"},
+            actor={
+                "id": subject["id"],
+                "name": subject.get(subject_name_key, ""),
+                "role": subject.get("role", "client"),
+            },
         )
         save_store(store)
         return jsonify({"error": "La contrasena actual no coincide."}), 400
@@ -4238,16 +4285,20 @@ def api_client_change_password():
     if errors:
         return jsonify({"error": " ".join(errors)}), 400
 
-    client["passwordHash"] = generate_password_hash(new_password)
-    client["mustChangePassword"] = False
-    client["updatedAt"] = utc_now()
+    subject["passwordHash"] = generate_password_hash(new_password)
+    subject["mustChangePassword"] = False
+    subject["updatedAt"] = utc_now()
     record_audit_event(
         store,
         "password_change",
-        "client",
-        client["id"],
-        "Contrasena movil actualizada por el cliente.",
-        actor={"id": client["id"], "name": client.get("businessName", ""), "role": "client"},
+        subject_type,
+        subject["id"],
+        "Contrasena movil actualizada por el usuario.",
+        actor={
+            "id": subject["id"],
+            "name": subject.get(subject_name_key, ""),
+            "role": subject.get("role", "client"),
+        },
     )
     save_store(store)
     return jsonify({"status": "updated", "mustChangePassword": False})
@@ -4256,6 +4307,9 @@ def api_client_change_password():
 @app.get("/api/mobile/products")
 def api_products():
     store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
     products = [
         {
             "id": product["id"],
@@ -4292,13 +4346,20 @@ def api_products():
 
 @app.get("/api/mobile/announcements")
 def api_announcements():
+    store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
     placement = request.args.get("placement")
-    return jsonify({"items": active_announcements(placement)})
+    return jsonify({"items": active_announcements(placement, store)})
 
 
 @app.get("/api/mobile/service-technicians")
 def api_service_technicians():
     store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
     technicians = [
         technician
         for technician in store.get("service_technicians", [])
@@ -4310,6 +4371,9 @@ def api_service_technicians():
 @app.get("/api/mobile/locations")
 def api_locations():
     store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
     technicians = [
         technician
         for technician in store.get("service_technicians", [])

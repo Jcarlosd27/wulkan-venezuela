@@ -16,6 +16,7 @@ from werkzeug.security import generate_password_hash
 
 SELLER_EMAIL = "vendedor.flow@wulkan.test"
 SELLER_PASSWORD = "Vendedor2026"
+SUPER_ADMIN_ID = "admin-super-flow"
 MANAGER_ID = "admin-manager-flow"
 CLIENT_PASSWORD = "ClienteTemporal2026"
 CLIENT_NEW_PASSWORD = "ClienteFinal2026"
@@ -82,6 +83,16 @@ def base_store() -> dict:
         ],
         "orders": [],
         "admin_users": [
+            {
+                "id": SUPER_ADMIN_ID,
+                "name": "Super Admin Flow",
+                "email": "super.flow@wulkan.test",
+                "passwordHash": generate_password_hash("Super2026"),
+                "role": "super_admin",
+                "status": "active",
+                "createdAt": now,
+                "updatedAt": now,
+            },
             {
                 "id": MANAGER_ID,
                 "name": "Gerente Flow",
@@ -166,8 +177,8 @@ def main() -> int:
 
     with client.session_transaction() as session:
         session["admin_authenticated"] = True
-        session["admin_user_id"] = MANAGER_ID
-        session["admin_name"] = "Gerente Flow"
+        session["admin_user_id"] = SUPER_ADMIN_ID
+        session["admin_name"] = "Super Admin Flow"
         session["admin_role"] = "super_admin"
         session["_csrf_token"] = "csrf-flow"
 

@@ -687,6 +687,50 @@ body {
   font-weight: 650;
 }
 
+.audit-snapshot {
+  border: 1px solid var(--wulkan-line);
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 8px 10px;
+}
+
+.audit-snapshot summary {
+  cursor: pointer;
+  color: #0d6efd;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.audit-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.audit-snapshot-grid strong {
+  color: var(--wulkan-charcoal);
+  display: block;
+  font-size: 11px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.audit-snapshot-grid pre {
+  background: #111827;
+  border-radius: 10px;
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .audit-graphify-value {
   font-size: 17px !important;
   white-space: nowrap;

@@ -19,6 +19,9 @@ abstract class MobileRepository {
   Future<List<MobileOrderSummary>> listOrders(String customerId);
   Future<MobileSellerSummary> getSellerSummary();
   Future<List<MobileSellerClient>> listSellerClients();
+  Future<MobileSellerClientCreated> createSellerClient(
+    MobileSellerClientDraft draft,
+  );
   Future<List<MobileOrderSummary>> listSellerOrders();
   Future<List<MobileOrderSummary>> listSellerCommissions();
 }
@@ -272,6 +275,30 @@ class MockMobileRepository implements MobileRepository {
   }
 
   @override
+  Future<MobileSellerClientCreated> createSellerClient(
+    MobileSellerClientDraft draft,
+  ) async {
+    final requestedCredit = draft.creditRequestedUsd;
+    return MobileSellerClientCreated(
+      temporaryPassword: "Temporal2026",
+      client: MobileSellerClient(
+        id: "client-${draft.email.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '-')}",
+        businessName: draft.businessName,
+        email: draft.email,
+        phone: draft.phone,
+        city: draft.city,
+        state: draft.state,
+        creditEnabled: false,
+        creditStatus: "without_credit",
+        creditLimitUsd: 0,
+        creditAvailableUsd: 0,
+        creditExposureUsd: 0,
+        creditRequestStatus: requestedCredit > 0 ? "pending" : "none",
+      ),
+    );
+  }
+
+  @override
   Future<List<MobileOrderSummary>> listSellerOrders() async {
     return listOrders("client-ferreteria-valencia");
   }
@@ -430,6 +457,13 @@ class FirestoreMobileRepository implements MobileRepository {
   Future<List<MobileSellerClient>> listSellerClients() async => const [];
 
   @override
+  Future<MobileSellerClientCreated> createSellerClient(
+    MobileSellerClientDraft draft,
+  ) {
+    throw UnsupportedError("Alta de clientes disponible en modo API.");
+  }
+
+  @override
   Future<List<MobileOrderSummary>> listSellerOrders() async => const [];
 
   @override
@@ -578,6 +612,22 @@ class ApiMobileRepository implements MobileRepository {
   }
 
   @override
+  Future<MobileSellerClientCreated> createSellerClient(
+    MobileSellerClientDraft draft,
+  ) async {
+    final payload = await _postPayload("/seller/clients", draft.toJson());
+    final clientData = payload["client"];
+    final data =
+        clientData is Map<String, dynamic> ? clientData : <String, dynamic>{};
+
+    return MobileSellerClientCreated(
+      client: mapApiSellerClient(data),
+      temporaryPassword:
+          _asString(data["temporaryPassword"] ?? payload["temporaryPassword"]),
+    );
+  }
+
+  @override
   Future<List<MobileOrderSummary>> listSellerOrders() async {
     final items = await _getItems("/seller/orders");
     return items.map(mapApiOrder).toList();
@@ -613,6 +663,35 @@ class ApiMobileRepository implements MobileRepository {
       }
 
       final payload = jsonDecode(body);
+      return payload is Map<String, dynamic> ? payload : <String, dynamic>{};
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<Map<String, dynamic>> _postPayload(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final uri = _baseUri.replace(path: "${_baseUri.path}$path");
+    final client = HttpClient();
+
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      final session = await mobileAuthRepository.getCurrentSession();
+      if (session.accessToken.isNotEmpty) {
+        request.headers.set("Authorization", "Bearer ${session.accessToken}");
+      }
+      request.write(jsonEncode(body));
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError("Flask API ${response.statusCode}: $responseBody");
+      }
+
+      final payload = jsonDecode(responseBody);
       return payload is Map<String, dynamic> ? payload : <String, dynamic>{};
     } finally {
       client.close(force: true);

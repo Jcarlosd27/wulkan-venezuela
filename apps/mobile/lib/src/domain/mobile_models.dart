@@ -407,3 +407,63 @@ class MobileSellerClient {
   final double creditExposureUsd;
   final String creditRequestStatus;
 }
+
+class MobileSellerClientDraft {
+  const MobileSellerClientDraft({
+    required this.businessName,
+    required this.email,
+    this.phone = "",
+    this.taxId = "",
+    this.contactName = "",
+    this.address = "",
+    this.state = "",
+    this.city = "",
+    this.deliveryZone = "",
+    this.notes = "",
+    this.defaultSaleType = "cash",
+    this.creditRequestedUsd = 0,
+    this.allowedPaymentTermsDays = const [0],
+  });
+
+  final String businessName;
+  final String email;
+  final String phone;
+  final String taxId;
+  final String contactName;
+  final String address;
+  final String state;
+  final String city;
+  final String deliveryZone;
+  final String notes;
+  final String defaultSaleType;
+  final double creditRequestedUsd;
+  final List<int> allowedPaymentTermsDays;
+
+  Map<String, dynamic> toJson() {
+    return {
+      "businessName": businessName,
+      "email": email,
+      "phone": phone,
+      "taxId": taxId,
+      "contactName": contactName,
+      "address": address,
+      "state": state,
+      "city": city,
+      "deliveryZone": deliveryZone,
+      "notes": notes,
+      "defaultSaleType": defaultSaleType,
+      "creditRequestedUsd": creditRequestedUsd,
+      "allowedPaymentTermsDays": allowedPaymentTermsDays,
+    };
+  }
+}
+
+class MobileSellerClientCreated {
+  const MobileSellerClientCreated({
+    required this.client,
+    required this.temporaryPassword,
+  });
+
+  final MobileSellerClient client;
+  final String temporaryPassword;
+}

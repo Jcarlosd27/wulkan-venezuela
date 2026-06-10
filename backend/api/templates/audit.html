@@ -91,6 +91,21 @@
                 Cambios: {{ event.metadata.changedFields | join(', ') }}
               </small>
             {% endif %}
+            {% if event.metadata and (event.metadata.before or event.metadata.after) %}
+              <details class="audit-snapshot mt-2">
+                <summary>Ver antes / despues</summary>
+                <div class="audit-snapshot-grid">
+                  <div>
+                    <strong>Antes</strong>
+                    <pre>{{ event.metadata.before | tojson(indent=2) }}</pre>
+                  </div>
+                  <div>
+                    <strong>Despues</strong>
+                    <pre>{{ event.metadata.after | tojson(indent=2) }}</pre>
+                  </div>
+                </div>
+              </details>
+            {% endif %}
           </td>
           <td>
             <small class="d-block text-secondary">{{ event.method }} {{ event.path }}</small>
