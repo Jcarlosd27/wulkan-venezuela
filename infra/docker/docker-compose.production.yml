@@ -34,7 +34,13 @@ services:
         condition: service_healthy
     command: >
       sh -c "python -m alembic upgrade head &&
-      gunicorn --bind 0.0.0.0:5000 --workers ${WULKAN_WEB_WORKERS:-3} --timeout 60 wsgi:application"
+      gunicorn --bind 0.0.0.0:5000
+      --workers ${WULKAN_WEB_WORKERS:-1}
+      --threads ${WULKAN_WEB_THREADS:-4}
+      --timeout ${WULKAN_GUNICORN_TIMEOUT:-60}
+      --max-requests ${WULKAN_GUNICORN_MAX_REQUESTS:-600}
+      --max-requests-jitter ${WULKAN_GUNICORN_MAX_REQUESTS_JITTER:-60}
+      wsgi:application"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/healthz"]
       interval: 15s

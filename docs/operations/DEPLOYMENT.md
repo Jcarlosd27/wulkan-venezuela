@@ -66,8 +66,10 @@ El servicio `api` ejecuta:
 
 ```bash
 python -m alembic upgrade head
-gunicorn --bind 0.0.0.0:5000 --workers 3 --timeout 60 wsgi:application
+gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 4 --timeout 60 wsgi:application
 ```
+
+Para contenedores pequenos, partir con `WULKAN_WEB_WORKERS=1` evita duplicar memoria en procesos Python. Los threads mantienen concurrencia suficiente para el panel, API movil y cargas operativas iniciales. Si el trafico crece y la RAM queda estable bajo 70%, se puede aumentar workers o subir el tamano del contenedor.
 
 Caddy publica el dominio definido en `WULKAN_DOMAIN` y solicita certificado HTTPS automaticamente. El DNS del dominio debe apuntar al servidor antes de levantar el stack.
 

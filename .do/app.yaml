@@ -74,10 +74,28 @@ services:
         value: "16"
       - key: WULKAN_WEB_WORKERS
         scope: RUN_TIME
-        value: "3"
+        value: "1"
+      - key: WULKAN_WEB_THREADS
+        scope: RUN_TIME
+        value: "4"
       - key: WULKAN_GUNICORN_TIMEOUT
         scope: RUN_TIME
         value: "60"
+      - key: WULKAN_GUNICORN_MAX_REQUESTS
+        scope: RUN_TIME
+        value: "600"
+      - key: WULKAN_GUNICORN_MAX_REQUESTS_JITTER
+        scope: RUN_TIME
+        value: "60"
+      - key: WULKAN_DB_POOL_SIZE
+        scope: RUN_TIME
+        value: "2"
+      - key: WULKAN_DB_MAX_OVERFLOW
+        scope: RUN_TIME
+        value: "2"
+      - key: WULKAN_DB_POOL_RECYCLE_SECONDS
+        scope: RUN_TIME
+        value: "1800"
       - key: WULKAN_RUN_MIGRATIONS
         scope: RUN_TIME
         value: "1"

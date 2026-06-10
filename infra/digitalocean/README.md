@@ -17,6 +17,19 @@ Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil en
 - `infra/digitalocean/.env.digitalocean.example`: variables para revisar o copiar en App Platform.
 - `apps/mobile/dart_defines.digitalocean.example.json`: configuracion movil apuntando al dominio publico.
 
+## Uso de RAM en App Platform
+
+En el plan pequeno de App Platform se recomienda partir con:
+
+```bash
+WULKAN_WEB_WORKERS=1
+WULKAN_WEB_THREADS=4
+WULKAN_DB_POOL_SIZE=2
+WULKAN_DB_MAX_OVERFLOW=2
+```
+
+Esto evita levantar copias innecesarias de Flask/Gunicorn y mantiene un pool SQL acotado. Si la RAM se mantiene bajo 70% y el trafico crece, se puede escalar subiendo el tamano del contenedor antes de aumentar workers.
+
 ## Crear la app en DigitalOcean
 
 1. Crear un Space, por ejemplo `wulkan-assets`, en la region elegida. Para la configuracion actual se usa `atl1`.

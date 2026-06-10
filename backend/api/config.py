@@ -54,6 +54,9 @@ class Config:
     S3_PREFIX = os.environ.get("WULKAN_S3_PREFIX", "wulkan")
     S3_ACL = os.environ.get("WULKAN_S3_ACL", "")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    DB_POOL_SIZE = int(os.environ.get("WULKAN_DB_POOL_SIZE", "2"))
+    DB_MAX_OVERFLOW = int(os.environ.get("WULKAN_DB_MAX_OVERFLOW", "2"))
+    DB_POOL_RECYCLE_SECONDS = int(os.environ.get("WULKAN_DB_POOL_RECYCLE_SECONDS", "1800"))
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = False
