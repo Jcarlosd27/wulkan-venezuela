@@ -4472,7 +4472,7 @@ class _CustomerOrderRow extends StatelessWidget {
     return (
       label: 'Pago parcial',
       icon: Icons.payments_outlined,
-      color: const Color(0xFF0D6EFD)
+      color: _wulkanOrange
     );
   }
   if (payment.contains('paid')) {
@@ -6030,15 +6030,15 @@ Future<int?> _showQuantityPicker(
 Color _productAccentColor(String value) {
   final normalized = value.toLowerCase();
   if (normalized.contains('repuesto')) {
-    return const Color(0xFF0D6EFD);
+    return const Color(0xFFFF6A1A);
   }
   if (normalized.contains('industrial')) {
-    return const Color(0xFF6F42C1);
+    return _wulkanBlack;
   }
   if (normalized.contains('maquinaria') ||
       normalized.contains('jardin') ||
       normalized.contains('bosque')) {
-    return const Color(0xFF198754);
+    return const Color(0xFFD83B00);
   }
   return _wulkanOrange;
 }
