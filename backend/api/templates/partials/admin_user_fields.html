@@ -14,7 +14,6 @@
       <option value="super_admin" {% if selected_role == 'super_admin' %}selected{% endif %}>Super admin</option>
       <option value="commercial_manager" {% if selected_role == 'commercial_manager' %}selected{% endif %}>Gerente comercial</option>
       <option value="operator" {% if selected_role == 'operator' %}selected{% endif %}>Operador</option>
-      <option value="sales" {% if selected_role == 'sales' %}selected{% endif %}>Ventas</option>
       <option value="inventory" {% if selected_role == 'inventory' %}selected{% endif %}>Inventario</option>
       <option value="readonly" {% if selected_role == 'readonly' %}selected{% endif %}>Solo lectura</option>
     </select>
@@ -30,7 +29,12 @@
   </div>
   <div class="col-12">
     <label class="form-label fw-semibold">Contrasena</label>
-    <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if user is defined else 'Crea una contrasena temporal segura' }}" {% if user is not defined %}required{% endif %}>
+    <div class="input-group">
+      <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if user is defined else 'Crea una contrasena temporal segura' }}" {% if user is not defined %}required{% endif %}>
+      <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
     <div class="form-text">Minimo 10 caracteres, con letras y numeros.</div>
   </div>
 </div>

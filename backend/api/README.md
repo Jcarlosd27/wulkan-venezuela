@@ -163,6 +163,7 @@ El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade hea
 - Los formularios del admin usan CSRF con `csrf_field()`.
 - La API movil queda fuera de CSRF y usa autenticacion JSON/token.
 - Roles disponibles: `super_admin`, `commercial_manager`, `operator`, `sales`, `inventory`, `readonly`.
+- El rol `sales` es para vendedores en app movil; el panel web queda restringido a roles administrativos.
 - Auditoria disponible en `/audit` para `super_admin`.
 - Usuarios admin y clientes nuevos quedan con contrasena temporal y `mustChangePassword`.
 - El admin cambia su clave en `/account/password`.

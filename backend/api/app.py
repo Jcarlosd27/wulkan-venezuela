@@ -92,15 +92,15 @@ ROLE_LABELS = {
     "super_admin": "Super admin",
     "commercial_manager": "Gerente comercial",
     "operator": "Operador",
-    "sales": "Vendedor",
+    "sales": "Vendedor app movil",
     "inventory": "Inventario",
     "readonly": "Solo lectura",
 }
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
-ALL_ADMIN_ROLES = {"super_admin", "commercial_manager", "operator", "sales", "inventory", "readonly"}
+WEB_ADMIN_ROLES = {"super_admin", "commercial_manager", "operator", "inventory", "readonly"}
 WRITE_ROLES = {"super_admin", "commercial_manager", "operator"}
-SALES_ROLES = {"super_admin", "commercial_manager", "operator", "sales"}
+SALES_ROLES = {"super_admin", "commercial_manager", "operator"}
 INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
 CREDIT_APPROVAL_ROLES = {"super_admin", "commercial_manager", "operator"}
 COMMISSION_MANAGEMENT_ROLES = {"super_admin", "commercial_manager", "operator"}
@@ -110,16 +110,16 @@ MODULE_ACCESS = {
     "admin_users": ADMIN_ONLY_ROLES,
     "audit": ADMIN_ONLY_ROLES,
     "sellers": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "clients": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
-    "credit": {"super_admin", "commercial_manager", "operator", "sales"},
-    "orders": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
-    "commissions": {"super_admin", "commercial_manager", "operator", "sales", "readonly"},
-    "products": ALL_ADMIN_ROLES,
-    "media_library": ALL_ADMIN_ROLES,
-    "categories": ALL_ADMIN_ROLES,
-    "stock": ALL_ADMIN_ROLES,
-    "announcements": ALL_ADMIN_ROLES,
-    "service_technicians": ALL_ADMIN_ROLES,
+    "clients": {"super_admin", "commercial_manager", "operator", "readonly"},
+    "credit": {"super_admin", "commercial_manager", "operator"},
+    "orders": {"super_admin", "commercial_manager", "operator", "readonly"},
+    "commissions": {"super_admin", "commercial_manager", "operator", "readonly"},
+    "products": WEB_ADMIN_ROLES,
+    "media_library": WEB_ADMIN_ROLES,
+    "categories": WEB_ADMIN_ROLES,
+    "stock": WEB_ADMIN_ROLES,
+    "announcements": WEB_ADMIN_ROLES,
+    "service_technicians": WEB_ADMIN_ROLES,
 }
 
 
@@ -161,6 +161,17 @@ def sales_users(store: dict) -> list[dict]:
             user
             for user in store.get("admin_users", [])
             if user.get("role") == "sales" and user.get("status") == "active"
+        ],
+        key=lambda user: user.get("name", ""),
+    )
+
+
+def web_admin_users(store: dict) -> list[dict]:
+    return sorted(
+        [
+            user
+            for user in store.get("admin_users", [])
+            if user.get("role") != "sales"
         ],
         key=lambda user: user.get("name", ""),
     )
@@ -315,7 +326,7 @@ def password_errors(password: str) -> list[str]:
 
 
 def can_access_module(module: str) -> bool:
-    return role_allowed(MODULE_ACCESS.get(module, ALL_ADMIN_ROLES))
+    return role_allowed(MODULE_ACCESS.get(module, WEB_ADMIN_ROLES))
 
 
 def forbidden_response():
@@ -390,6 +401,10 @@ def require_admin_session():
     if not session.get("admin_authenticated"):
         return redirect(url_for("login", next=request.path))
 
+    if session.get("admin_role") == "sales":
+        session.clear()
+        return redirect(url_for("login", mobile_only="1"))
+
     allowed_password_endpoints = {"account_password", "logout"}
     if session.get("must_change_password") and request.endpoint not in allowed_password_endpoints:
         return redirect(url_for("account_password"))
@@ -400,6 +415,8 @@ def require_admin_session():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = ""
+    if request.args.get("mobile_only") == "1":
+        error = "Los vendedores ingresan desde la app movil. El panel web es solo administrativo."
 
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
@@ -441,6 +458,19 @@ def login():
         )
 
         if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
+            if admin_user.get("role") == "sales":
+                reset_login_attempts("admin", email)
+                record_audit_event(
+                    store,
+                    "login_blocked",
+                    "admin_user",
+                    admin_user["id"],
+                    "Intento de acceso web con rol vendedor; debe usar app movil.",
+                    actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": "sales"},
+                )
+                save_store(store)
+                error = "Los vendedores ingresan desde la app movil. El panel web es solo administrativo."
+                return render_template("login.html", error=error)
             reset_login_attempts("admin", email)
             session["admin_authenticated"] = True
             session["admin_user_id"] = admin_user["id"]
@@ -1812,7 +1842,7 @@ def admin_users():
         if error:
             return render_template(
                 "admin_users.html",
-                users=sorted(store["admin_users"], key=lambda item: item.get("name", "")),
+                users=web_admin_users(store),
                 error=error,
             )
         user = admin_user_payload()
@@ -1823,7 +1853,7 @@ def admin_users():
 
     return render_template(
         "admin_users.html",
-        users=sorted(store["admin_users"], key=lambda item: item.get("name", "")),
+        users=web_admin_users(store),
     )
 
 
@@ -1832,12 +1862,14 @@ def admin_users():
 def admin_user_edit(user_id: str):
     store = load_store()
     user = find_by_id(store["admin_users"], user_id)
+    if user and user.get("role") == "sales":
+        return forbidden_response()
     if user:
         error = admin_user_form_error(store, user)
         if error:
             return render_template(
                 "admin_users.html",
-                users=sorted(store["admin_users"], key=lambda item: item.get("name", "")),
+                users=web_admin_users(store),
                 error=error,
             )
         updated = admin_user_payload(user)
@@ -1896,7 +1928,7 @@ def seller_edit(seller_id: str):
 
 
 @app.route("/clients", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "sales", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def clients():
     store = load_store()
     if request.method == "POST":
@@ -1916,7 +1948,7 @@ def clients():
 
 
 @app.post("/clients/<client_id>/edit")
-@require_roles("super_admin", "commercial_manager", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator")
 def client_edit(client_id: str):
     store = load_store()
     client = find_by_id(store["clients"], client_id)
@@ -2229,7 +2261,7 @@ def media_library():
 
 
 @app.route("/service-technicians", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "sales", "inventory", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "inventory", "readonly")
 def service_technicians():
     store = load_store()
     if request.method == "POST":
@@ -2299,7 +2331,7 @@ def service_technician_delete(technician_id: str):
 
 
 @app.get("/credit")
-@require_roles("super_admin", "commercial_manager", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator")
 def credit():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -2405,7 +2437,7 @@ def audit():
 
 
 @app.get("/orders")
-@require_roles("super_admin", "commercial_manager", "operator", "sales", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def orders():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -2437,7 +2469,7 @@ def orders():
 
 
 @app.route("/orders/new", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator")
 def order_new():
     store = load_store()
     if request.method == "POST":
@@ -2577,7 +2609,7 @@ def order_payment_create(order_id: str):
 
 
 @app.get("/commissions")
-@require_roles("super_admin", "commercial_manager", "operator", "sales", "readonly")
+@require_roles("super_admin", "commercial_manager", "operator", "readonly")
 def commissions():
     store = load_store()
     return render_template("commissions.html", **commissions_page_context(store))
@@ -2614,6 +2646,7 @@ def commission_status_update(order_id: str):
 
 
 @app.route("/announcements", methods=["GET", "POST"])
+@require_roles("super_admin", "commercial_manager", "operator", "inventory", "readonly")
 def announcements():
     store = load_store()
     if request.method == "POST":
@@ -2647,7 +2680,7 @@ def announcements():
 
 
 @app.post("/announcements/<announcement_id>/edit")
-@require_roles("super_admin", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator")
 def announcement_edit(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)
@@ -2677,7 +2710,7 @@ def announcement_edit(announcement_id: str):
 
 
 @app.post("/announcements/<announcement_id>/delete")
-@require_roles("super_admin", "operator", "sales")
+@require_roles("super_admin", "commercial_manager", "operator")
 def announcement_delete(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)

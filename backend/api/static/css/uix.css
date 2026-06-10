@@ -513,6 +513,19 @@ body {
   box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.12);
 }
 
+.input-group [data-password-toggle] {
+  min-width: 44px;
+  border-color: var(--wulkan-line);
+  color: #6c757d;
+}
+
+.input-group [data-password-toggle]:hover,
+.input-group [data-password-toggle]:focus {
+  border-color: rgba(13, 110, 253, 0.35);
+  background: #f8f9fa;
+  color: var(--wulkan-orange);
+}
+
 .btn {
   border-radius: 10px;
   font-weight: 800;
@@ -1154,6 +1167,11 @@ body {
 .login-card .input-group-text {
   background: #fff6f2;
   color: var(--wulkan-orange);
+}
+
+.login-card [data-password-toggle] {
+  min-height: 42px;
+  background: #fff;
 }
 
 .login-card .btn-primary {

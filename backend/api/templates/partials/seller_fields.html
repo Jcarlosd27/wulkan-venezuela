@@ -13,7 +13,12 @@
   </div>
   <div class="col-12 col-md-5">
     <label class="form-label fw-semibold">Contrasena</label>
-    <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if seller is defined else 'Crea una contrasena temporal segura' }}" {% if seller is not defined %}required{% endif %}>
+    <div class="input-group">
+      <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if seller is defined else 'Crea una contrasena temporal segura' }}" {% if seller is not defined %}required{% endif %}>
+      <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
   </div>
   <div class="col-12 col-md-4">
     <label class="form-label fw-semibold">Telefono</label>
