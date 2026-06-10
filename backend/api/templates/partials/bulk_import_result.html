@@ -1,9 +1,10 @@
 {% if bulk_result %}
 {% set has_errors = bulk_result.errors %}
+{% set has_warnings = bulk_result.warnings %}
 {% set is_preview = bulk_result.preview %}
 {% set title = "Previsualizacion de carga" if is_preview else ("Previsualizacion descartada" if bulk_result.discarded else "Carga masiva procesada") %}
-{% set icon = "eye" if is_preview else ("x-circle" if bulk_result.discarded else ("exclamation-triangle" if has_errors else "check-circle")) %}
-{% set alert_class = "info" if is_preview else ("secondary" if bulk_result.discarded else ("warning" if has_errors else "success")) %}
+{% set icon = "eye" if is_preview else ("x-circle" if bulk_result.discarded else ("exclamation-triangle" if has_errors else ("info-circle" if has_warnings else "check-circle"))) %}
+{% set alert_class = "info" if is_preview else ("secondary" if bulk_result.discarded else ("warning" if has_errors or has_warnings else "success")) %}
 <div class="alert alert-{{ alert_class }} border-0 shadow-sm bulk-result" role="alert">
   <div class="bulk-result-head">
     <div class="fs-5"><i class="bi bi-{{ icon }}"></i></div>
@@ -14,6 +15,9 @@
         {{ "Se actualizaran" if is_preview else "Actualizados" }} {{ bulk_result.updated }} ·
         {{ bulk_result.skipped }} omitidos
       </span>
+      {% if bulk_result.warnings %}
+      <small class="d-block mt-1">{{ bulk_result.warnings | length }} advertencias para revisar antes de confirmar.</small>
+      {% endif %}
       {% if is_preview %}
       <small class="d-block mt-1">
         El archivo aun no modifica datos. Confirma esta previsualizacion dentro de {{ bulk_result.expiresInMinutes }} min.
@@ -24,7 +28,7 @@
     </div>
   </div>
 
-  {% if bulk_result.createdRows or bulk_result.updatedRows or bulk_result.errorRows or bulk_result.skippedRows %}
+  {% if bulk_result.createdRows or bulk_result.updatedRows or bulk_result.errorRows or bulk_result.warningRows or bulk_result.warnings or bulk_result.skippedRows %}
   <div class="bulk-result-grid">
     {% if bulk_result.createdRows %}
     <div>
@@ -61,6 +65,25 @@
       <ul>
         {% for error in bulk_result.errors %}
         <li>{{ error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if bulk_result.warningRows %}
+    <div>
+      <strong>Advertencias</strong>
+      <ul>
+        {% for row in bulk_result.warningRows %}
+        <li>Fila {{ row.row }}: {{ row.label }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% elif bulk_result.warnings %}
+    <div>
+      <strong>Advertencias</strong>
+      <ul>
+        {% for warning in bulk_result.warnings %}
+        <li>{{ warning }}</li>
         {% endfor %}
       </ul>
     </div>

@@ -1316,17 +1316,20 @@ def blank_bulk_result() -> dict:
         "created": 0,
         "updated": 0,
         "skipped": 0,
+        "warnings": [],
         "errors": [],
         "createdRows": [],
         "updatedRows": [],
         "skippedRows": [],
+        "warningRows": [],
         "errorRows": [],
     }
 
 
 def remember_bulk_result(module: str, result: dict) -> None:
     result["errors"] = result.get("errors", [])[:8]
-    for key in ("createdRows", "updatedRows", "skippedRows", "errorRows"):
+    result["warnings"] = result.get("warnings", [])[:8]
+    for key in ("createdRows", "updatedRows", "skippedRows", "warningRows", "errorRows"):
         result[key] = result.get(key, [])[:12]
     session[f"bulk_import_{module}"] = result
 
@@ -1341,6 +1344,11 @@ def bulk_error(result: dict, row_number: int, message: str) -> None:
     result["skipped"] = int(result.get("skipped", 0)) + 1
 
 
+def bulk_warning(result: dict, row_number: int, message: str) -> None:
+    result.setdefault("warnings", []).append(f"Fila {row_number}: {message}")
+    result.setdefault("warningRows", []).append({"row": row_number, "label": message})
+
+
 def bulk_row(result: dict, action: str, row_number: int, label: str) -> None:
     bucket = {
         "created": "createdRows",
@@ -1349,6 +1357,28 @@ def bulk_row(result: dict, action: str, row_number: int, label: str) -> None:
     }.get(action)
     if bucket:
         result.setdefault(bucket, []).append({"row": row_number, "label": label})
+
+
+def is_public_url(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized.startswith("https://") or normalized.startswith("http://")
+
+
+def warn_invalid_urls(result: dict, row_number: int, label: str, urls: list[str]) -> None:
+    invalid_urls = [url for url in urls if url and not is_public_url(url)]
+    if invalid_urls:
+        bulk_warning(result, row_number, f"{label} con URL no publica o invalida: {', '.join(invalid_urls[:3])}.")
+
+
+def duplicate_in_upload(seen: dict[str, int], value: str, row_number: int) -> str:
+    normalized = normalize_import_key(value)
+    if not normalized:
+        return ""
+    first_row = seen.get(normalized)
+    if first_row:
+        return f"valor duplicado en el archivo; ya aparece en fila {first_row}."
+    seen[normalized] = row_number
+    return ""
 
 
 def purge_expired_import_drafts() -> None:
@@ -1501,10 +1531,15 @@ def append_unique(target: list, values: list[str]) -> None:
 
 def import_categories_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    seen_categories: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         name = row_value(row, "name", "nombre", "categoria", "category")
         if not name:
             bulk_error(result, row_number, "la categoria requiere nombre.")
+            continue
+        duplicate_message = duplicate_in_upload(seen_categories, name, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"categoria {name}: {duplicate_message}")
             continue
         category_id = row_value(row, "id", "category_id", "categoria_id")
         category = find_by_id(store.get("categories", []), category_id) if category_id else find_category_by_name(store, name)
@@ -1524,30 +1559,31 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
             result["updated"] += 1
             bulk_row(result, "updated", row_number, name)
             if before_name != category["name"]:
-                result.setdefault("warnings", []).append(f"Fila {row_number}: categoria renombrada.")
+                bulk_warning(result, row_number, "categoria renombrada.")
         else:
             payload["id"] = next_id("cat", name)
             store.setdefault("categories", []).append(payload)
             result["created"] += 1
             bulk_row(result, "created", row_number, name)
+        warn_invalid_urls(result, row_number, "imagen de categoria", [payload.get("imageUrl", "")])
     return result
 
 
 def import_products_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    seen_skus: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         sku = row_value(row, "sku", "codigo", "codigo_sku").upper()
         title = row_value(row, "title", "nombre", "producto", "nombre_comercial")
         if not sku or not title:
             bulk_error(result, row_number, "producto requiere SKU y nombre.")
             continue
+        duplicate_message = duplicate_in_upload(seen_skus, sku, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"SKU {sku}: {duplicate_message}")
+            continue
 
         existing = find_product_by_sku(store, sku)
-        category = ensure_import_category(
-            store,
-            row_value(row, "categoryId", "categoria_id", "id_categoria"),
-            row_value(row, "categoryName", "category", "categoria", "familia"),
-        )
         current = existing or {}
         public_price = parse_import_float(
             row_value(row, "publicPriceUsd", "precio_publico_usd", "precio_usd", "precio"),
@@ -1564,6 +1600,14 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
         discount = parse_import_float(
             row_value(row, "discountPercent", "descuento", "descuento_porcentaje"),
             float(current.get("discountPercent") or 0),
+        )
+        if public_price <= 0:
+            bulk_error(result, row_number, f"SKU {sku} requiere precio_publico_usd mayor a 0.")
+            continue
+        category = ensure_import_category(
+            store,
+            row_value(row, "categoryId", "categoria_id", "id_categoria"),
+            row_value(row, "categoryName", "category", "categoria", "familia"),
         )
         primary_image = row_value(
             row,
@@ -1585,6 +1629,11 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
         pdf_urls = parse_import_list(row_value(row, "pdfUrls", "pdfs", "fichas_pdf", "pdf_tecnicos"))
         if not pdf_urls:
             pdf_urls = list(current.get("pdfUrls") or [])
+        if not primary_image and not gallery_images:
+            bulk_warning(result, row_number, f"SKU {sku} no tiene imagen principal ni galeria.")
+        warn_invalid_urls(result, row_number, f"SKU {sku} imagen principal", [primary_image])
+        warn_invalid_urls(result, row_number, f"SKU {sku} galeria", gallery_images)
+        warn_invalid_urls(result, row_number, f"SKU {sku} PDF tecnico", pdf_urls)
 
         payload = {
             "sku": sku,
@@ -1638,8 +1687,13 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
 def import_stock_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     reserved_by_product = stock_reserved_quantities(store.get("orders", []))
+    seen_skus: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         sku = row_value(row, "sku", "codigo", "codigo_sku").upper()
+        duplicate_message = duplicate_in_upload(seen_skus, sku, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"SKU {sku}: {duplicate_message}")
+            continue
         product = find_product_by_sku(store, sku)
         if not product:
             bulk_error(result, row_number, f"SKU {sku or 'vacio'} no existe.")
@@ -1672,11 +1726,16 @@ def import_stock_rows(store: dict, rows: list[dict]) -> dict:
 
 def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    seen_emails: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
         name = row_value(row, "name", "nombre", "vendedor")
         if not email or not name:
             bulk_error(result, row_number, "vendedor requiere nombre y email.")
+            continue
+        duplicate_message = duplicate_in_upload(seen_emails, email, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"{email}: {duplicate_message}")
             continue
         user = next((item for item in store.get("admin_users", []) if item.get("email", "").lower() == email), None)
         if user and user.get("role") != "sales":
@@ -1728,11 +1787,16 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
 def import_clients_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     can_approve = role_allowed(CREDIT_APPROVAL_ROLES)
+    seen_emails: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
         business_name = row_value(row, "businessName", "razon_social", "nombre_comercial", "cliente")
         if not email or not business_name:
             bulk_error(result, row_number, "cliente requiere nombre comercial y email.")
+            continue
+        duplicate_message = duplicate_in_upload(seen_emails, email, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"{email}: {duplicate_message}")
             continue
         client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == email), None)
         password = row_value(row, "password", "contrasena", "clave")
@@ -1749,9 +1813,8 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         if credit_limit > 0 and can_approve and credit_enabled:
             credit_status = "approved"
         elif credit_limit > 0 and not can_approve:
-            credit_status = "pending"
-            credit_enabled = False
-            credit_limit = float((client or {}).get("creditLimitUsd") or 0)
+            bulk_error(result, row_number, "solo gerente comercial o super admin puede importar cupos de credito aprobados.")
+            continue
         terms = [
             int(term)
             for term in re.split(r"[\s,;|/]+", row_value(row, "allowedPaymentTermsDays", "plazos", "plazos_pago", default="0"))
@@ -1783,6 +1846,12 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
             "updatedAt": utc_now(),
         }
+        if not payload.get("taxId"):
+            bulk_warning(result, row_number, f"{business_name} no tiene RIF/taxId.")
+        if not payload.get("contactName"):
+            bulk_warning(result, row_number, f"{business_name} no tiene contacto principal.")
+        if not payload.get("phone"):
+            bulk_warning(result, row_number, f"{business_name} no tiene telefono/WhatsApp.")
         if credit_status == "approved" and can_approve:
             payload["creditApprovedBy"] = session.get("admin_name", "Admin")
             payload["creditApprovedAt"] = utc_now()
@@ -1810,10 +1879,15 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
 
 def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    seen_titles: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         title = row_value(row, "title", "titulo", "banner")
         if not title:
             bulk_error(result, row_number, "banner requiere titulo.")
+            continue
+        duplicate_message = duplicate_in_upload(seen_titles, title, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"banner {title}: {duplicate_message}")
             continue
         announcement_id = row_value(row, "id", "announcement_id", "banner_id")
         announcement = find_by_id(store.get("announcements", []), announcement_id) if announcement_id else next(
@@ -1837,6 +1911,9 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
             "status": row_value(row, "status", "estado", default=(announcement or {}).get("status", "active")) or "active",
             "updatedAt": utc_now(),
         }
+        if not payload.get("imageUrl"):
+            bulk_warning(result, row_number, f"banner {title} no tiene imagen de carrusel.")
+        warn_invalid_urls(result, row_number, f"banner {title}", [payload.get("imageUrl", "")])
         if announcement:
             payload["id"] = announcement["id"]
             store["announcements"] = [payload if item["id"] == announcement["id"] else item for item in store.get("announcements", [])]
@@ -1852,12 +1929,19 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
 
 def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    seen_assets: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         title = row_value(row, "title", "titulo", "recurso", default="Activo Wulkan")
         asset_url = row_value(row, "url", "assetUrl", "archivo_url", "imagen_url", "pdf_url")
         if not asset_url:
             bulk_error(result, row_number, "recurso requiere URL de imagen o PDF.")
             continue
+        duplicate_key = f"{row_value(row, 'sku', 'producto_sku', 'sku_producto')}|{asset_url}"
+        duplicate_message = duplicate_in_upload(seen_assets, duplicate_key, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"recurso {title}: {duplicate_message}")
+            continue
+        warn_invalid_urls(result, row_number, f"recurso {title}", [asset_url])
         product_id = row_value(row, "productId", "producto_id", "id_producto")
         product = find_by_id(store.get("products", []), product_id) if product_id else find_product_by_sku(
             store,
@@ -1902,10 +1986,15 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
 
 def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    seen_services: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         name = row_value(row, "name", "nombre", "servicio")
         if not name:
             bulk_error(result, row_number, "servicio tecnico requiere nombre.")
+            continue
+        duplicate_message = duplicate_in_upload(seen_services, name, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"servicio tecnico {name}: {duplicate_message}")
             continue
         technician_id = row_value(row, "id", "technician_id", "servicio_id")
         technician = find_by_id(store.get("service_technicians", []), technician_id) if technician_id else next(
@@ -1933,6 +2022,10 @@ def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
             "notes": row_value(row, "notes", "notas", default=(technician or {}).get("notes", "")),
             "updatedAt": utc_now(),
         }
+        if not payload.get("phone") and not payload.get("whatsapp"):
+            bulk_warning(result, row_number, f"{name} no tiene telefono ni WhatsApp.")
+        if payload.get("visibleInApp") and not payload.get("city"):
+            bulk_warning(result, row_number, f"{name} visible en app sin ciudad/zona definida.")
         if technician:
             payload["id"] = technician["id"]
             payload["createdAt"] = technician.get("createdAt", utc_now())
