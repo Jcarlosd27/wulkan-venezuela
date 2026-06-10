@@ -32,7 +32,7 @@ Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil en
    - `WULKAN_S3_ENDPOINT_URL`
 5. Confirmar que la base `wulkan-db` quede enlazada y que `WULKAN_DATABASE_URL` use `${wulkan-db.DATABASE_URL}`.
 
-El backend falla al arrancar en produccion si intenta usar JSON, SQLite, storage local o secreto de desarrollo.
+El backend falla al arrancar en produccion si intenta usar JSON, SQLite, storage local o secreto de desarrollo. Con `WULKAN_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque tambien deshabilita cuentas, clientes, productos, categorias, anuncios y servicios tecnicos demo para que la app solo muestre datos creados o cargados por Wulkan.
 
 ## Crear el primer super admin
 
@@ -54,6 +54,8 @@ cd backend/api
 python scripts/readiness_check.py --strict
 python scripts/smoke_production.py --base-url https://crmwulky.com.ve
 ```
+
+`readiness_check.py --strict` debe pasar antes de venta comercial: exige super admin real, sin demos activos, catalogo/categorias reales y configuracion SQL/S3/token movil. Si todavia no hay productos reales cargados, el smoke puede fallar en catalogo aunque el servicio este sano.
 
 Endpoints importantes:
 

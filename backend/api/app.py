@@ -2981,7 +2981,12 @@ def api_client_credit():
 
 @app.get("/api/mobile/categories")
 def api_categories():
-    return jsonify({"items": load_store()["categories"]})
+    categories = [
+        category
+        for category in load_store()["categories"]
+        if category.get("status", "active") == "active"
+    ]
+    return jsonify({"items": categories})
 
 
 @app.post("/api/mobile/auth/login")

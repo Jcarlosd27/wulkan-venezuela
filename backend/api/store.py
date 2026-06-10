@@ -15,6 +15,11 @@ SQL_BACKEND_NAMES = {"sql", "database", "db"}
 PRODUCTION_ENV_NAME = "production"
 INSECURE_PRODUCTION_ADMIN_EMAILS = {"admin@wulkan.local"}
 INSECURE_PRODUCTION_CLIENT_EMAILS = {"ferreteria@wulkan.local"}
+INSECURE_PRODUCTION_CATEGORY_IDS = {"machinery-garden", "spare-parts", "industrial"}
+INSECURE_PRODUCTION_PRODUCT_IDS = {"prod-motosierra-45cc", "prod-cadena-18", "prod-motobomba-3x3"}
+INSECURE_PRODUCTION_ANNOUNCEMENT_IDS = {"ann-home-launch", "ann-checkout-payment"}
+INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS = {"svc-caracas-central"}
+INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS = {"mov-001", "mov-002", "mov-003"}
 
 
 def utc_now() -> str:
@@ -263,6 +268,31 @@ def production_safe_seed(store: dict[str, list[dict[str, Any]]]) -> dict[str, li
         client
         for client in sanitized.get("clients", [])
         if client.get("email", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_EMAILS
+    ]
+    sanitized["categories"] = [
+        category
+        for category in sanitized.get("categories", [])
+        if category.get("id", "").strip().lower() not in INSECURE_PRODUCTION_CATEGORY_IDS
+    ]
+    sanitized["products"] = [
+        product
+        for product in sanitized.get("products", [])
+        if product.get("id", "").strip().lower() not in INSECURE_PRODUCTION_PRODUCT_IDS
+    ]
+    sanitized["announcements"] = [
+        announcement
+        for announcement in sanitized.get("announcements", [])
+        if announcement.get("id", "").strip().lower() not in INSECURE_PRODUCTION_ANNOUNCEMENT_IDS
+    ]
+    sanitized["service_technicians"] = [
+        technician
+        for technician in sanitized.get("service_technicians", [])
+        if technician.get("id", "").strip().lower() not in INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS
+    ]
+    sanitized["stock_movements"] = [
+        movement
+        for movement in sanitized.get("stock_movements", [])
+        if movement.get("id", "").strip().lower() not in INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS
     ]
     return sanitized
 

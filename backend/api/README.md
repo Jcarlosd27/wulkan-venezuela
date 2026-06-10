@@ -114,7 +114,7 @@ WULKAN_S3_ENDPOINT_URL=https://atl1.digitaloceanspaces.com
 WULKAN_S3_PREFIX=production
 ```
 
-En `production`, Flask falla al arrancar si intenta usar secreto de desarrollo, backend JSON, SQLite, fallback a JSON o storage local.
+En `production`, Flask falla al arrancar si intenta usar secreto de desarrollo, backend JSON, SQLite, fallback a JSON o storage local. Con `WULKAN_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque productivo deshabilita cuentas demo y oculta el catalogo demo inicial.
 
 ## Produccion con Docker
 
@@ -156,7 +156,7 @@ Arquitectura recomendada:
 - DigitalOcean Spaces usa `WULKAN_STORAGE_BACKEND=s3`.
 - La app movil se compila con `apps/mobile/dart_defines.digitalocean.example.json`.
 
-El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade head` al iniciar y luego levanta Gunicorn con el puerto entregado por DigitalOcean.
+El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade head` al iniciar, deshabilita seeds demo en produccion y luego levanta Gunicorn con el puerto entregado por DigitalOcean.
 
 ## Seguridad admin
 

@@ -14,7 +14,11 @@ if str(ROOT_DIR) not in sys.path:
 from config import get_config
 from store import (
     INSECURE_PRODUCTION_ADMIN_EMAILS,
+    INSECURE_PRODUCTION_ANNOUNCEMENT_IDS,
+    INSECURE_PRODUCTION_CATEGORY_IDS,
     INSECURE_PRODUCTION_CLIENT_EMAILS,
+    INSECURE_PRODUCTION_PRODUCT_IDS,
+    INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS,
     load_store,
 )
 
@@ -126,10 +130,39 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         for client in active_clients
         if client.get("email", "").lower() in INSECURE_PRODUCTION_CLIENT_EMAILS
     ]
+    demo_products = [
+        product.get("sku") or product.get("id", "")
+        for product in active_products
+        if product.get("id", "").lower() in INSECURE_PRODUCTION_PRODUCT_IDS
+    ]
+    demo_categories = [
+        category.get("name") or category.get("id", "")
+        for category in active_categories
+        if category.get("id", "").lower() in INSECURE_PRODUCTION_CATEGORY_IDS
+    ]
+    demo_announcements = [
+        announcement.get("title") or announcement.get("id", "")
+        for announcement in active_items(store.get("announcements", []))
+        if announcement.get("id", "").lower() in INSECURE_PRODUCTION_ANNOUNCEMENT_IDS
+    ]
+    demo_technicians = [
+        technician.get("name") or technician.get("id", "")
+        for technician in active_items(store.get("service_technicians", []))
+        if technician.get("id", "").lower() in INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS
+        and technician.get("visibleInApp", True)
+    ]
     if insecure_admins:
         add(findings, "error" if strict else "warn", "demo-admin", f"Cuentas admin demo activas: {', '.join(insecure_admins)}.")
     if insecure_clients:
         add(findings, "error" if strict else "warn", "demo-client", f"Clientes demo activos: {', '.join(insecure_clients)}.")
+    if demo_products:
+        add(findings, "error" if strict else "warn", "demo-products", f"Productos demo activos: {', '.join(demo_products)}.")
+    if demo_categories:
+        add(findings, "error" if strict else "warn", "demo-categories", f"Categorias demo activas: {', '.join(demo_categories)}.")
+    if demo_announcements:
+        add(findings, "error" if strict else "warn", "demo-announcements", f"Anuncios demo activos: {', '.join(demo_announcements)}.")
+    if demo_technicians:
+        add(findings, "error" if strict else "warn", "demo-technicians", f"Servicios tecnicos demo visibles: {', '.join(demo_technicians)}.")
 
     if not any(user.get("role") == "sales" for user in active_admins):
         add(findings, "warn", "seller", "No hay vendedores activos para cartera/comisiones.")

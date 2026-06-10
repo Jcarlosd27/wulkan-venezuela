@@ -15,11 +15,20 @@ if str(ROOT_DIR) not in sys.path:
 
 from config import Config
 from db import SessionLocal, init_database
-from models import AdminUser, Client
+from models import AdminUser, Announcement, Category, Client, Product, ServiceTechnician, StockMovement
+from store import (
+    INSECURE_PRODUCTION_ADMIN_EMAILS,
+    INSECURE_PRODUCTION_ANNOUNCEMENT_IDS,
+    INSECURE_PRODUCTION_CATEGORY_IDS,
+    INSECURE_PRODUCTION_CLIENT_EMAILS,
+    INSECURE_PRODUCTION_PRODUCT_IDS,
+    INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS,
+    INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS,
+)
 
 
-DEFAULT_ADMIN_EMAILS = {"admin@wulkan.local"}
-DEFAULT_CLIENT_EMAILS = {"ferreteria@wulkan.local"}
+DEFAULT_ADMIN_EMAILS = INSECURE_PRODUCTION_ADMIN_EMAILS
+DEFAULT_CLIENT_EMAILS = INSECURE_PRODUCTION_CLIENT_EMAILS
 
 
 def utc_now() -> datetime:
@@ -35,8 +44,28 @@ def disabled_payload(payload: dict, status: str) -> dict:
     return updated
 
 
+def disabled_catalog_payload(payload: dict, status: str) -> dict:
+    updated = dict(payload or {})
+    updated["status"] = status
+    updated["disabledReason"] = "disabled_default_production_seed"
+    updated["updatedAt"] = utc_now().isoformat()
+    return updated
+
+
 def random_password_hash() -> str:
     return generate_password_hash(secrets.token_urlsafe(48))
+
+
+def disable_status_rows(session, model, ids: set[str], status: str, label: str) -> list[str]:
+    rows = session.query(model).filter(model.id.in_(ids)).all()
+    disabled: list[str] = []
+    now = utc_now()
+    for row in rows:
+        row.status = status
+        row.updated_at = now
+        row.payload = disabled_catalog_payload(row.payload, status)
+        disabled.append(f"{label}:{row.id}")
+    return disabled
 
 
 def main() -> None:
@@ -77,6 +106,33 @@ def main() -> None:
             client.updated_at = now
             client.payload = disabled_payload(client.payload, "blocked")
             disabled.append(f"client:{client.email}")
+
+        disabled.extend(disable_status_rows(session, Product, INSECURE_PRODUCTION_PRODUCT_IDS, "deleted", "product"))
+        disabled.extend(disable_status_rows(session, Category, INSECURE_PRODUCTION_CATEGORY_IDS, "deleted", "category"))
+        disabled.extend(
+            disable_status_rows(session, Announcement, INSECURE_PRODUCTION_ANNOUNCEMENT_IDS, "deleted", "announcement")
+        )
+
+        technicians = (
+            session.query(ServiceTechnician)
+            .filter(ServiceTechnician.id.in_(INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS))
+            .all()
+        )
+        for technician in technicians:
+            technician.status = "inactive"
+            technician.visible_in_app = False
+            technician.updated_at = now
+            technician.payload = disabled_catalog_payload(technician.payload, "inactive")
+            technician.payload["visibleInApp"] = False
+            disabled.append(f"service-technician:{technician.id}")
+
+        stock_deleted = (
+            session.query(StockMovement)
+            .filter(StockMovement.id.in_(INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS))
+            .delete(synchronize_session=False)
+        )
+        if stock_deleted:
+            disabled.append(f"stock-movement:{stock_deleted}")
 
         session.commit()
 
