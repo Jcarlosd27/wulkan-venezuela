@@ -1,723 +1,627 @@
-# Wulkan Venezuela - Alcance Comercial del Admin Panel y App Movil
+# Presentacion Comercial - Wulkan CRM Ecommerce B2B
 
-## 1. Resumen Ejecutivo
+Actualizacion: 10 de junio de 2026
 
-Wulkan Venezuela cuenta actualmente con una plataforma ecommerce B2B/B2C orientada a la venta de maquinaria, repuestos y productos asociados al mercado venezolano.
+## 1. Resumen ejecutivo
+
+Wulkan Venezuela cuenta con una plataforma comercial B2B para administrar ventas de maquinaria, repuestos, productos tecnicos, clientes ferreteros, vendedores, credito, stock y ordenes desde un solo ecosistema.
 
 La solucion esta compuesta por:
 
-- **Admin Panel Web** para operacion interna, gestion comercial, inventario, catalogo, credito B2B, ordenes, comisiones, servicios tecnicos y auditoria.
-- **App Movil Android** para clientes ferreteros y vendedores, conectada al backend productivo.
-- **Backend Flask API** publicado en DigitalOcean, con dominio productivo `https://crmwulky.com.ve`.
-- **Base de datos SQL** para persistencia comercial.
-- **DigitalOcean Spaces/S3** para imagenes, PDFs y recursos multimedia.
-- **Bootstrap 5.3 + UIX + Graphify** en el panel administrativo para una experiencia profesional, clara y eficiente.
+- **Admin Panel Web** para el equipo interno de Wulkan.
+- **App Movil Android** para clientes ferreteros y vendedores.
+- **Backend Flask API** publicado en DigitalOcean.
+- **Dominio productivo**: `https://crmwulky.com.ve`.
+- **Base de datos SQL** para informacion comercial real.
+- **DigitalOcean Spaces/S3** para imagenes, galerias, PDFs y banners.
+- **Bootstrap 5.3, UIX y Graphify** para una interfaz administrativa profesional y eficiente.
 
-El objetivo de la plataforma es permitir que Wulkan administre su catalogo, stock, clientes ferreteros, vendedores, creditos, ordenes y anuncios moviles desde un solo sistema, con trazabilidad completa.
+El objetivo es que Wulkan pueda digitalizar su proceso comercial sin depender de pagos online. Las ordenes se generan desde la app o desde el admin, y Wulkan gestiona cobro, validacion, despacho y seguimiento de manera operativa.
 
-## 2. Estado Actual del Producto
+## 2. Estado comercial actual
 
-Hoy el sistema ya permite operar un flujo comercial real:
+El sistema ya esta preparado para iniciar carga de informacion real y operar un piloto comercial controlado con Wulkan.
 
-- Crear y administrar productos.
-- Asociar categorias, imagenes, galerias y PDFs tecnicos.
-- Administrar stock y movimientos de inventario.
-- Crear clientes ferreteros con acceso movil.
-- Crear vendedores con acceso desde la app movil.
-- Asignar clientes a vendedores.
-- Solicitar y aprobar lineas de credito B2B.
-- Registrar ordenes desde app movil o desde el admin.
-- Registrar tipo de venta: contado, credito por dias o linea de credito.
-- Calcular saldo, credito disponible, stock comprometido y comision del vendedor.
-- Publicar banners/anuncios visibles en el carrusel de la app.
-- Publicar servicios tecnicos visibles en la app.
-- Ver auditoria de eventos criticos.
-- Importar informacion masivamente desde Excel/CSV con previsualizacion antes de guardar.
+Actualmente permite:
 
-La plataforma productiva ya esta preparada para recibir informacion real de Wulkan. No depende de que el telefono este conectado al computador: la app, compilada apuntando al backend productivo, consulta los datos por internet desde `https://crmwulky.com.ve/api/mobile`.
+- Crear productos reales con SKU, descripcion, precios, descuento, stock, categoria, imagen principal, galeria de imagenes, PDFs tecnicos, variantes y especificaciones.
+- Mostrar productos creados en el admin dentro de la app movil.
+- Publicar banners/anuncios para el carrusel de la app movil.
+- Crear categorias con imagen y estado.
+- Cargar stock individual o masivo.
+- Administrar clientes ferreteros con usuario, clave, estado, direccion, RIF, vendedor asignado y credito.
+- Administrar vendedores con cartera, zona y comision.
+- Crear ordenes con tipo de venta: contado, credito por dias o linea de credito.
+- Consumir credito aprobado por cliente ferretero.
+- Registrar abonos externos, sin pasarela de pago online.
+- Calcular saldo pendiente, credito disponible, stock comprometido y comision del vendedor.
+- Publicar servicios tecnicos visibles para la app.
+- Importar informacion desde Excel/CSV con previsualizacion antes de guardar.
+- Auditar cambios relevantes con trazabilidad.
 
-## 3. Roles del Admin Panel Web
+Los datos demo fueron retirados para que Wulkan pueda comenzar a cargar informacion real sin contaminacion de pruebas.
+
+## 3. Sincronizacion Admin Panel - App Movil
+
+La app movil no necesita estar conectada al computador para recibir productos.
+
+Cuando la APK esta instalada apuntando al backend productivo, el telefono consulta por internet:
+
+```text
+https://crmwulky.com.ve/api/mobile
+```
+
+Flujo real:
+
+1. Wulkan crea o edita productos desde el admin web.
+2. El backend guarda la informacion en la base de datos SQL.
+3. La app movil consulta el backend por internet.
+4. El cliente ferretero o vendedor ve productos, stock, precios, banners, credito y ordenes segun su rol.
+
+Para que un producto se vea correctamente en la app debe estar activo y tener, como minimo:
+
+- SKU.
+- Nombre comercial.
+- Categoria.
+- Precio.
+- Stock.
+- Descripcion.
+- Imagen principal.
+
+Si se cargan varias imagenes en la galeria del producto, la app puede mostrarlas como carrusel/deslizamiento en el detalle del producto.
+
+## 4. Identidad visual
+
+El sistema ya esta alineado visualmente con Wulkan:
+
+- Paleta naranja, negro y blanco.
+- Login con logo Wulkan.
+- Admin panel con acentos Wulkan sobre Bootstrap 5.3.
+- App movil con identidad visual consistente.
+- Icono/favico de navegador con concepto **CRM** para el admin.
+- Componentes visuales limpios y enfocados en operacion comercial.
+
+La paleta no satura todas las pantallas, sino que usa el naranja y negro en puntos clave: botones, navegacion activa, metricas, focus de formularios y elementos de marca.
+
+## 5. Roles del Admin Panel Web
+
+El admin panel esta pensado para usuarios internos de Wulkan. Los vendedores no deben operar desde el panel web; ellos trabajan desde la app movil.
 
 ### Super Admin
 
-Rol de control total del sistema.
+Control total del sistema.
 
 Puede:
 
-- Ver todos los modulos del admin.
-- Crear, editar y eliminar datos.
-- Administrar usuarios administrativos.
+- Ver todos los modulos.
+- Crear, editar y eliminar informacion.
+- Administrar usuarios admin.
 - Administrar vendedores.
 - Administrar clientes ferreteros.
 - Administrar productos, categorias, stock, biblioteca tecnica y anuncios.
-- Aprobar o rechazar lineas de credito.
+- Aprobar o rechazar creditos.
 - Gestionar ordenes y abonos.
-- Gestionar estados de comisiones.
-- Ver auditoria operativa.
-- Eliminar registros cuando corresponda.
+- Gestionar comisiones.
+- Ver auditoria.
+- Ejecutar acciones sensibles de CRUD.
 
 Uso recomendado:
 
-- Gerencia general, direccion de tecnologia o responsable maximo del sistema.
+- Gerencia general.
+- Responsable maximo del sistema.
+- Administracion principal de Wulkan.
 
-### Gerente Comercial
+### Gerente comercial
 
-Rol orientado al control comercial y financiero de la operacion.
+Rol enfocado en control comercial, credito y comisiones.
 
 Puede:
 
 - Ver dashboard comercial.
 - Administrar vendedores.
 - Administrar clientes ferreteros.
-- Revisar y aprobar/rechazar creditos B2B.
+- Revisar solicitudes de credito.
+- Aprobar o rechazar lineas de credito.
 - Revisar vencimientos e historial de credito.
 - Gestionar ordenes.
-- Gestionar comisiones.
-- Administrar anuncios de app.
-- Administrar servicios tecnicos.
-- Crear y editar informacion comercial relevante.
+- Revisar comisiones.
+- Revisar cartera comercial.
 
 Restricciones:
 
 - No administra usuarios internos del sistema.
-- No tiene acceso completo a auditoria de sistema.
-- No elimina registros criticos, salvo que sea Super Admin.
-
-Uso recomendado:
-
-- Gerente comercial de Wulkan Venezuela.
+- No elimina informacion critica salvo que tenga rol Super Admin.
 
 ### Operador
 
-Rol operativo para administracion diaria.
+Rol para administracion diaria.
 
 Puede:
 
 - Gestionar productos.
-- Gestionar clientes.
-- Gestionar ordenes.
 - Gestionar categorias.
 - Gestionar biblioteca tecnica.
-- Gestionar anuncios app.
-- Gestionar servicios tecnicos.
-- Crear pedidos asistidos desde el panel.
-- Cargar informacion mediante Excel/CSV donde aplique.
+- Gestionar anuncios de app.
+- Gestionar clientes.
+- Crear pedidos asistidos.
+- Registrar informacion operativa.
+- Cargar archivos Excel/CSV segun permisos.
 
 Restricciones:
 
-- No aprueba lineas de credito.
-- No gestiona comisiones.
-- No administra usuarios del sistema.
-- No elimina registros criticos.
-
-Uso recomendado:
-
-- Personal administrativo de Wulkan que opera catalogo, pedidos y carga de informacion.
+- No aprueba creditos.
+- No gestiona comisiones globales.
+- No administra usuarios admin.
+- No elimina datos sensibles.
 
 ### Inventario
 
-Rol enfocado en stock y disponibilidad.
+Rol enfocado en stock.
 
 Puede:
 
-- Ver catalogo/productos.
-- Administrar stock.
-- Cargar stock masivo.
-- Registrar movimientos de inventario.
-- Revisar disponibilidad fisica, reservada y comprometida.
+- Ver stock disponible, fisico, reservado y comprometido.
+- Registrar movimientos de entrada, salida, ajuste, reserva o liberacion.
+- Cargar stock de forma masiva por SKU.
+- Revisar rotacion con Graphify.
 
 Restricciones:
 
-- No gestiona creditos.
-- No gestiona comisiones.
-- No administra clientes ni vendedores.
-- No elimina registros.
+- No administra clientes, credito ni comisiones.
+- No modifica condiciones comerciales.
 
-Uso recomendado:
+### Ventas / lectura administrativa
 
-- Encargado de almacen, inventario o logistica.
+Roles administrativos secundarios para consulta o apoyo.
 
-### Solo Lectura
+Pueden:
 
-Rol de consulta.
-
-Puede:
-
-- Ver informacion operativa segun los modulos habilitados.
-- Consultar productos, clientes, ordenes u otros datos permitidos.
+- Revisar informacion asignada segun permiso.
+- Consultar catalogo, ordenes o clientes si corresponde.
+- Apoyar operaciones sin acceso total.
 
 Restricciones:
 
-- No crea, edita ni elimina informacion.
-- No aprueba creditos.
-- No cambia estados comerciales.
+- No deben reemplazar al rol vendedor movil.
+- No ven informacion sensible si el permiso no corresponde.
 
-Uso recomendado:
+## 6. Roles en la App Movil
 
-- Auditores, supervisores o personal que solo requiere consulta.
+### Cliente ferretero
 
-## 4. Roles en App Movil
-
-### Cliente Ferretero
-
-El cliente ferretero ingresa desde la app movil con correo y contrasena.
+El cliente ferretero ingresa con correo y contrasena.
 
 Puede:
 
-- Iniciar sesion en la app.
-- Cambiar contrasena temporal cuando corresponda.
 - Ver catalogo de productos activos.
-- Ver productos con precio en USD y referencia en VES.
-- Ver stock disponible.
-- Ver imagenes de productos y galeria.
-- Buscar productos por nombre, SKU, descripcion, categoria, variantes o especificaciones.
-- Ver categorias.
-- Ver anuncios/carrusel publicados desde el admin.
-- Agregar productos al carrito.
-- Seleccionar cantidades.
+- Buscar productos por nombre, SKU o categoria.
+- Ver precio, stock, descuento, imagenes y detalle del producto.
+- Agregar cantidades al carrito.
 - Crear ordenes de compra.
-- Elegir condicion de pago permitida:
-  - contado/efectivo,
-  - credito por dias,
-  - linea de credito aprobada.
-- Ver credito disponible, credito usado, saldo expuesto y vendedor asignado.
-- Ver historial de ordenes.
-- Ver servicios tecnicos o puntos autorizados publicados por Wulkan.
+- Seleccionar condicion de pago permitida.
+- Ver credito disponible, credito usado y saldo.
+- Ver sus ordenes.
+- Cambiar su clave temporal.
+- Consultar servicios tecnicos publicados por Wulkan.
 
-Reglas comerciales:
+Condiciones de pago esperadas:
 
-- Si usa linea de credito, el sistema valida cupo disponible.
-- Si no tiene credito aprobado, la orden queda para revision.
-- No existen pagos online dentro de la app; los pagos se gestionan externamente y se registran en el admin como abonos/manuales.
+- Contado / efectivo.
+- Credito 10, 15, 20, 30 o 40 dias.
+- Linea de credito aprobada.
+- Credito pendiente de autorizacion, cuando aplique.
 
 ### Vendedor
 
-El vendedor trabaja desde la app movil, no desde el admin panel web.
+El vendedor trabaja desde la app movil.
 
 Puede:
 
-- Iniciar sesion en la app.
-- Ver catalogo actualizado.
-- Ver su resumen comercial.
-- Ver su cartera de clientes asignados.
+- Ver catalogo.
 - Crear clientes ferreteros.
-- Solicitar apertura de credito para un cliente.
-- Crear pedidos asistidos para clientes de su cartera.
-- Ver ordenes asociadas a sus clientes.
-- Ver comisiones asociadas a sus ventas.
-- Dar seguimiento a pedidos, saldos y clientes.
+- Ver su cartera asignada.
+- Generar pedidos asistidos.
+- Ver ordenes de sus clientes.
+- Ver sus comisiones.
+- Dar seguimiento a clientes que hicieron pedidos.
+- Asociar ventas a su gestion comercial.
 
 Restricciones:
 
 - No ingresa al admin panel web.
-- No aprueba lineas de credito.
 - No ve comisiones de otros vendedores.
-- No modifica reglas comerciales globales.
-- No elimina datos.
+- No administra usuarios internos.
+- No cambia reglas globales de credito.
 
-### Gerente Comercial en App Movil
+### Gerente en movil
 
-Actualmente el backend permite autenticar roles comerciales en la app como usuarios moviles operativos, pero el flujo principal de aprobaciones comerciales esta pensado para ejecutarse desde el admin web.
+Actualmente las aprobaciones principales se ejecutan desde el admin web.
 
-Uso actual recomendado:
+Como fase futura se puede agregar una vista movil gerencial para:
 
-- Aprobar creditos desde el panel web.
-- Revisar clientes, ordenes y comisiones desde el panel web.
+- Aprobar creditos.
+- Autorizar condiciones especiales.
+- Revisar cartera comercial.
+- Revisar metricas de vendedores.
 
-Mejora futura:
-
-- Agregar una vista movil especifica para aprobaciones de credito y autorizaciones comerciales.
-
-### Servicio Tecnico
-
-Actualmente "Servicio Tecnico" esta implementado como directorio visible en la app, no como usuario operativo con login.
-
-Desde el admin se puede cargar:
-
-- Nombre del servicio tecnico.
-- Empresa.
-- Contacto.
-- Telefono.
-- WhatsApp.
-- Email.
-- Estado/ciudad.
-- Direccion.
-- Especialidades.
-- Cobertura.
-- Estado activo/inactivo.
-- Visibilidad en app.
-
-En la app el cliente puede ver los servicios tecnicos publicados para contactar soporte autorizado.
-
-Mejora futura:
-
-- Crear login para servicios tecnicos si Wulkan decide que ellos gestionen casos, diagnosticos, repuestos o garantias desde una vista propia.
-
-## 5. Modulos Actuales del Admin Panel
+## 7. Modulos del Admin Panel
 
 ### Dashboard
 
-Muestra metricas operativas para seguimiento rapido:
+Resumen ejecutivo de operacion:
 
 - Productos.
-- Activos.
-- Stock bajo.
+- Clientes.
+- Vendedores.
 - Ordenes.
 - Ventas.
-- Anuncios.
-- Rotacion de productos mediante Graphify.
-- Salud de inventario.
+- Credito.
+- Stock.
+- Rotacion con Graphify.
 - Ordenes recientes.
 
 ### Vendedores
 
-Permite administrar la red comercial.
+Permite administrar la fuerza comercial:
 
-Incluye:
-
-- Usuarios vendedores.
-- Zona.
-- Porcentaje de comision.
-- Meta de venta.
-- Telefono.
-- Estado.
-- Cartera asociada.
-
-Impacto en app:
-
-- Los vendedores pueden iniciar sesion en la app.
-- Las ordenes quedan asociadas al vendedor responsable.
-- Las comisiones se calculan sobre las ventas asociadas.
+- Crear vendedores.
+- Definir zona.
+- Definir porcentaje de comision.
+- Ver cartera asignada.
+- Ver ventas asociadas.
+- Ver estado operativo.
+- Importar vendedores por Excel/CSV.
 
 ### Clientes
 
-Permite administrar clientes ferreteros.
+Permite administrar ferreteros y clientes B2B:
 
-Incluye:
-
-- Razon social / nombre comercial.
-- RIF o identificador fiscal.
-- Contacto principal.
-- Telefono / WhatsApp.
-- Email de acceso.
+- Razon social o nombre comercial.
+- RIF/documento.
+- Contacto.
+- Correo.
+- Telefono.
 - Direccion.
-- Estado, ciudad y zona.
+- Ciudad/zona.
 - Vendedor asignado.
+- Acceso movil.
+- Estado.
+- Clave temporal.
 - Condicion comercial.
-- Estado activo/inactivo.
-- Acceso movil con contrasena.
-
-Impacto en app:
-
-- El cliente puede iniciar sesion.
-- El cliente ve su credito disponible.
-- Las ordenes quedan asociadas a su cuenta.
-- El vendedor asignado puede dar seguimiento.
+- Importacion masiva por Excel/CSV.
 
 ### Credito B2B
 
-Modulo dividido en submodulos para mayor claridad:
+Modulo para controlar riesgo y exposicion comercial.
 
-- **Lineas de credito:** cupo aprobado, usado, disponible, estado y decision.
-- **Vencimientos:** ordenes a credito o linea aprobada con saldo pendiente.
-- **Historial credito:** abonos externos y movimientos registrados.
+Incluye:
 
-Permite:
+- Lineas de credito.
+- Solicitudes.
+- Cupo otorgado.
+- Cupo usado.
+- Cupo disponible.
+- Deuda manual.
+- Ordenes abiertas.
+- Dias de credito.
+- Decision de aprobacion/rechazo.
 
-- Aprobar o rechazar creditos.
-- Definir cupo en USD.
-- Definir plazo de pago.
-- Ver exposicion de credito.
-- Ver disponible real.
-- Registrar abonos externos.
-- Mantener trazabilidad de decisiones.
+Submodulos:
 
-Impacto en app:
-
-- El cliente ferretero ve su credito disponible.
-- La app valida si puede usar linea de credito.
-- La orden consume credito si corresponde.
+- **Lineas de credito**: vista principal de cupo por cliente.
+- **Vencimientos**: ordenes o saldos por cobrar.
+- **Historial credito**: abonos externos y movimientos historicos.
 
 ### Ordenes
 
-Permite gestionar ordenes creadas desde la app movil o desde el panel.
-
-Incluye:
+Gestion operativa de pedidos:
 
 - Cliente.
 - Vendedor.
 - Tipo de venta.
 - Condicion de pago.
-- Total USD.
-- Total VES referencial.
+- Total.
 - Abonado.
 - Saldo.
+- Estado.
 - Estado de credito.
 - Estado de inventario.
-- Estado operativo.
-- Acciones de cambio de estado.
 - Registro de abonos.
+- Cambio de estado.
 
-Tipos de venta soportados:
-
-- Contado / efectivo.
-- Pago movil.
-- Transferencia.
-- Credito por dias.
-- Linea de credito.
-
-Impacto comercial:
-
-- La orden queda asociada al cliente y vendedor.
-- El saldo se mantiene visible.
-- El stock puede quedar reservado o liberado segun estado.
-- La comision queda calculada para seguimiento.
+Las ordenes creadas desde la app quedan asociadas al cliente y, cuando corresponde, al vendedor responsable.
 
 ### Comisiones
 
-Permite gestionar comisiones por vendedor.
-
-Incluye:
+Permite gestionar comisiones por vendedor:
 
 - Vendedor.
-- Orden asociada.
+- Orden.
 - Porcentaje.
 - Monto.
-- Estado:
-  - pendiente,
-  - aprobada,
-  - pagada,
-  - anulada.
+- Estado: pendiente, aprobada, pagada o anulada.
 
-Regla actual:
-
-- La comision se calcula y registra con la orden.
-- Gerencia puede cambiar su estado segun la politica comercial de Wulkan.
+La comision se registra, pero puede liberarse segun la politica definida por Wulkan: venta validada, entregada o pagada.
 
 ### Productos
 
-Permite administrar el catalogo ecommerce.
-
-Incluye:
+Permite administrar el catalogo:
 
 - SKU.
-- Nombre comercial.
-- Tipo de producto.
+- Nombre.
 - Categoria.
-- Estado.
+- Tipo de producto.
 - Precio publico USD.
-- Precio anterior USD.
-- Descuento.
 - Precio B2B USD.
-- Tasa USD/VES referencial.
+- Precio anterior.
+- Descuento.
+- Referencia VES.
 - Stock inicial.
 - Imagen principal.
 - Galeria de imagenes.
 - PDFs tecnicos.
 - Descripcion.
-- Variantes/tallas/opciones.
+- Variantes, tallas u opciones.
 - Especificaciones.
 - Requiere cotizacion.
 - Requiere validacion tecnica.
+- Estado.
+- Importacion masiva por Excel/CSV.
 
-Impacto en app:
+### Biblioteca tecnica
 
-- Solo productos activos aparecen en la app.
-- La app recibe SKU, nombre, descripcion, precios, stock, descuentos, imagenes, variantes y especificaciones.
-- Las imagenes pueden mostrarse como galeria/carrusel de producto.
+Modulo profesional para recursos asociados a productos:
+
+- Imagenes adicionales.
+- PDFs tecnicos.
+- Fichas tecnicas.
+- Manuales.
+- Recursos asociados a SKU.
+- Archivos almacenables en DigitalOcean Spaces/S3.
 
 ### Categorias
 
-Permite organizar el catalogo.
-
-Incluye:
+Permite ordenar el catalogo:
 
 - Nombre.
 - Descripcion.
-- Imagen de categoria.
+- Imagen.
 - Estado.
+- Visibilidad en app.
+- Importacion masiva.
 
-Impacto en app:
+### Stock masivo
 
-- Las categorias activas aparecen en la app.
-- Ayudan a ordenar busquedas y catalogo.
-
-### Biblioteca Tecnica
-
-Modulo para recursos asociados a productos.
-
-Incluye:
-
-- Imagenes de producto.
-- Galerias adicionales.
-- PDFs tecnicos.
-- Fichas o documentos asociados.
-- Asociacion por SKU/producto.
-
-Impacto en app:
-
-- Permite enriquecer la ficha del producto.
-- Las imagenes adicionales alimentan la galeria del producto.
-- Los PDFs pueden mantenerse como soporte tecnico/comercial del producto.
-
-### Stock Masivo
-
-Permite administrar inventario.
-
-Incluye:
+Modulo para inventario:
 
 - Carga individual.
-- Carga masiva por Excel/CSV.
+- Carga masiva por SKU.
+- Movimientos de entrada/salida/ajuste/reserva/liberacion.
 - Stock fisico.
-- Stock reservado.
+- Stock comprometido.
 - Stock disponible real.
-- Movimientos recientes.
-- Rotacion mediante Graphify.
+- Rotacion.
+- Estados: disponible, reposicion, agotado.
 
-Impacto en app:
+### Anuncios app
 
-- La app muestra disponibilidad real del producto.
-- Las ordenes pueden reservar stock segun estado.
-
-### Anuncios App
-
-Permite administrar banners y mensajes visibles en la app movil.
-
-Incluye:
+Modulo para banners del carrusel movil:
 
 - Titulo.
 - Mensaje.
 - Imagen.
-- Ubicacion:
-  - home,
-  - catalogo,
-  - checkout.
+- Ubicacion.
 - Prioridad.
-- Vigencia.
-- Boton/CTA.
+- Fechas de inicio y cierre.
+- Boton.
+- Accion.
 - Estado.
+- Importacion masiva.
 
-Impacto en app:
+### Servicios tecnicos
 
-- Alimenta el carrusel y banners promocionales.
-- Permite publicar descuentos, campanas o mensajes operativos.
+Directorio visible para la app:
 
-### Servicios Tecnicos
-
-Permite administrar el directorio de soporte visible para clientes.
-
-Incluye:
-
-- Nombre.
-- Empresa.
+- Nombre del servicio.
 - Contacto.
 - Telefono.
-- WhatsApp.
-- Email.
-- Estado/ciudad.
+- Zona.
 - Direccion.
-- Especialidades.
-- Cobertura.
-- Visibilidad en app.
+- Especialidad.
+- Estado.
+- Visibilidad.
+- Importacion masiva.
 
-Impacto en app:
+### Planillas / Importaciones
 
-- Los clientes pueden ubicar servicios tecnicos autorizados.
+El sistema incluye plantillas oficiales para que Wulkan cargue datos correctamente.
 
-### Plantillas de Importacion
-
-Modulo para descargar formatos oficiales de Excel/CSV.
-
-Incluye plantillas para:
+Cada plantilla define columnas requeridas y formato esperado para:
 
 - Productos.
+- Categorias.
 - Stock.
 - Clientes.
 - Vendedores.
-- Categorias.
+- Anuncios.
 - Biblioteca tecnica.
-- Anuncios app.
 - Servicios tecnicos.
 
 La importacion tiene previsualizacion:
 
 - Filas que se crearan.
 - Filas que se actualizaran.
+- Filas con advertencias.
 - Filas con error.
-- Advertencias.
-- Confirmacion antes de guardar.
 
-Esto reduce riesgos al cargar informacion real de Wulkan.
+Esto reduce riesgo antes de guardar informacion real.
 
 ### Auditoria
 
-Modulo de trazabilidad.
+Modulo de trazabilidad:
 
-Registra eventos relevantes como:
+- Usuario que realizo la accion.
+- Fecha.
+- Tipo de accion.
+- Entidad afectada.
+- Detalle del cambio.
+- Origen.
+- Datos antes/despues en acciones sensibles.
 
-- Inicio de sesion.
-- Intentos fallidos.
+Eventos auditables:
+
 - Creacion de clientes.
-- Aprobacion/rechazo de creditos.
-- Creacion de ordenes.
-- Cambios de estado.
-- Registro de abonos.
-- Cambios de comisiones.
-- Acciones de importacion.
+- Aprobacion o rechazo de credito.
+- Cambios en ordenes.
+- Abonos externos.
+- Cambios de comision.
+- Cambios de stock.
+- Cambios en productos.
+- Cambios en usuarios.
 
-Objetivo:
+### Usuarios admin
 
-- Saber quien hizo cada cambio.
-- Mantener control operativo.
-- Reducir inconsistencias.
+Permite administrar quienes entran al panel web:
 
-### Usuarios Admin
+- Nombre.
+- Email.
+- Rol.
+- Estado.
+- Clave temporal.
+- Cambio obligatorio de contrasena.
+- Permisos segun rol.
 
-Modulo exclusivo para Super Admin.
+## 8. Tecnologia utilizada
 
-Permite:
+Backend y admin:
 
-- Crear usuarios administrativos.
-- Definir rol.
-- Activar/inactivar usuarios.
-- Obligar cambio de contrasena.
-- Separar accesos web y movil.
+- Python.
+- Flask.
+- SQLAlchemy.
+- Alembic.
+- PostgreSQL / SQL administrado.
+- Bootstrap 5.3.
+- UIX.
+- Graphify para visualizaciones ligeras.
+- Docker.
+- DigitalOcean App Platform.
+- DigitalOcean Spaces/S3.
 
-Importante:
+App movil:
 
-- Los vendedores trabajan desde la app movil.
-- El admin web queda reservado para perfiles administrativos autorizados.
+- Flutter.
+- Android APK.
+- Consumo de API productiva.
+- Login por rol.
+- Catalogo, carrito, ordenes, credito y servicios.
 
-## 6. Flujo Comercial Actual
+Operacion:
 
-### Flujo Cliente Ferretero
+- GitHub como repositorio.
+- Autodeploy hacia DigitalOcean.
+- Dominio productivo `crmwulky.com.ve`.
+- Configuracion por variables de entorno.
 
-1. Wulkan crea el cliente desde el admin o un vendedor lo registra desde la app.
-2. El cliente queda asociado a un vendedor.
-3. El cliente recibe usuario y contrasena.
-4. El cliente ingresa a la app.
-5. El cliente revisa productos, stock, precios y promociones.
-6. El cliente agrega productos al carrito.
-7. El cliente selecciona condicion de pago.
-8. El sistema registra la orden.
-9. El admin ve la orden.
-10. El vendedor responsable puede contactar al cliente.
-11. Wulkan gestiona despacho, abonos y cierre de la venta.
+## 9. Trazabilidad y control
 
-### Flujo Vendedor
+La plataforma fue disenada para evitar inconsistencias.
 
-1. El vendedor ingresa a la app.
-2. Ve su cartera de clientes.
-3. Crea clientes nuevos si corresponde.
-4. Solicita apertura de credito para clientes.
-5. Genera pedidos asistidos.
-6. Da seguimiento a ordenes.
-7. Consulta comisiones asociadas a sus ventas.
+Cada flujo comercial debe dejar evidencia de:
 
-### Flujo Credito B2B
+- Quien creo el cliente.
+- A que vendedor quedo asignado.
+- Quien solicito credito.
+- Quien aprobo o rechazo credito.
+- Que productos fueron solicitados.
+- Que stock se comprometio.
+- Que credito se consumio.
+- Que saldo quedo pendiente.
+- Que comision se genero.
+- Que usuario registro abonos.
+- Que usuario cambio estados.
 
-1. Cliente o vendedor solicita credito.
-2. Gerente comercial revisa solicitud.
-3. Gerente aprueba o rechaza.
-4. Si aprueba, define cupo USD y plazo.
-5. La app muestra credito disponible.
-6. Cada orden con linea de credito consume disponibilidad.
-7. Los abonos externos se registran desde el admin.
-8. El sistema muestra saldo, vencimientos e historial.
+Esto permite que Wulkan tenga control de la venta desde el origen del cliente hasta el cierre del pedido.
 
-### Flujo Catalogo-App
+## 10. Flujo comercial principal
 
-1. Admin crea producto.
-2. Admin asigna categoria, imagenes, PDFs, precios y stock.
-3. Producto activo queda disponible en API movil.
-4. App movil consulta catalogo desde el backend productivo.
-5. Cliente/vendedor ve el producto sin depender de una computadora conectada.
+### Cliente ferretero con linea de credito
 
-## 7. Trazabilidad y Control
+1. Wulkan crea el cliente ferretero o un vendedor lo registra desde la app.
+2. El cliente queda asignado a un vendedor.
+3. Se solicita apertura de credito si corresponde.
+4. Gerencia comercial aprueba o rechaza.
+5. El cliente ingresa a la app.
+6. Revisa catalogo y stock.
+7. Agrega productos al carrito.
+8. Selecciona condicion de pago.
+9. Genera la orden.
+10. El sistema descuenta disponibilidad/compromete stock segun flujo.
+11. El admin ve la orden.
+12. El vendedor responsable puede contactar al cliente.
+13. Wulkan valida, despacha y registra abonos externos.
+14. El credito disponible se actualiza.
+15. La comision del vendedor queda registrada segun regla.
 
-La plataforma mantiene trazabilidad en los puntos criticos:
+### Venta asistida por vendedor
 
-- Quien crea clientes.
-- Que vendedor tiene asignado cada cliente.
-- Quien aprueba credito.
-- Que cupo fue aprobado.
-- Que orden se genero.
-- Que cliente y vendedor estan asociados a la orden.
-- Que tipo de venta se selecciono.
-- Que saldo queda pendiente.
-- Que stock queda reservado o liberado.
-- Que comision queda registrada.
-- Que usuario registra abonos o cambia estados.
+1. El vendedor inicia sesion en la app.
+2. Ve su cartera.
+3. Crea cliente o selecciona cliente asignado.
+4. Revisa catalogo.
+5. Genera pedido asistido.
+6. La orden queda asociada al vendedor.
+7. Wulkan revisa desde el admin.
+8. Se registra tipo de venta y condicion.
+9. Se gestiona despacho, saldo y comision.
 
-Esto permite que Wulkan tenga control comercial y operativo sobre el ciclo completo de venta.
-
-## 8. Integracion Admin Panel - App Movil
-
-La app movil consume informacion desde el backend Flask publicado en DigitalOcean.
-
-Endpoints principales:
-
-- `/api/mobile/auth/login`: inicio de sesion movil.
-- `/api/mobile/auth/change-password`: cambio de contrasena.
-- `/api/mobile/products`: catalogo de productos.
-- `/api/mobile/categories`: categorias.
-- `/api/mobile/announcements`: banners/carrusel.
-- `/api/mobile/orders`: ordenes de cliente ferretero.
-- `/api/mobile/credit`: credito disponible del cliente.
-- `/api/mobile/service-technicians`: servicios tecnicos.
-- `/api/mobile/locations`: puntos/directorio.
-- `/api/mobile/seller/summary`: resumen del vendedor.
-- `/api/mobile/seller/clients`: cartera y creacion de clientes.
-- `/api/mobile/seller/orders`: pedidos asistidos del vendedor.
-- `/api/mobile/seller/commissions`: comisiones del vendedor.
-
-La app debe compilarse con:
-
-- `WULKAN_MOBILE_DATA_SOURCE=api`
-- `WULKAN_MOBILE_AUTH_MODE=api`
-- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/mobile`
-- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/mobile/orders`
-
-Con esta configuracion, el telefono recibe productos, categorias, anuncios, ordenes y credito directamente desde produccion.
-
-## 9. Que No Incluye Actualmente
+## 11. Lo que no incluye actualmente
 
 Para mantener expectativas claras, actualmente el sistema no incluye:
 
-- Pagos online integrados.
+- Pagos online.
 - Conciliacion bancaria automatica.
 - Facturacion fiscal automatica.
 - Integracion contable/ERP.
 - Notificaciones push productivas.
-- Aprobacion de credito desde una vista movil gerencial dedicada.
+- Aprobacion gerencial desde app movil.
 - Login operativo para servicios tecnicos.
-- Gestion avanzada de garantias/casos tecnicos desde app de servicio tecnico.
+- Gestion avanzada de garantias o casos tecnicos.
 
-Estos puntos pueden agregarse como fases posteriores.
+Estos puntos pueden desarrollarse como fases posteriores.
 
-## 10. Recomendaciones para Comercializacion
+## 12. Recomendaciones antes de salida comercial masiva
 
-Antes de una entrega comercial formal, se recomienda:
+Antes de escalar a todos los usuarios, se recomienda:
 
-1. Cargar productos reales de Wulkan usando las plantillas oficiales.
-2. Cargar categorias reales con imagenes.
+1. Cargar productos reales con imagenes y galeria.
+2. Cargar categorias reales con imagen.
 3. Cargar stock real.
 4. Cargar vendedores reales.
 5. Cargar clientes ferreteros reales.
-6. Validar 5 a 10 ordenes reales de prueba.
-7. Validar flujo de credito con un cliente aprobado y otro sin credito.
-8. Validar que la app instalada en telefono consulte datos sin estar conectada al computador.
-9. Definir politica comercial de comisiones.
-10. Definir politica de estados de orden y liberacion de stock.
-11. Definir responsables internos por rol.
+6. Definir politica formal de credito.
+7. Definir politica formal de comisiones.
+8. Definir estados de orden y responsables internos.
+9. Probar 5 a 10 ordenes reales con ferreteros seleccionados.
+10. Probar un cliente con credito aprobado y otro sin credito.
+11. Instalar APK en telefonos reales sin cable.
+12. Validar que la app consulte datos desde `https://crmwulky.com.ve`.
+13. Validar carga de imagenes y PDFs en DigitalOcean Spaces.
+14. Capacitar a los usuarios internos segun rol.
 
-## 11. Mensaje Comercial Sugerido
+## 13. Mensaje comercial sugerido
 
-Wulkan Venezuela cuenta con una plataforma ecommerce B2B conectada a una app movil Android, orientada a digitalizar la venta de maquinaria, repuestos y productos tecnicos para ferreteros y clientes finales.
+Wulkan Venezuela cuenta con una plataforma CRM Ecommerce B2B conectada a una app movil Android, orientada a digitalizar la venta de maquinaria, repuestos y productos tecnicos para ferreteros y clientes comerciales.
 
 El sistema permite administrar catalogo, imagenes, PDFs tecnicos, stock, vendedores, clientes, creditos, ordenes, comisiones y anuncios moviles desde un solo panel web. La app movil permite que clientes ferreteros y vendedores consulten productos, generen pedidos y trabajen con condiciones comerciales reales como contado, credito por dias o linea de credito aprobada.
 
-La solucion esta preparada para operar en produccion sobre DigitalOcean, con dominio propio, base de datos SQL, almacenamiento S3 para recursos multimedia y trazabilidad de los eventos comerciales clave.
+La solucion opera sobre DigitalOcean, con dominio propio, base de datos SQL, almacenamiento S3 para recursos multimedia y trazabilidad de eventos comerciales clave.
 
-El enfoque del producto es reducir trabajo manual, ordenar la cartera comercial, mejorar la disponibilidad de informacion para vendedores y clientes, y entregar a Wulkan una base escalable para su ecommerce B2B en Venezuela.
+El enfoque del producto es reducir trabajo manual, ordenar la cartera comercial, mejorar la disponibilidad de informacion para vendedores y clientes, y entregar a Wulkan una base escalable para su operacion ecommerce B2B en Venezuela.
 
+## 14. Conclusion
+
+El proyecto Wulkan se encuentra en condiciones de operar como piloto comercial productivo controlado.
+
+La plataforma ya conecta admin web, backend productivo y app movil. Los productos, categorias, stock, banners, clientes, credito y ordenes pueden administrarse desde el panel y verse reflejados en la app sin mantener el telefono conectado a una computadora.
+
+El siguiente paso comercial es cargar informacion real, ejecutar pruebas con usuarios reales y ajustar politicas internas de credito, comisiones, despacho y cobranza.
