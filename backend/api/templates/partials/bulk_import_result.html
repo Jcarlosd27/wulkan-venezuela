@@ -11,12 +11,15 @@
     <div>
       <strong class="d-block">{{ title }}</strong>
       <span>
-        {{ "Se crearan" if is_preview else "Creados" }} {{ bulk_result.created }} ·
-        {{ "Se actualizaran" if is_preview else "Actualizados" }} {{ bulk_result.updated }} ·
+        {{ "Se crearan" if is_preview else "Creados" }} {{ bulk_result.created }} &middot;
+        {{ "Se actualizaran" if is_preview else "Actualizados" }} {{ bulk_result.updated }} &middot;
         {{ bulk_result.skipped }} omitidos
       </span>
       {% if bulk_result.warnings %}
       <small class="d-block mt-1">{{ bulk_result.warnings | length }} advertencias para revisar antes de confirmar.</small>
+      {% endif %}
+      {% if bulk_result.errors %}
+      <small class="d-block mt-1">Las filas con error no se guardaran; corrige el archivo o confirma solo los cambios validos.</small>
       {% endif %}
       {% if is_preview %}
       <small class="d-block mt-1">

@@ -8,12 +8,10 @@ void main() {
   group('MobileCartService', () {
     final service = MobileCartService(repository: MockMobileRepository());
 
-    test('loads local cart from product repository', () async {
+    test('starts local cart empty until the user selects products', () async {
       final items = await service.loadLocalCart();
 
-      expect(items, hasLength(1));
-      expect(items.first.sku, 'WUL-MOT-45CC');
-      expect(items.first.unitPriceUsd, 162);
+      expect(items, isEmpty);
     });
 
     test('calculates checkout preview in USD and VES', () {

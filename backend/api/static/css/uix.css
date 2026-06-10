@@ -877,6 +877,23 @@ body {
   padding: 16px;
 }
 
+.audit-filter-panel {
+  padding: 16px;
+}
+
+.audit-filter-panel .form-label {
+  color: var(--wulkan-muted);
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.audit-filter-panel .input-group-text {
+  background: #fff;
+  border-color: var(--wulkan-line);
+  color: var(--bs-secondary-color);
+}
+
 .audit-table {
   min-width: 960px;
 }

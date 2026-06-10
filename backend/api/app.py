@@ -513,6 +513,21 @@ def can_access_order_record(order: dict | None, store: dict) -> bool:
     return bool(client and client.get("assignedSellerId") == seller_id)
 
 
+def product_has_commercial_history(store: dict, product: dict | None) -> bool:
+    if not product:
+        return False
+    product_id = product.get("id", "")
+    sku = product.get("sku", "")
+    for order in store.get("orders", []):
+        for item in order.get("items", []):
+            if item.get("productId") == product_id or item.get("sku") == sku:
+                return True
+    return any(
+        movement.get("productId") == product_id or movement.get("sku") == sku
+        for movement in store.get("stock_movements", [])
+    )
+
+
 def login_attempt_key(scope: str, email: str) -> str:
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "local").split(",")[0].strip()
     return f"{scope}:{ip_address}:{email.lower()}"
@@ -3591,15 +3606,28 @@ def product_edit(product_id: str):
 def product_delete(product_id: str):
     store = load_store()
     product = find_by_id(store["products"], product_id)
-    store["products"] = [product for product in store["products"] if product["id"] != product_id]
+    if not product:
+        return redirect(url_for("products"))
+    before = copy.deepcopy(product)
+    has_history = product_has_commercial_history(store, product)
+    if has_history:
+        product["status"] = "inactive"
+        product["updatedAt"] = utc_now()
+        after = product
+    else:
+        store["products"] = [item for item in store["products"] if item["id"] != product_id]
+        store["media_assets"] = [
+            item for item in store.get("media_assets", []) if item.get("productId") != product_id
+        ]
+        after = None
     record_change_event(
         store,
         "delete",
         "product",
         product_id,
-        f"Producto eliminado: {(product or {}).get('sku', product_id)}.",
-        product,
-        None,
+        f"Producto {'desactivado por historial comercial' if has_history else 'eliminado'}: {before.get('sku', product_id)}.",
+        before,
+        after,
     )
     save_store(store)
     return redirect(url_for("products"))
@@ -4094,11 +4122,50 @@ def credit_decision(client_id: str):
     return redirect(url_for("credit"))
 
 
+def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:
+    if filters["action"] and event.get("action", "") != filters["action"]:
+        return False
+    if filters["entity_type"] and event.get("entityType", "") != filters["entity_type"]:
+        return False
+    actor_haystack = f"{event.get('actorName', '')} {event.get('actorRole', '')}".lower()
+    if filters["actor"] and filters["actor"].lower() not in actor_haystack:
+        return False
+    query = filters["q"].lower()
+    if query:
+        searchable = " ".join(
+            str(event.get(key, ""))
+            for key in (
+                "action",
+                "entityType",
+                "entityId",
+                "actorName",
+                "actorRole",
+                "detail",
+                "path",
+                "method",
+            )
+        ).lower()
+        if query not in searchable:
+            return False
+    return True
+
+
 @app.get("/audit")
 @require_roles("super_admin")
 def audit():
     store = load_store()
-    events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)[:200]
+    all_events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "action": request.args.get("action", "").strip(),
+        "entity_type": request.args.get("entity_type", "").strip(),
+        "actor": request.args.get("actor", "").strip(),
+    }
+    filtered_events = [
+        event for event in all_events
+        if audit_event_matches_filters(event, filters)
+    ]
+    events = filtered_events[:1000]
     write_actions = {
         "create",
         "update",
@@ -4111,9 +4178,10 @@ def audit():
         "bulk_import",
     }
     metrics = {
-        "total": len(store.get("audit_events", [])),
-        "actors": len({event.get("actorId") or event.get("actorName") for event in store.get("audit_events", [])}),
-        "writes": sum(1 for event in store.get("audit_events", []) if event.get("action") in write_actions),
+        "total": len(all_events),
+        "filtered": len(filtered_events),
+        "actors": len({event.get("actorId") or event.get("actorName") for event in filtered_events}),
+        "writes": sum(1 for event in filtered_events if event.get("action") in write_actions),
     }
     graphify_summary = f"{metrics['writes']} cambios / {metrics['actors']} actores"
     return render_template(
@@ -4121,6 +4189,10 @@ def audit():
         events=events,
         metrics=metrics,
         graphify_summary=graphify_summary,
+        filters=filters,
+        action_options=sorted({event.get("action", "") for event in all_events if event.get("action")}),
+        entity_options=sorted({event.get("entityType", "") for event in all_events if event.get("entityType")}),
+        actor_options=sorted({event.get("actorName", "") for event in all_events if event.get("actorName")}),
     )
 
 

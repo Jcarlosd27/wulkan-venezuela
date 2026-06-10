@@ -3013,13 +3013,46 @@ class _StockBadge extends StatelessWidget {
   }
 }
 
-class ProductDetailScreen extends StatelessWidget {
-  const ProductDetailScreen({super.key});
+class ProductDetailScreen extends StatefulWidget {
+  const ProductDetailScreen({super.key, this.productId});
+
+  final String? productId;
+
+  @override
+  State<ProductDetailScreen> createState() => _ProductDetailScreenState();
+}
+
+class _ProductDetailScreenState extends State<ProductDetailScreen> {
+  late final PageController _imageController;
+  late final Future<MobileProduct?> _productFuture;
+  int _imageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageController = PageController();
+    _productFuture = _loadProduct();
+  }
+
+  @override
+  void dispose() {
+    _imageController.dispose();
+    super.dispose();
+  }
+
+  Future<MobileProduct?> _loadProduct() async {
+    final productId = widget.productId;
+    if (productId != null && productId.isNotEmpty) {
+      return mobileRepository.getProduct(productId);
+    }
+    final products = await mobileRepository.listProducts();
+    return products.isEmpty ? null : products.first;
+  }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<MobileProduct?>(
-      future: mobileRepository.getProduct("prod-motosierra-45cc"),
+      future: _productFuture,
       builder: (context, snapshot) {
         final product = snapshot.data;
 
@@ -3031,12 +3064,19 @@ class ProductDetailScreen extends StatelessWidget {
           return const _EmptyState(message: 'Producto no disponible');
         }
 
+        final accentColor = _productAccentColor(product.categoryName);
+
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (product.imageUrl != null)
-              _ProductImageHero(
-                  imageUrl: product.imageUrl!, title: product.name),
+            _ProductImageCarousel(
+              images: product.galleryImageUrls,
+              title: product.name,
+              accentColor: accentColor,
+              controller: _imageController,
+              selectedIndex: _imageIndex,
+              onChanged: (index) => setState(() => _imageIndex = index),
+            ),
             const SizedBox(height: 12),
             _SectionTitle(title: product.name),
             Text('SKU ${product.sku}'),
@@ -5573,37 +5613,6 @@ class _ProductFallbackMark extends StatelessWidget {
           Icons.inventory_2_outlined,
           color: _wulkanBlack,
           size: 48,
-        ),
-      ),
-    );
-  }
-}
-
-class _ProductImageHero extends StatelessWidget {
-  const _ProductImageHero({required this.imageUrl, required this.title});
-
-  final String imageUrl;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: AspectRatio(
-        aspectRatio: 16 / 11,
-        child: ColoredBox(
-          color: const Color(0xFFF8FAFD),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit.contain,
-              semanticLabel: title,
-              errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.image_not_supported_outlined),
-              ),
-            ),
-          ),
         ),
       ),
     );

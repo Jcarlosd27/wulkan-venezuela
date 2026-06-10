@@ -10,24 +10,7 @@ class MobileCartService {
   final MobileRepository repository;
 
   Future<List<MobileCartItem>> loadLocalCart() async {
-    final product = await repository.getProduct("prod-motosierra-45cc");
-
-    if (product == null) {
-      return const [];
-    }
-
-    return [
-      MobileCartItem(
-        productId: product.id,
-        sku: product.sku,
-        title: product.name,
-        quantity: 1,
-        unitPriceUsd: product.ferreteroPriceUsd,
-        requiresQuote: product.requiresQuote,
-        requiresTechnicalValidation: product.requiresTechnicalValidation,
-        imageUrl: product.primaryImageUrl,
-      ),
-    ];
+    return const [];
   }
 
   MobileCheckoutPreview calculatePreview(

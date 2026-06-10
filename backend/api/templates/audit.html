@@ -9,7 +9,7 @@
       <div class="metric-icon"><i class="bi bi-list-check"></i></div>
       <span>Total eventos</span>
       <strong>{{ metrics.total }}</strong>
-      <em>1000 max</em>
+      <em>{{ metrics.filtered }} filtrados</em>
     </article>
   </div>
   <div class="col-12 col-md-6 col-xl-3">
@@ -38,13 +38,60 @@
   </div>
 </section>
 
+<section class="panel audit-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label">Buscar en auditoria</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Actor, entidad, detalle u origen">
+      </div>
+    </div>
+    <div class="col-12 col-md-4 col-xl-2">
+      <label class="form-label">Accion</label>
+      <select class="form-select" name="action">
+        <option value="">Todas</option>
+        {% for action in action_options %}
+        <option value="{{ action }}" {% if filters.action == action %}selected{% endif %}>{{ action }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-4 col-xl-2">
+      <label class="form-label">Modulo</label>
+      <select class="form-select" name="entity_type">
+        <option value="">Todos</option>
+        {% for entity in entity_options %}
+        <option value="{{ entity }}" {% if filters.entity_type == entity %}selected{% endif %}>{{ entity }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-4 col-xl-2">
+      <label class="form-label">Actor</label>
+      <select class="form-select" name="actor">
+        <option value="">Todos</option>
+        {% for actor in actor_options %}
+        <option value="{{ actor }}" {% if filters.actor == actor %}selected{% endif %}>{{ actor }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-xl-2 d-flex gap-2">
+      <button class="btn btn-primary flex-fill" type="submit">
+        <i class="bi bi-funnel"></i> Filtrar
+      </button>
+      <a class="btn btn-light" href="{{ url_for('audit') }}" aria-label="Limpiar filtros">
+        <i class="bi bi-x-lg"></i>
+      </a>
+    </div>
+  </form>
+</section>
+
 <section class="panel category-panel audit-panel">
   <div class="panel-header">
     <div>
       <h2>Registro operativo</h2>
       <span>Eventos recientes ordenados por fecha, actor y modulo afectado.</span>
     </div>
-    <span>{{ events | length }} eventos</span>
+    <span>{{ events | length }} eventos visibles</span>
   </div>
   <div class="table-responsive">
     <table class="table align-middle category-table audit-table">
