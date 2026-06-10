@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import hmac
+import csv
 import copy
+import io
+import re
 import secrets
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -823,6 +827,671 @@ def find_order(orders: list[dict], order_id: str) -> dict | None:
     )
 
 
+def normalize_import_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", normalized.strip().lower())
+    return normalized.strip("_")
+
+
+def row_value(row: dict, *keys: str, default: str = "") -> str:
+    for key in keys:
+        value = row.get(normalize_import_key(key))
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return default
+
+
+def parse_import_float(value, default: float = 0.0) -> float:
+    if value is None or str(value).strip() == "":
+        return default
+    cleaned = str(value).strip().replace("USD", "").replace("$", "").replace(" ", "")
+    if "," in cleaned and "." in cleaned:
+        cleaned = cleaned.replace(",", "")
+    else:
+        cleaned = cleaned.replace(",", ".")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return default
+
+
+def parse_import_int(value, default: int = 0) -> int:
+    try:
+        return int(round(parse_import_float(value, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_import_bool(value, default: bool = False) -> bool:
+    if value is None or str(value).strip() == "":
+        return default
+    normalized = normalize_import_key(str(value))
+    if normalized in {"1", "si", "s", "true", "activo", "activa", "yes", "y", "visible"}:
+        return True
+    if normalized in {"0", "no", "false", "inactivo", "inactiva", "oculto", "hidden"}:
+        return False
+    return default
+
+
+def parse_import_list(value) -> list[str]:
+    if value is None:
+        return []
+    return [
+        item.strip()
+        for item in re.split(r"[\n\r|;,]+", str(value))
+        if item and item.strip()
+    ]
+
+
+def parse_import_specs(value) -> dict[str, str]:
+    specs: dict[str, str] = {}
+    for item in parse_import_list(value):
+        if ":" in item:
+            key, spec_value = item.split(":", 1)
+            specs[key.strip()] = spec_value.strip()
+    return specs
+
+
+def read_tabular_upload(file_storage) -> list[dict]:
+    if not file_storage or not file_storage.filename:
+        raise BadRequest("Selecciona un archivo .xlsx, .xlsm o .csv para la carga masiva.")
+
+    filename = file_storage.filename.lower()
+    rows: list[dict] = []
+    if filename.endswith((".xlsx", ".xlsm")):
+        from openpyxl import load_workbook
+
+        file_storage.stream.seek(0)
+        workbook = load_workbook(filename=file_storage.stream, read_only=True, data_only=True)
+        worksheet = workbook.active
+        raw_rows = list(worksheet.iter_rows(values_only=True))
+        if not raw_rows:
+            return []
+        headers = [normalize_import_key(header) for header in raw_rows[0]]
+        for raw_row in raw_rows[1:]:
+            row = {
+                headers[index]: raw_row[index]
+                for index in range(min(len(headers), len(raw_row)))
+                if headers[index]
+            }
+            if any(str(value).strip() for value in row.values() if value is not None):
+                rows.append(row)
+        return rows
+
+    if filename.endswith(".csv"):
+        file_storage.stream.seek(0)
+        payload = file_storage.read()
+        text = payload.decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(text))
+        for raw_row in reader:
+            row = {
+                normalize_import_key(key): value
+                for key, value in (raw_row or {}).items()
+                if key
+            }
+            if any(str(value).strip() for value in row.values() if value is not None):
+                rows.append(row)
+        return rows
+
+    raise BadRequest("Formato no soportado. Usa .xlsx, .xlsm o .csv.")
+
+
+def blank_bulk_result() -> dict:
+    return {"created": 0, "updated": 0, "skipped": 0, "errors": []}
+
+
+def remember_bulk_result(module: str, result: dict) -> None:
+    result["errors"] = result.get("errors", [])[:8]
+    session[f"bulk_import_{module}"] = result
+
+
+def consume_bulk_result(module: str) -> dict | None:
+    return session.pop(f"bulk_import_{module}", None)
+
+
+def bulk_error(result: dict, row_number: int, message: str) -> None:
+    result.setdefault("errors", []).append(f"Fila {row_number}: {message}")
+    result["skipped"] = int(result.get("skipped", 0)) + 1
+
+
+def find_product_by_sku(store: dict, sku: str) -> dict | None:
+    normalized = sku.strip().upper()
+    return next((product for product in store.get("products", []) if product.get("sku", "").upper() == normalized), None)
+
+
+def find_category_by_name(store: dict, name: str) -> dict | None:
+    normalized = normalize_import_key(name)
+    return next(
+        (
+            category
+            for category in store.get("categories", [])
+            if normalize_import_key(category.get("name", "")) == normalized
+            or normalize_import_key(category.get("id", "")) == normalized
+        ),
+        None,
+    )
+
+
+def ensure_import_category(store: dict, category_id: str = "", category_name: str = "") -> dict:
+    category = find_by_id(store.get("categories", []), category_id) if category_id else None
+    if category:
+        return category
+    category = find_category_by_name(store, category_name) if category_name else None
+    if category:
+        return category
+    if category_name:
+        category = {
+            "id": next_id("cat", category_name),
+            "name": category_name,
+            "description": "Categoria creada automaticamente por carga masiva.",
+            "imageUrl": "",
+            "status": "active",
+            "updatedAt": utc_now(),
+        }
+        store.setdefault("categories", []).append(category)
+        return category
+    return (store.get("categories") or [{"id": "uncategorized", "name": "Sin categoria"}])[0]
+
+
+def find_seller_for_import(store: dict, row: dict) -> dict | None:
+    seller_id = row_value(row, "assignedSellerId", "sellerId", "vendedor_id", "id_vendedor")
+    if seller_id:
+        seller = find_by_id(store.get("admin_users", []), seller_id)
+        if seller:
+            return seller
+    seller_email = row_value(row, "sellerEmail", "vendedor_email", "email_vendedor")
+    if seller_email:
+        return next(
+            (
+                user
+                for user in store.get("admin_users", [])
+                if user.get("role") == "sales" and user.get("email", "").lower() == seller_email.lower()
+            ),
+            None,
+        )
+    seller_name = row_value(row, "sellerName", "vendedor", "vendedor_nombre")
+    if seller_name:
+        normalized = normalize_import_key(seller_name)
+        return next(
+            (
+                user
+                for user in store.get("admin_users", [])
+                if user.get("role") == "sales" and normalize_import_key(user.get("name", "")) == normalized
+            ),
+            None,
+        )
+    return None
+
+
+def append_unique(target: list, values: list[str]) -> None:
+    for value in values:
+        if value and value not in target:
+            target.append(value)
+
+
+def import_categories_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    for row_number, row in enumerate(rows, start=2):
+        name = row_value(row, "name", "nombre", "categoria", "category")
+        if not name:
+            bulk_error(result, row_number, "la categoria requiere nombre.")
+            continue
+        category_id = row_value(row, "id", "category_id", "categoria_id")
+        category = find_by_id(store.get("categories", []), category_id) if category_id else find_category_by_name(store, name)
+        payload = {
+            "name": name,
+            "description": row_value(row, "description", "descripcion", default=(category or {}).get("description", "")),
+            "imageUrl": row_value(row, "imageUrl", "imagen", "imagen_url", "url_imagen", default=(category or {}).get("imageUrl", "")),
+            "status": row_value(row, "status", "estado", default=(category or {}).get("status", "active")) or "active",
+            "updatedAt": utc_now(),
+        }
+        if category:
+            before_name = category.get("name", "")
+            category.update(payload)
+            for product in store.get("products", []):
+                if product.get("categoryId") == category.get("id"):
+                    product["categoryName"] = category["name"]
+            result["updated"] += 1
+            if before_name != category["name"]:
+                result.setdefault("warnings", []).append(f"Fila {row_number}: categoria renombrada.")
+        else:
+            payload["id"] = next_id("cat", name)
+            store.setdefault("categories", []).append(payload)
+            result["created"] += 1
+    return result
+
+
+def import_products_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    for row_number, row in enumerate(rows, start=2):
+        sku = row_value(row, "sku", "codigo", "codigo_sku").upper()
+        title = row_value(row, "title", "nombre", "producto", "nombre_comercial")
+        if not sku or not title:
+            bulk_error(result, row_number, "producto requiere SKU y nombre.")
+            continue
+
+        existing = find_product_by_sku(store, sku)
+        category = ensure_import_category(
+            store,
+            row_value(row, "categoryId", "categoria_id", "id_categoria"),
+            row_value(row, "categoryName", "category", "categoria", "familia"),
+        )
+        current = existing or {}
+        public_price = parse_import_float(
+            row_value(row, "publicPriceUsd", "precio_publico_usd", "precio_usd", "precio"),
+            float(current.get("publicPriceUsd") or 0),
+        )
+        original_price = parse_import_float(
+            row_value(row, "originalPriceUsd", "precio_anterior_usd", "precio_lista_usd"),
+            float(current.get("originalPriceUsd") or public_price),
+        )
+        b2b_price = parse_import_float(
+            row_value(row, "b2bPriceUsd", "precio_b2b_usd", "precio_ferretero_usd"),
+            float(current.get("b2bPriceUsd") or public_price),
+        )
+        discount = parse_import_float(
+            row_value(row, "discountPercent", "descuento", "descuento_porcentaje"),
+            float(current.get("discountPercent") or 0),
+        )
+        primary_image = row_value(
+            row,
+            "imageUrl",
+            "imagen_principal",
+            "imagen",
+            "url_imagen",
+            default=current.get("imageUrl", ""),
+        )
+        gallery_images = parse_import_list(
+            row_value(row, "imageUrls", "imagenes", "galeria", "galeria_imagenes")
+        )
+        if primary_image and primary_image not in gallery_images:
+            gallery_images.insert(0, primary_image)
+        if not gallery_images:
+            gallery_images = list(current.get("imageUrls") or [])
+        if not primary_image and gallery_images:
+            primary_image = gallery_images[0]
+        pdf_urls = parse_import_list(row_value(row, "pdfUrls", "pdfs", "fichas_pdf", "pdf_tecnicos"))
+        if not pdf_urls:
+            pdf_urls = list(current.get("pdfUrls") or [])
+
+        payload = {
+            "sku": sku,
+            "title": title,
+            "description": row_value(row, "description", "descripcion", default=current.get("description", "")),
+            "productType": row_value(row, "productType", "tipo", "tipo_producto", default=current.get("productType", "machine")) or "machine",
+            "categoryId": category["id"],
+            "categoryName": category["name"],
+            "publicPriceUsd": public_price,
+            "originalPriceUsd": original_price or public_price,
+            "discountPercent": discount,
+            "b2bPriceUsd": b2b_price,
+            "exchangeRateUsdVes": parse_import_float(
+                row_value(row, "exchangeRateUsdVes", "tasa_usd_ves", "tasa"),
+                float(current.get("exchangeRateUsdVes") or current_rate()),
+            ),
+            "stock": parse_import_int(row_value(row, "stock", "stock_inicial", "cantidad"), int(current.get("stock") or 0)),
+            "reserved": int(current.get("reserved") or 0),
+            "status": row_value(row, "status", "estado", default=current.get("status", "active")) or "active",
+            "imageUrl": primary_image,
+            "imageUrls": gallery_images,
+            "pdfUrls": pdf_urls,
+            "variants": parse_import_list(row_value(row, "variants", "variantes", "tallas", "opciones")) or list(current.get("variants") or []),
+            "specifications": parse_import_specs(row_value(row, "specifications", "especificaciones")) or dict(current.get("specifications") or {}),
+            "requiresQuote": parse_import_bool(row_value(row, "requiresQuote", "requiere_cotizacion"), bool(current.get("requiresQuote", False))),
+            "requiresTechnicalValidation": parse_import_bool(
+                row_value(row, "requiresTechnicalValidation", "requiere_validacion_tecnica"),
+                bool(current.get("requiresTechnicalValidation", False)),
+            ),
+            "rotationLast30Days": parse_import_int(
+                row_value(row, "rotationLast30Days", "rotacion_30_dias", "rotacion"),
+                int(current.get("rotationLast30Days") or 0),
+            ),
+            "updatedAt": utc_now(),
+        }
+        if existing:
+            payload["id"] = existing["id"]
+            payload["createdAt"] = existing.get("createdAt", utc_now())
+            store["products"] = [payload if item["id"] == existing["id"] else item for item in store.get("products", [])]
+            result["updated"] += 1
+        else:
+            payload["id"] = next_id("prod", sku)
+            payload["createdAt"] = utc_now()
+            store.setdefault("products", []).append(payload)
+            result["created"] += 1
+    return result
+
+
+def import_stock_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    reserved_by_product = stock_reserved_quantities(store.get("orders", []))
+    for row_number, row in enumerate(rows, start=2):
+        sku = row_value(row, "sku", "codigo", "codigo_sku").upper()
+        product = find_product_by_sku(store, sku)
+        if not product:
+            bulk_error(result, row_number, f"SKU {sku or 'vacio'} no existe.")
+            continue
+        raw_quantity = row_value(row, "cantidad", "stock", "stock_fisico", "disponible")
+        if raw_quantity == "":
+            bulk_error(result, row_number, f"SKU {sku} sin cantidad.")
+            continue
+        quantity = max(parse_import_int(raw_quantity), reserved_by_product.get(product["id"], 0))
+        before = int(product.get("stock") or 0)
+        product["stock"] = quantity
+        product["updatedAt"] = utc_now()
+        store.setdefault("stock_movements", []).append(
+            {
+                "id": next_id("mov", product["sku"]),
+                "productId": product["id"],
+                "sku": product["sku"],
+                "type": row_value(row, "type", "tipo", default="bulk_excel_set") or "bulk_excel_set",
+                "quantity": quantity,
+                "note": row_value(row, "note", "nota", "motivo", default="Carga masiva Excel/CSV."),
+                "createdBy": session.get("admin_name", "Admin"),
+                "createdAt": utc_now(),
+            }
+        )
+        result["updated" if before != quantity else "skipped"] += 1
+    return result
+
+
+def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    for row_number, row in enumerate(rows, start=2):
+        email = row_value(row, "email", "correo").lower()
+        name = row_value(row, "name", "nombre", "vendedor")
+        if not email or not name:
+            bulk_error(result, row_number, "vendedor requiere nombre y email.")
+            continue
+        user = next((item for item in store.get("admin_users", []) if item.get("email", "").lower() == email), None)
+        if user and user.get("role") != "sales":
+            bulk_error(result, row_number, f"{email} ya existe con rol administrativo.")
+            continue
+        password = row_value(row, "password", "contrasena", "clave")
+        if password and password_errors(password):
+            bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
+            continue
+        if not password and not user:
+            password = secrets.token_urlsafe(12)
+        payload = {
+            "name": name,
+            "email": email,
+            "role": "sales",
+            "status": row_value(row, "status", "estado", default=(user or {}).get("status", "active")) or "active",
+            "sellerCode": row_value(row, "sellerCode", "codigo_vendedor", default=(user or {}).get("sellerCode", "")).upper(),
+            "sellerZone": row_value(row, "sellerZone", "zona", default=(user or {}).get("sellerZone", "")),
+            "phone": row_value(row, "phone", "telefono", "whatsapp", default=(user or {}).get("phone", "")),
+            "commissionRatePercent": parse_import_float(
+                row_value(row, "commissionRatePercent", "comision", "porcentaje_comision"),
+                float((user or {}).get("commissionRatePercent") or 0),
+            ),
+            "salesGoalUsd": parse_import_float(
+                row_value(row, "salesGoalUsd", "meta_usd", "meta_ventas_usd"),
+                float((user or {}).get("salesGoalUsd") or 0),
+            ),
+            "updatedAt": utc_now(),
+        }
+        if user:
+            payload["id"] = user["id"]
+            payload["createdAt"] = user.get("createdAt", utc_now())
+            payload["passwordHash"] = generate_password_hash(password) if password else user.get("passwordHash", "")
+            payload["mustChangePassword"] = True if password else bool(user.get("mustChangePassword"))
+            store["admin_users"] = [payload if item["id"] == user["id"] else item for item in store.get("admin_users", [])]
+            result["updated"] += 1
+        else:
+            payload["id"] = next_id("admin", email)
+            payload["createdAt"] = utc_now()
+            payload["passwordHash"] = generate_password_hash(password)
+            payload["mustChangePassword"] = True
+            store.setdefault("admin_users", []).append(payload)
+            result["created"] += 1
+    return result
+
+
+def import_clients_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    can_approve = role_allowed(CREDIT_APPROVAL_ROLES)
+    for row_number, row in enumerate(rows, start=2):
+        email = row_value(row, "email", "correo").lower()
+        business_name = row_value(row, "businessName", "razon_social", "nombre_comercial", "cliente")
+        if not email or not business_name:
+            bulk_error(result, row_number, "cliente requiere nombre comercial y email.")
+            continue
+        client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == email), None)
+        password = row_value(row, "password", "contrasena", "clave")
+        if password and password_errors(password):
+            bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
+            continue
+        if not password and not client:
+            password = secrets.token_urlsafe(12)
+        seller = find_seller_for_import(store, row)
+        credit_requested = parse_import_float(row_value(row, "creditRequestedUsd", "credito_solicitado_usd", "solicitud_credito_usd"), float((client or {}).get("creditRequestedUsd") or 0))
+        credit_limit = parse_import_float(row_value(row, "creditLimitUsd", "credito_limite_usd", "cupo_usd", "linea_credito_usd"), float((client or {}).get("creditLimitUsd") or 0))
+        credit_status = row_value(row, "creditRequestStatus", "estado_credito", default=(client or {}).get("creditRequestStatus", "none")) or "none"
+        credit_enabled = parse_import_bool(row_value(row, "creditEnabled", "credito_aprobado", "linea_activa"), bool((client or {}).get("creditEnabled", False)))
+        if credit_limit > 0 and can_approve and credit_enabled:
+            credit_status = "approved"
+        elif credit_limit > 0 and not can_approve:
+            credit_status = "pending"
+            credit_enabled = False
+            credit_limit = float((client or {}).get("creditLimitUsd") or 0)
+        terms = [
+            int(term)
+            for term in re.split(r"[\s,;|/]+", row_value(row, "allowedPaymentTermsDays", "plazos", "plazos_pago", default="0"))
+            if term.strip().isdigit() and int(term) in PAYMENT_TERM_OPTIONS
+        ] or list((client or {}).get("allowedPaymentTermsDays") or [0])
+        payment_term = parse_import_int(row_value(row, "paymentTermsDays", "plazo_default", "dias_credito"), int((client or {}).get("paymentTermsDays") or 0))
+        payload = {
+            "businessName": business_name,
+            "taxId": row_value(row, "taxId", "rif", "rut", default=(client or {}).get("taxId", "")),
+            "contactName": row_value(row, "contactName", "contacto", "responsable", default=(client or {}).get("contactName", "")),
+            "phone": row_value(row, "phone", "telefono", "whatsapp", default=(client or {}).get("phone", "")),
+            "email": email,
+            "clientType": row_value(row, "clientType", "tipo_cliente", default=(client or {}).get("clientType", "ferretero")) or "ferretero",
+            "status": row_value(row, "status", "estado", default=(client or {}).get("status", "active")) or "active",
+            "address": row_value(row, "address", "direccion", default=(client or {}).get("address", "")),
+            "state": row_value(row, "state", "estado_ubicacion", "provincia", default=(client or {}).get("state", "")),
+            "city": row_value(row, "city", "ciudad", default=(client or {}).get("city", "")),
+            "deliveryZone": row_value(row, "deliveryZone", "zona", default=(client or {}).get("deliveryZone", "")),
+            "assignedSellerId": (seller or {}).get("id", (client or {}).get("assignedSellerId", "")),
+            "assignedSellerName": (seller or {}).get("name", (client or {}).get("assignedSellerName", "")),
+            "defaultSaleType": row_value(row, "defaultSaleType", "tipo_venta_default", default=(client or {}).get("defaultSaleType", "cash")) or "cash",
+            "allowedPaymentTermsDays": sorted(set(terms)),
+            "creditRequestStatus": credit_status,
+            "creditRequestedUsd": credit_requested,
+            "creditEnabled": credit_enabled and credit_status == "approved",
+            "creditLimitUsd": credit_limit if credit_enabled and credit_status == "approved" else float((client or {}).get("creditLimitUsd") or 0),
+            "creditUsedUsd": parse_import_float(row_value(row, "creditUsedUsd", "credito_usado_usd"), float((client or {}).get("creditUsedUsd") or 0)),
+            "paymentTermsDays": payment_term if credit_status == "approved" else int((client or {}).get("paymentTermsDays") or 0),
+            "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
+            "updatedAt": utc_now(),
+        }
+        if credit_status == "approved" and can_approve:
+            payload["creditApprovedBy"] = session.get("admin_name", "Admin")
+            payload["creditApprovedAt"] = utc_now()
+        elif client:
+            payload["creditApprovedBy"] = client.get("creditApprovedBy", "")
+            payload["creditApprovedAt"] = client.get("creditApprovedAt", "")
+        if client:
+            payload["id"] = client["id"]
+            payload["createdAt"] = client.get("createdAt", utc_now())
+            payload["passwordHash"] = generate_password_hash(password) if password else client.get("passwordHash", "")
+            payload["mustChangePassword"] = True if password else bool(client.get("mustChangePassword"))
+            store["clients"] = [payload if item["id"] == client["id"] else item for item in store.get("clients", [])]
+            result["updated"] += 1
+        else:
+            payload["id"] = next_id("client", email)
+            payload["createdAt"] = utc_now()
+            payload["passwordHash"] = generate_password_hash(password)
+            payload["mustChangePassword"] = True
+            store.setdefault("clients", []).append(payload)
+            result["created"] += 1
+    return result
+
+
+def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    for row_number, row in enumerate(rows, start=2):
+        title = row_value(row, "title", "titulo", "banner")
+        if not title:
+            bulk_error(result, row_number, "banner requiere titulo.")
+            continue
+        announcement_id = row_value(row, "id", "announcement_id", "banner_id")
+        announcement = find_by_id(store.get("announcements", []), announcement_id) if announcement_id else next(
+            (
+                item
+                for item in store.get("announcements", [])
+                if normalize_import_key(item.get("title", "")) == normalize_import_key(title)
+            ),
+            None,
+        )
+        payload = {
+            "title": title,
+            "body": row_value(row, "body", "mensaje", "descripcion", default=(announcement or {}).get("body", "")),
+            "placement": row_value(row, "placement", "ubicacion", default=(announcement or {}).get("placement", "home")) or "home",
+            "priority": parse_import_int(row_value(row, "priority", "prioridad"), int((announcement or {}).get("priority") or 50)),
+            "ctaLabel": row_value(row, "ctaLabel", "boton", "texto_boton", default=(announcement or {}).get("ctaLabel", "")),
+            "ctaUrl": row_value(row, "ctaUrl", "accion", "url_accion", default=(announcement or {}).get("ctaUrl", "")),
+            "imageUrl": row_value(row, "imageUrl", "imagen", "imagen_url", default=(announcement or {}).get("imageUrl", "")),
+            "startsAt": row_value(row, "startsAt", "inicio", default=(announcement or {}).get("startsAt", utc_now())) or utc_now(),
+            "endsAt": row_value(row, "endsAt", "cierre", "fin", default=(announcement or {}).get("endsAt", "")),
+            "status": row_value(row, "status", "estado", default=(announcement or {}).get("status", "active")) or "active",
+            "updatedAt": utc_now(),
+        }
+        if announcement:
+            payload["id"] = announcement["id"]
+            store["announcements"] = [payload if item["id"] == announcement["id"] else item for item in store.get("announcements", [])]
+            result["updated"] += 1
+        else:
+            payload["id"] = next_id("ann", title)
+            store.setdefault("announcements", []).append(payload)
+            result["created"] += 1
+    return result
+
+
+def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    for row_number, row in enumerate(rows, start=2):
+        title = row_value(row, "title", "titulo", "recurso", default="Activo Wulkan")
+        asset_url = row_value(row, "url", "assetUrl", "archivo_url", "imagen_url", "pdf_url")
+        if not asset_url:
+            bulk_error(result, row_number, "recurso requiere URL de imagen o PDF.")
+            continue
+        product_id = row_value(row, "productId", "producto_id", "id_producto")
+        product = find_by_id(store.get("products", []), product_id) if product_id else find_product_by_sku(
+            store,
+            row_value(row, "sku", "producto_sku", "sku_producto"),
+        )
+        asset_type = normalize_import_key(row_value(row, "assetType", "tipo", default="image"))
+        asset_type = "pdf" if asset_type in {"pdf", "ficha", "ficha_pdf"} else "image"
+        duplicate = next(
+            (
+                item
+                for item in store.get("media_assets", [])
+                if item.get("url") == asset_url and item.get("productId", "") == (product or {}).get("id", product_id)
+            ),
+            None,
+        )
+        if duplicate:
+            duplicate.update({"title": title, "assetType": asset_type, "createdAt": duplicate.get("createdAt", utc_now())})
+            result["updated"] += 1
+        else:
+            asset = {
+                "id": next_id("asset", title),
+                "title": title,
+                "assetType": asset_type,
+                "productId": (product or {}).get("id", product_id),
+                "url": asset_url,
+                "createdAt": utc_now(),
+            }
+            store.setdefault("media_assets", []).append(asset)
+            result["created"] += 1
+        if product:
+            if asset_type == "pdf":
+                append_unique(product.setdefault("pdfUrls", []), [asset_url])
+            else:
+                append_unique(product.setdefault("imageUrls", []), [asset_url])
+                if not product.get("imageUrl"):
+                    product["imageUrl"] = asset_url
+            product["updatedAt"] = utc_now()
+    return result
+
+
+def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    for row_number, row in enumerate(rows, start=2):
+        name = row_value(row, "name", "nombre", "servicio")
+        if not name:
+            bulk_error(result, row_number, "servicio tecnico requiere nombre.")
+            continue
+        technician_id = row_value(row, "id", "technician_id", "servicio_id")
+        technician = find_by_id(store.get("service_technicians", []), technician_id) if technician_id else next(
+            (
+                item
+                for item in store.get("service_technicians", [])
+                if normalize_import_key(item.get("name", "")) == normalize_import_key(name)
+            ),
+            None,
+        )
+        payload = {
+            "name": name,
+            "companyName": row_value(row, "companyName", "empresa", default=(technician or {}).get("companyName", "")),
+            "contactName": row_value(row, "contactName", "contacto", default=(technician or {}).get("contactName", "")),
+            "phone": row_value(row, "phone", "telefono", default=(technician or {}).get("phone", "")),
+            "whatsapp": row_value(row, "whatsapp", default=(technician or {}).get("whatsapp", "")),
+            "email": row_value(row, "email", "correo", default=(technician or {}).get("email", "")).lower(),
+            "state": row_value(row, "state", "estado_ubicacion", default=(technician or {}).get("state", "")),
+            "city": row_value(row, "city", "ciudad", default=(technician or {}).get("city", "")),
+            "address": row_value(row, "address", "direccion", default=(technician or {}).get("address", "")),
+            "specialties": parse_import_list(row_value(row, "specialties", "especialidades")) or list((technician or {}).get("specialties", [])),
+            "coverage": row_value(row, "coverage", "cobertura", "zona", default=(technician or {}).get("coverage", "")),
+            "status": row_value(row, "status", "estado", default=(technician or {}).get("status", "active")) or "active",
+            "visibleInApp": parse_import_bool(row_value(row, "visibleInApp", "visible_app", "visible"), bool((technician or {}).get("visibleInApp", True))),
+            "notes": row_value(row, "notes", "notas", default=(technician or {}).get("notes", "")),
+            "updatedAt": utc_now(),
+        }
+        if technician:
+            payload["id"] = technician["id"]
+            payload["createdAt"] = technician.get("createdAt", utc_now())
+            store["service_technicians"] = [
+                payload if item["id"] == technician["id"] else item
+                for item in store.get("service_technicians", [])
+            ]
+            result["updated"] += 1
+        else:
+            payload["id"] = next_id("svc", name)
+            payload["createdAt"] = utc_now()
+            store.setdefault("service_technicians", []).append(payload)
+            result["created"] += 1
+    return result
+
+
+def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoint: str):
+    store = load_store()
+    try:
+        rows = read_tabular_upload(request.files.get("importFile"))
+        result = importer(store, rows)
+        record_audit_event(
+            store,
+            "bulk_import",
+            entity_type,
+            "",
+            f"Carga masiva {module}: {result['created']} creados, {result['updated']} actualizados.",
+            metadata={
+                "module": module,
+                "created": result.get("created", 0),
+                "updated": result.get("updated", 0),
+                "skipped": result.get("skipped", 0),
+                "errors": result.get("errors", [])[:8],
+            },
+        )
+        save_store(store)
+    except BadRequest as exc:
+        result = blank_bulk_result()
+        result["errors"] = [exc.description or str(exc)]
+    remember_bulk_result(module, result)
+    return redirect(url_for(redirect_endpoint))
+
+
 def order_actor() -> dict:
     return {
         "id": session.get("admin_user_id", ""),
@@ -1408,11 +2077,17 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
     pdf_urls = split_lines(request.form.get("pdfUrls", ""))
     uploaded_image = save_upload(request.files.get("imageFile"), "products")
     uploaded_pdf = save_upload(request.files.get("pdfFile"), "products")
+    uploaded_gallery = [
+        save_upload(file_storage, "products")
+        for file_storage in request.files.getlist("galleryFiles")
+        if file_storage and file_storage.filename
+    ]
 
     if uploaded_image:
         primary_image = uploaded_image
     if primary_image and primary_image not in image_urls:
         image_urls.insert(0, primary_image)
+    append_unique(image_urls, [url for url in uploaded_gallery if url])
     if uploaded_pdf and uploaded_pdf not in pdf_urls:
         pdf_urls.insert(0, uploaded_pdf)
 
@@ -1691,6 +2366,7 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         "can_approve_credit": role_allowed(CREDIT_APPROVAL_ROLES),
         "metrics": metrics,
         "error": error,
+        "bulk_result": consume_bulk_result("clients") if not error else None,
     }
 
 
@@ -1735,6 +2411,7 @@ def sellers_page_context(store: dict, error: str = "") -> dict:
         "sellers": sellers,
         "metrics": metrics,
         "error": error,
+        "bulk_result": consume_bulk_result("sellers") if not error else None,
     }
 
 
@@ -1841,6 +2518,7 @@ def service_technicians_page_context(store: dict, error: str = "") -> dict:
         "technicians": technicians,
         "metrics": metrics,
         "error": error,
+        "bulk_result": consume_bulk_result("service_technicians") if not error else None,
     }
 
 
@@ -1969,6 +2647,12 @@ def sellers():
     return render_template("sellers.html", **sellers_page_context(store))
 
 
+@app.post("/sellers/import")
+@require_roles("super_admin", "commercial_manager", "operator")
+def sellers_import():
+    return handle_bulk_import("sellers", "seller", import_sellers_rows, "sellers")
+
+
 @app.post("/sellers/<seller_id>/edit")
 @require_roles("super_admin", "commercial_manager", "operator")
 def seller_edit(seller_id: str):
@@ -2024,6 +2708,12 @@ def clients():
     return render_template("clients.html", **clients_page_context(store))
 
 
+@app.post("/clients/import")
+@require_roles("super_admin", "commercial_manager", "operator")
+def clients_import():
+    return handle_bulk_import("clients", "client", import_clients_rows, "clients")
+
+
 @app.post("/clients/<client_id>/edit")
 @require_roles("super_admin", "commercial_manager", "operator")
 def client_edit(client_id: str):
@@ -2062,7 +2752,13 @@ def products():
             for product in products
             if query in product.get("title", "").lower() or query in product.get("sku", "").lower()
         ]
-    return render_template("products.html", products=products, query=query)
+    return render_template("products.html", products=products, query=query, bulk_result=consume_bulk_result("products"))
+
+
+@app.post("/products/import")
+@require_roles("super_admin", "operator", "inventory")
+def products_import():
+    return handle_bulk_import("products", "product", import_products_rows, "products")
 
 
 @app.route("/products/new", methods=["GET", "POST"])
@@ -2260,7 +2956,14 @@ def stock():
         products=products,
         movements=list(reversed(store["stock_movements"][-20:])),
         rotation_chart=rotation_chart(products),
+        bulk_result=consume_bulk_result("stock"),
     )
+
+
+@app.post("/stock/import")
+@require_roles("super_admin", "operator", "inventory")
+def stock_import():
+    return handle_bulk_import("stock", "stock", import_stock_rows, "stock")
 
 
 @app.route("/categories", methods=["GET", "POST"])
@@ -2284,7 +2987,13 @@ def categories():
         save_store(store)
         return redirect(url_for("categories"))
 
-    return render_template("categories.html", categories=store["categories"])
+    return render_template("categories.html", categories=store["categories"], bulk_result=consume_bulk_result("categories"))
+
+
+@app.post("/categories/import")
+@require_roles("super_admin", "operator", "inventory")
+def categories_import():
+    return handle_bulk_import("categories", "category", import_categories_rows, "categories")
 
 
 @app.route("/categories/<category_id>/edit", methods=["POST"])
@@ -2387,7 +3096,14 @@ def media_library():
         "media_library.html",
         products=products,
         assets=assets,
+        bulk_result=consume_bulk_result("media_library"),
     )
+
+
+@app.post("/media-library/import")
+@require_roles("super_admin", "operator", "inventory")
+def media_library_import():
+    return handle_bulk_import("media_library", "media_asset", import_media_assets_rows, "media_library")
 
 
 @app.route("/service-technicians", methods=["GET", "POST"])
@@ -2416,6 +3132,12 @@ def service_technicians():
         return redirect(url_for("service_technicians"))
 
     return render_template("service_technicians.html", **service_technicians_page_context(store))
+
+
+@app.post("/service-technicians/import")
+@require_roles("super_admin", "commercial_manager", "operator")
+def service_technicians_import():
+    return handle_bulk_import("service_technicians", "service_technician", import_service_technicians_rows, "service_technicians")
 
 
 @app.post("/service-technicians/<technician_id>/edit")
@@ -2575,6 +3297,7 @@ def audit():
         "credit_decision",
         "commission_update",
         "password_change",
+        "bulk_import",
     }
     metrics = {
         "total": len(store.get("audit_events", [])),
@@ -2851,7 +3574,14 @@ def announcements():
     return render_template(
         "announcements.html",
         announcements=sorted(store["announcements"], key=lambda item: int(item.get("priority") or 0), reverse=True),
+        bulk_result=consume_bulk_result("announcements"),
     )
+
+
+@app.post("/announcements/import")
+@require_roles("super_admin", "commercial_manager", "operator")
+def announcements_import():
+    return handle_bulk_import("announcements", "announcement", import_announcements_rows, "announcements")
 
 
 @app.post("/announcements/<announcement_id>/edit")

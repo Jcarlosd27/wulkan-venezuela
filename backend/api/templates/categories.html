@@ -3,12 +3,19 @@
 {% set description = "Administra familias del catalogo, imagenes y visibilidad para la app movil." %}
 
 {% block top_action %}
-<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
-  <i class="bi bi-plus-lg"></i> Nueva categoria
-</button>
+<div class="d-flex flex-wrap gap-2">
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#categoriesImportModal">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
+  </button>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
+    <i class="bi bi-plus-lg"></i> Nueva categoria
+  </button>
+</div>
 {% endblock %}
 
 {% block content %}
+{% include "partials/bulk_import_result.html" %}
+
 <section class="row g-3 mb-3">
   <div class="col-12 col-md-4">
     <article class="metric-card">
@@ -172,6 +179,13 @@
   </div>
 </div>
 {% endfor %}
+
+{% set bulk_modal_id = "categoriesImportModal" %}
+{% set bulk_action = url_for("categories_import") %}
+{% set bulk_title = "Importar categorias" %}
+{% set bulk_help = "Crea o actualiza familias del catalogo con descripcion, imagen y estado para Android." %}
+{% set bulk_columns = ["nombre", "descripcion", "imagen_url", "estado"] %}
+{% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}

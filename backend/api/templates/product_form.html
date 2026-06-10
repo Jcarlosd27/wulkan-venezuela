@@ -138,6 +138,8 @@
           <div class="col-12">
             <label class="form-label fw-semibold">Galeria de imagenes</label>
             <textarea class="form-control" name="imageUrls" rows="3" placeholder="Una URL por linea">{{ (product.imageUrls | join('\n')) if product else '' }}</textarea>
+            <input class="form-control mt-2" name="galleryFiles" type="file" accept="image/*" multiple>
+            <small class="text-secondary">Cada URL se muestra como imagen deslizable en el carrusel del detalle movil.</small>
           </div>
           <div class="col-12">
             <label class="form-label fw-semibold">PDFs tecnicos</label>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import sys
 from pathlib import Path
 
@@ -163,6 +164,35 @@ def main() -> int:
 
     client = wulkan_app.app.test_client()
 
+    with client.session_transaction() as session:
+        session["admin_authenticated"] = True
+        session["admin_user_id"] = MANAGER_ID
+        session["admin_name"] = "Gerente Flow"
+        session["admin_role"] = "super_admin"
+        session["_csrf_token"] = "csrf-flow"
+
+    assert_status(
+        client.post(
+            "/products/import",
+            data={
+                "_csrf_token": "csrf-flow",
+                "importFile": (
+                    io.BytesIO(
+                        b"sku,nombre,categoria,precio_publico_usd,precio_b2b_usd,stock,imagenes\n"
+                        b"WUL-FLOW-45CC,Motosierra Wulkan 45cc Flow,Maquinaria profesional,185,162,12,https://cdn.example.com/productos/motosierra.jpg|https://cdn.example.com/productos/motosierra-lateral.jpg\n"
+                    ),
+                    "products.csv",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        ),
+        302,
+        "importar productos",
+    )
+    imported_product = state["products"][0]
+    assert len(imported_product["imageUrls"]) == 2
+
     seller_login = assert_status(
         client.post(
             "/api/mobile/auth/login",
@@ -289,6 +319,7 @@ def main() -> int:
     assert created_order["inventoryStatus"] == "reserved"
 
     audit_events = state["audit_events"]
+    assert any(event["action"] == "bulk_import" and event["entityType"] == "product" for event in audit_events)
     assert any(event["action"] == "credit_decision" for event in audit_events)
     credit_event = next(event for event in audit_events if event["action"] == "credit_decision")
     assert "creditLimitUsd" in credit_event["metadata"]["changedFields"]
@@ -297,6 +328,7 @@ def main() -> int:
     print("Graphify smoke comercial")
     print("------------------------")
     print("OK vendedor crea cliente y queda asignado")
+    print("OK carga masiva actualiza producto y galeria movil")
     print("OK gerente aprueba credito B2B con auditoria before/after")
     print("OK ferretero cambia clave temporal")
     print("OK ferretero crea orden con linea de credito")

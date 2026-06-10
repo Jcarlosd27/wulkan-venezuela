@@ -3,10 +3,17 @@
 {% set description = "Catalogo ecommerce para venta directa, B2B y sincronizacion con Android." %}
 
 {% block top_action %}
-<a class="btn btn-primary" href="{{ url_for('product_new') }}"><i class="bi bi-plus-lg"></i> Crear producto</a>
+<div class="d-flex flex-wrap gap-2">
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#productsImportModal">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
+  </button>
+  <a class="btn btn-primary" href="{{ url_for('product_new') }}"><i class="bi bi-plus-lg"></i> Crear producto</a>
+</div>
 {% endblock %}
 
 {% block content %}
+{% include "partials/bulk_import_result.html" %}
+
 <section class="panel">
   <div class="panel-header">
     <div>
@@ -108,4 +115,11 @@
     </table>
   </div>
 </section>
+
+{% set bulk_modal_id = "productsImportModal" %}
+{% set bulk_action = url_for("products_import") %}
+{% set bulk_title = "Importar productos" %}
+{% set bulk_help = "Crea o actualiza productos por SKU, incluyendo precios, stock inicial, categorias e imagenes para carrusel movil." %}
+{% set bulk_columns = ["sku", "nombre", "categoria", "precio_publico_usd", "precio_b2b_usd", "stock", "imagenes", "pdfs", "variantes", "especificaciones"] %}
+{% include "partials/bulk_import_modal.html" %}
 {% endblock %}

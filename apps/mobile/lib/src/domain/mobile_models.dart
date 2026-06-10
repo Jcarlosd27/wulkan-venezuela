@@ -88,6 +88,20 @@ class MobileProduct {
     }
     return imageUrls.isNotEmpty ? imageUrls.first : null;
   }
+
+  List<String> get galleryImageUrls {
+    final urls = <String>[];
+    final primary = primaryImageUrl;
+    if (primary != null && primary.isNotEmpty) {
+      urls.add(primary);
+    }
+    for (final url in imageUrls) {
+      if (url.isNotEmpty && !urls.contains(url)) {
+        urls.add(url);
+      }
+    }
+    return urls;
+  }
 }
 
 class MobileProductQuery {

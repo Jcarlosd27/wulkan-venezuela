@@ -1,0 +1,22 @@
+{% if bulk_result %}
+<div class="alert alert-{{ 'warning' if bulk_result.errors else 'success' }} border-0 shadow-sm d-flex align-items-start gap-3" role="alert">
+  <div class="fs-5">
+    <i class="bi bi-{{ 'exclamation-triangle' if bulk_result.errors else 'check-circle' }}"></i>
+  </div>
+  <div>
+    <strong class="d-block">Carga masiva procesada</strong>
+    <span>
+      {{ bulk_result.created }} creados ·
+      {{ bulk_result.updated }} actualizados ·
+      {{ bulk_result.skipped }} omitidos
+    </span>
+    {% if bulk_result.errors %}
+    <ul class="mb-0 mt-2 ps-3">
+      {% for error in bulk_result.errors %}
+      <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

@@ -2398,6 +2398,20 @@ class _ProductDetailSheet extends StatefulWidget {
 
 class _ProductDetailSheetState extends State<_ProductDetailSheet> {
   int _quantity = 1;
+  int _imageIndex = 0;
+  late final PageController _imageController;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _imageController.dispose();
+    super.dispose();
+  }
 
   Future<void> _editQuantity() async {
     final selected = await _showQuantityPicker(
@@ -2421,6 +2435,7 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
     final referencePrice = product.ferreteroReferencePriceUsd;
     final accentColor = _productAccentColor(product.categoryName);
     final canAdd = product.requiresQuote || product.availableStock > 0;
+    final galleryImages = product.galleryImageUrls;
 
     return FractionallySizedBox(
       heightFactor: 0.88,
@@ -2452,24 +2467,14 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          _ProductDetailMedia(
-            imageUrl: product.primaryImageUrl,
+          _ProductImageCarousel(
+            images: galleryImages,
             title: product.name,
             accentColor: accentColor,
+            controller: _imageController,
+            selectedIndex: _imageIndex,
+            onChanged: (index) => setState(() => _imageIndex = index),
           ),
-          if (product.imageUrls.length > 1) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 62,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: product.imageUrls.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) =>
-                    _ProductThumb(imageUrl: product.imageUrls[index]),
-              ),
-            ),
-          ],
           const SizedBox(height: 14),
           Text(
             product.name,
@@ -4920,6 +4925,121 @@ class _ModuleTile extends StatelessWidget {
   }
 }
 
+class _ProductImageCarousel extends StatelessWidget {
+  const _ProductImageCarousel({
+    required this.images,
+    required this.title,
+    required this.accentColor,
+    required this.controller,
+    required this.selectedIndex,
+    required this.onChanged,
+  });
+
+  final List<String> images;
+  final String title;
+  final Color accentColor;
+  final PageController controller;
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final safeImages = images.isEmpty ? <String?>[null] : images;
+    final hasGallery = safeImages.length > 1;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Stack(
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 10,
+              child: PageView.builder(
+                controller: controller,
+                itemCount: safeImages.length,
+                onPageChanged: onChanged,
+                itemBuilder: (context, index) => _ProductDetailMedia(
+                  imageUrl: safeImages[index],
+                  title: title,
+                  accentColor: accentColor,
+                ),
+              ),
+            ),
+            if (hasGallery)
+              Positioned(
+                right: 12,
+                top: 12,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${selectedIndex + 1}/${safeImages.length}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+            if (hasGallery)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 12,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var index = 0; index < safeImages.length; index++)
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: index == selectedIndex ? 18 : 7,
+                        height: 7,
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          color: index == selectedIndex
+                              ? accentColor
+                              : Colors.white.withValues(alpha: 0.85),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        if (hasGallery) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 68,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: safeImages.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) => GestureDetector(
+                onTap: () => controller.animateToPage(
+                  index,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                ),
+                child: _ProductThumb(
+                  imageUrl: safeImages[index],
+                  selected: index == selectedIndex,
+                  accentColor: accentColor,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _ProductDetailMedia extends StatelessWidget {
   const _ProductDetailMedia({
     required this.title,
@@ -5628,35 +5748,52 @@ class _SaleBadge extends StatelessWidget {
 }
 
 class _ProductThumb extends StatelessWidget {
-  const _ProductThumb({this.imageUrl});
+  const _ProductThumb({
+    this.imageUrl,
+    this.selected = false,
+    this.accentColor = _wulkanOrange,
+  });
 
   final String? imageUrl;
+  final bool selected;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: SizedBox(
-        width: 78,
-        height: 78,
-        child: imageUrl == null || imageUrl!.isEmpty
-            ? const ColoredBox(
-                color: Color(0xFFEFF4FB),
-                child: Icon(Icons.inventory_2_outlined),
-              )
-            : ColoredBox(
-                color: const Color(0xFFF8FAFD),
-                child: Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: Image.network(
-                    imageUrl!,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Center(
-                      child: Icon(Icons.image_not_supported_outlined),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: selected ? accentColor : const Color(0xFFE3E8F0),
+          width: selected ? 2 : 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 78,
+          height: 78,
+          child: imageUrl == null || imageUrl!.isEmpty
+              ? const ColoredBox(
+                  color: Color(0xFFEFF4FB),
+                  child: Icon(Icons.inventory_2_outlined),
+                )
+              : ColoredBox(
+                  color: const Color(0xFFF8FAFD),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Image.network(
+                      imageUrl!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Center(
+                        child: Icon(Icons.image_not_supported_outlined),
+                      ),
                     ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }

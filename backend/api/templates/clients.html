@@ -3,12 +3,19 @@
 {% set description = "Administra acceso B2B, linea de credito y estado comercial de cada cliente." %}
 
 {% block top_action %}
-<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newClientModal">
-  <i class="bi bi-plus-lg"></i> Nuevo cliente
-</button>
+<div class="d-flex flex-wrap gap-2">
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#clientsImportModal">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
+  </button>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newClientModal">
+    <i class="bi bi-plus-lg"></i> Nuevo cliente
+  </button>
+</div>
 {% endblock %}
 
 {% block content %}
+{% include "partials/bulk_import_result.html" %}
+
 {% if error %}
 <div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
   <i class="bi bi-exclamation-triangle"></i>
@@ -171,6 +178,13 @@
   </div>
 </div>
 {% endfor %}
+
+{% set bulk_modal_id = "clientsImportModal" %}
+{% set bulk_action = url_for("clients_import") %}
+{% set bulk_title = "Importar clientes ferreteros" %}
+{% set bulk_help = "Crea o actualiza clientes B2B, asignacion de vendedor, direccion, condiciones y solicitud de credito." %}
+{% set bulk_columns = ["cliente", "email", "rif", "telefono", "direccion", "ciudad", "vendedor_email", "tipo_venta_default", "cupo_usd", "plazos"] %}
+{% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}

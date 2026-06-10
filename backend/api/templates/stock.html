@@ -4,8 +4,11 @@
 
 {% block top_action %}
 <div class="d-flex flex-wrap gap-2">
-  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#bulkStockModal">
-    <i class="bi bi-upload"></i> Carga masiva
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#stockImportModal">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
+  </button>
+  <button class="btn btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#bulkStockModal">
+    <i class="bi bi-list-check"></i> Pegado rapido
   </button>
   <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#stockMoveModal">
     <i class="bi bi-plus-circle"></i> Nuevo movimiento
@@ -14,6 +17,8 @@
 {% endblock %}
 
 {% block content %}
+{% include "partials/bulk_import_result.html" %}
+
 {% set total_physical = products | sum(attribute="physicalStock") %}
 {% set total_available = products | sum(attribute="availableStock") %}
 {% set total_reserved = products | sum(attribute="committedStock") %}
@@ -236,6 +241,13 @@
     </form>
   </div>
 </div>
+
+{% set bulk_modal_id = "stockImportModal" %}
+{% set bulk_action = url_for("stock_import") %}
+{% set bulk_title = "Importar stock por SKU" %}
+{% set bulk_help = "Actualiza stock fisico final desde Excel o CSV. Nunca baja por debajo del stock reservado en ordenes." %}
+{% set bulk_columns = ["sku", "cantidad", "tipo", "nota"] %}
+{% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}

@@ -3,12 +3,19 @@
 {% set description = "Banners, imagenes de descuento y mensajes visibles en el carrusel de Android." %}
 
 {% block top_action %}
-<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newAnnouncementModal">
-  <i class="bi bi-plus-lg"></i> Nuevo banner
-</button>
+<div class="d-flex flex-wrap gap-2">
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#announcementsImportModal">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
+  </button>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newAnnouncementModal">
+    <i class="bi bi-plus-lg"></i> Nuevo banner
+  </button>
+</div>
 {% endblock %}
 
 {% block content %}
+{% include "partials/bulk_import_result.html" %}
+
 {% set active_count = announcements | selectattr('status', 'equalto', 'active') | list | length %}
 {% set image_count = announcements | selectattr('imageUrl') | list | length %}
 
@@ -153,6 +160,13 @@
   </div>
 </div>
 {% endfor %}
+
+{% set bulk_modal_id = "announcementsImportModal" %}
+{% set bulk_action = url_for("announcements_import") %}
+{% set bulk_title = "Importar banners de app" %}
+{% set bulk_help = "Carga campanas para el carrusel movil con imagen, mensaje, prioridad, vigencia y accion." %}
+{% set bulk_columns = ["titulo", "mensaje", "ubicacion", "prioridad", "imagen_url", "boton", "url_accion", "estado"] %}
+{% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}

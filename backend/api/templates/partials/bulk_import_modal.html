@@ -1,0 +1,39 @@
+<div class="modal fade" id="{{ bulk_modal_id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <form class="modal-content" method="post" enctype="multipart/form-data" action="{{ bulk_action }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title fs-5">{{ bulk_title }}</h2>
+          <p class="mb-0 text-secondary">{{ bulk_help }}</p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-semibold">Archivo Excel o CSV</label>
+        <input
+          class="form-control"
+          name="importFile"
+          type="file"
+          accept=".xlsx,.xlsm,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          required
+        >
+        <div class="bg-light rounded-3 p-3 mt-3">
+          <strong class="d-block mb-2">Columnas sugeridas</strong>
+          <div class="d-flex flex-wrap gap-2">
+            {% for column in bulk_columns %}
+            <code class="bg-white border rounded-pill px-2 py-1">{{ column }}</code>
+            {% endfor %}
+          </div>
+        </div>
+        <small class="text-secondary d-block mt-3">
+          Los encabezados pueden venir en espanol o ingles. Las filas validas se importan y los errores se muestran al volver al modulo.
+        </small>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-file-earmark-spreadsheet"></i> Importar archivo</button>
+      </div>
+    </form>
+  </div>
+</div>

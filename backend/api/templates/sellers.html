@@ -4,13 +4,20 @@
 
 {% block top_action %}
 {% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
-<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSellerModal">
-  <i class="bi bi-plus-lg"></i> Nuevo vendedor
-</button>
+<div class="d-flex flex-wrap gap-2">
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#sellersImportModal">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
+  </button>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSellerModal">
+    <i class="bi bi-plus-lg"></i> Nuevo vendedor
+  </button>
+</div>
 {% endif %}
 {% endblock %}
 
 {% block content %}
+{% include "partials/bulk_import_result.html" %}
+
 {% if error %}
 <div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
   <i class="bi bi-exclamation-triangle"></i>
@@ -164,6 +171,13 @@
   </div>
 </div>
 {% endfor %}
+
+{% set bulk_modal_id = "sellersImportModal" %}
+{% set bulk_action = url_for("sellers_import") %}
+{% set bulk_title = "Importar vendedores" %}
+{% set bulk_help = "Crea o actualiza usuarios vendedores para app movil con zona, comision y meta comercial." %}
+{% set bulk_columns = ["nombre", "email", "telefono", "codigo_vendedor", "zona", "comision", "meta_usd", "estado"] %}
+{% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
