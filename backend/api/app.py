@@ -136,9 +136,7 @@ ADMIN_MENU_GROUPS = [
         "items": [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
             {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "clients_import", "client_delete"]},
-            {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision"]},
-            {"module": "credit", "endpoint": "credit_due", "label": "Vencimientos", "icon": "bi-calendar2-week", "active": ["credit_due"]},
-            {"module": "credit", "endpoint": "credit_history", "label": "Historial credito", "icon": "bi-clock-history", "active": ["credit_history"]},
+            {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
         ],
