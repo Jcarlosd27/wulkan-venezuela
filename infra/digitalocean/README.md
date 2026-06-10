@@ -19,7 +19,7 @@ Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil en
 
 ## Crear la app en DigitalOcean
 
-1. Crear un Space, por ejemplo `wulkan-assets`, en la region elegida.
+1. Crear un Space, por ejemplo `wulkan-assets`, en la region elegida. Para la configuracion actual se usa `atl1`.
 2. Crear una llave de Spaces y guardarla como `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY`.
 3. Crear la App Platform desde el repositorio de GitHub o importando `.do/app.yaml`.
 4. Reemplazar estos valores antes del primer deploy:
@@ -51,7 +51,8 @@ El script pide una contrasena temporal segura y obliga a cambiarla al iniciar se
 
 ```bash
 cd backend/api
-python scripts/smoke_production.py --base-url https://admin.wulkanvenezuela.com
+python scripts/readiness_check.py --strict
+python scripts/smoke_production.py --base-url https://crmwulky.com.ve
 ```
 
 Endpoints importantes:
@@ -68,8 +69,8 @@ Editar `apps/mobile/dart_defines.digitalocean.example.json` con el dominio real:
 
 ```json
 {
-  "WULKAN_ADMIN_API_URL": "https://admin.wulkanvenezuela.com/api/mobile",
-  "WULKAN_MOBILE_ORDER_API_URL": "https://admin.wulkanvenezuela.com/api/mobile/orders"
+  "WULKAN_ADMIN_API_URL": "https://crmwulky.com.ve/api/mobile",
+  "WULKAN_MOBILE_ORDER_API_URL": "https://crmwulky.com.ve/api/mobile/orders"
 }
 ```
 

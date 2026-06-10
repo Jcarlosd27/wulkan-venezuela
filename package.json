@@ -28,6 +28,7 @@
     "mobile:build:apk:prod": "cd apps/mobile && flutter build apk --release --dart-define-from-file=dart_defines.production.example.json",
     "mobile:build:apk:do": "cd apps/mobile && flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json",
     "prod:smoke": "cd backend/api && python scripts/smoke_production.py",
+    "prod:readiness": "cd backend/api && python scripts/readiness_check.py --strict",
     "mobile:test": "cd apps/mobile && flutter test",
     "lint": "pnpm -r lint",
     "lint:npm": "npm run lint --workspaces --if-present",

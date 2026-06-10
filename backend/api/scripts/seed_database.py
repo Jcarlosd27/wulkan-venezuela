@@ -40,6 +40,34 @@ def parse_dt(value: str | None) -> datetime:
 
 
 def upsert(session, model, object_id: str, values: dict[str, Any]) -> None:
+    dialect_name = session.get_bind().dialect.name
+    table = model.__table__
+    update_values = {key: value for key, value in values.items() if key != "id"}
+
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        statement = pg_insert(table).values(**values)
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[table.c.id],
+                set_=update_values,
+            )
+        )
+        return
+
+    if dialect_name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        statement = sqlite_insert(table).values(**values)
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[table.c.id],
+                set_=update_values,
+            )
+        )
+        return
+
     instance = session.get(model, object_id)
     if instance is None:
         session.add(model(**values))

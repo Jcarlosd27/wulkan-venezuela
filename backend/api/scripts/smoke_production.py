@@ -8,11 +8,11 @@ from urllib.request import Request, urlopen
 
 
 CHECKS = [
-    ("/healthz", "health"),
-    ("/readyz", "readiness"),
-    ("/api/mobile/products", "mobile products"),
-    ("/api/mobile/categories", "mobile categories"),
-    ("/api/mobile/announcements", "mobile announcements"),
+    ("/healthz", "health", False),
+    ("/readyz", "readiness", False),
+    ("/api/mobile/products", "mobile products", True),
+    ("/api/mobile/categories", "mobile categories", True),
+    ("/api/mobile/announcements?placement=home", "mobile announcements", False),
 ]
 
 
@@ -32,12 +32,15 @@ def main() -> None:
     failures: list[str] = []
     print("Graphify production smoke")
     print("-------------------------")
-    for path, label in CHECKS:
+    for path, label, require_items in CHECKS:
         try:
             status, payload = fetch_json(args.base_url, path)
             ok = 200 <= status < 300
+            items_count = len(payload.get("items", []))
+            if require_items and items_count <= 0:
+                ok = False
             marker = "OK" if ok else "FAIL"
-            detail = payload.get("status") or f"{len(payload.get('items', []))} items"
+            detail = payload.get("status") or f"{items_count} items"
             print(f"{marker} {label:<20} {status} {detail}")
             if not ok:
                 failures.append(label)

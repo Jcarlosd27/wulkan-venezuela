@@ -107,10 +107,10 @@ WULKAN_MAX_UPLOAD_MB=16
 WULKAN_RUN_MIGRATIONS=1
 WULKAN_HARDEN_DEFAULT_ACCOUNTS=1
 WULKAN_STORAGE_BACKEND=s3
-WULKAN_STORAGE_PUBLIC_BASE_URL=https://cdn.example.com
+WULKAN_STORAGE_PUBLIC_BASE_URL=https://wulkan-assets.atl1.cdn.digitaloceanspaces.com
 WULKAN_S3_BUCKET=wulkan-assets
-WULKAN_S3_REGION=us-east-1
-WULKAN_S3_ENDPOINT_URL=
+WULKAN_S3_REGION=atl1
+WULKAN_S3_ENDPOINT_URL=https://atl1.digitaloceanspaces.com
 WULKAN_S3_PREFIX=production
 ```
 
@@ -135,6 +135,7 @@ docker compose -f docker-compose.production.yml --env-file .env.production exec 
 Smoke test:
 
 ```bash
+python scripts/readiness_check.py --strict
 python scripts/smoke_production.py --base-url https://wulkan.example.com
 ```
 
@@ -161,7 +162,7 @@ El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade hea
 
 - Los formularios del admin usan CSRF con `csrf_field()`.
 - La API movil queda fuera de CSRF y usa autenticacion JSON/token.
-- Roles disponibles: `super_admin`, `operator`, `sales`, `inventory`, `readonly`.
+- Roles disponibles: `super_admin`, `commercial_manager`, `operator`, `sales`, `inventory`, `readonly`.
 - Auditoria disponible en `/audit` para `super_admin`.
 - Usuarios admin y clientes nuevos quedan con contrasena temporal y `mustChangePassword`.
 - El admin cambia su clave en `/account/password`.

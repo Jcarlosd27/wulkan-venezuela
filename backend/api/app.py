@@ -16,7 +16,14 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from config import get_config
 from graphify import rotation_chart, stock_health
 from storage import save_uploaded_file
-from store import load_store, next_id, save_store, utc_now
+from store import (
+    INSECURE_PRODUCTION_ADMIN_EMAILS,
+    INSECURE_PRODUCTION_CLIENT_EMAILS,
+    load_store,
+    next_id,
+    save_store,
+    utc_now,
+)
 from uix import badge_class, money_usd, usd_to_ves
 
 
@@ -134,6 +141,18 @@ def current_admin_role() -> str:
 
 def role_allowed(roles: set[str]) -> bool:
     return current_admin_role() in roles
+
+
+def is_production_runtime() -> bool:
+    return str(app.config.get("ENV", "")).strip().lower() == "production"
+
+
+def is_blocked_default_login(email: str, *, mobile: bool = False) -> bool:
+    normalized = email.strip().lower()
+    blocked = set(INSECURE_PRODUCTION_ADMIN_EMAILS)
+    if mobile:
+        blocked.update(INSECURE_PRODUCTION_CLIENT_EMAILS)
+    return is_production_runtime() and normalized in blocked
 
 
 def sales_users(store: dict) -> list[dict]:
@@ -386,6 +405,19 @@ def login():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         store = load_store()
+        if is_blocked_default_login(email):
+            register_login_failure("admin", email)
+            record_audit_event(
+                store,
+                "login_failed",
+                "admin_user",
+                email,
+                "Intento de inicio con cuenta demo bloqueada en produccion.",
+                actor={"id": email, "name": email or "desconocido", "role": "anonymous"},
+            )
+            save_store(store)
+            error = "Credenciales invalidas."
+            return render_template("login.html", error=error)
         if is_login_limited("admin", email):
             error = "Demasiados intentos. Espera unos minutos e intentalo nuevamente."
             record_audit_event(
@@ -503,6 +535,8 @@ def readyz():
             {
                 "status": "ready",
                 "dataBackend": app.config.get("DATA_BACKEND"),
+                "storageBackend": app.config.get("STORAGE_BACKEND"),
+                "mobileTokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
                 "products": len(store.get("products", [])),
                 "clients": len(store.get("clients", [])),
                 "orders": len(store.get("orders", [])),
@@ -2956,6 +2990,18 @@ def api_client_login():
     payload = request.get_json(silent=True) or {}
     email = payload.get("email", "").strip().lower()
     password = payload.get("password", "")
+    if is_blocked_default_login(email, mobile=True):
+        register_login_failure("mobile", email)
+        record_audit_event(
+            store,
+            "login_failed",
+            "mobile_user",
+            email,
+            "Intento de inicio movil con cuenta demo bloqueada en produccion.",
+            actor={"id": email, "name": email or "desconocido", "role": "mobile"},
+        )
+        save_store(store)
+        return jsonify({"error": "Credenciales invalidas."}), 401
     if is_login_limited("mobile", email):
         record_audit_event(
             store,

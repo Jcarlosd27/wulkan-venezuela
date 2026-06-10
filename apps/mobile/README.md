@@ -78,8 +78,8 @@ Si usas DigitalOcean App Platform, ajusta `dart_defines.digitalocean.example.jso
 
 ```json
 {
-  "WULKAN_ADMIN_API_URL": "https://admin.wulkanvenezuela.com/api/mobile",
-  "WULKAN_MOBILE_ORDER_API_URL": "https://admin.wulkanvenezuela.com/api/mobile/orders"
+  "WULKAN_ADMIN_API_URL": "https://crmwulky.com.ve/api/mobile",
+  "WULKAN_MOBILE_ORDER_API_URL": "https://crmwulky.com.ve/api/mobile/orders"
 }
 ```
 

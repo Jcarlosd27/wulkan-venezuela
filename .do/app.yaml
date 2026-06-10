@@ -39,16 +39,16 @@ services:
         value: s3
       - key: WULKAN_STORAGE_PUBLIC_BASE_URL
         scope: RUN_TIME
-        value: https://wulkan-assets.nyc3.cdn.digitaloceanspaces.com
+        value: https://wulkan-assets.atl1.cdn.digitaloceanspaces.com
       - key: WULKAN_S3_BUCKET
         scope: RUN_TIME
         value: wulkan-assets
       - key: WULKAN_S3_REGION
         scope: RUN_TIME
-        value: nyc3
+        value: atl1
       - key: WULKAN_S3_ENDPOINT_URL
         scope: RUN_TIME
-        value: https://nyc3.digitaloceanspaces.com
+        value: https://atl1.digitaloceanspaces.com
       - key: WULKAN_S3_PREFIX
         scope: RUN_TIME
         value: production

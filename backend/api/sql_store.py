@@ -53,6 +53,34 @@ def copy_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def upsert(session, model, object_id: str, values: dict[str, Any]) -> None:
+    dialect_name = session.get_bind().dialect.name
+    table = model.__table__
+    update_values = {key: value for key, value in values.items() if key != "id"}
+
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        statement = pg_insert(table).values(**values)
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[table.c.id],
+                set_=update_values,
+            )
+        )
+        return
+
+    if dialect_name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        statement = sqlite_insert(table).values(**values)
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[table.c.id],
+                set_=update_values,
+            )
+        )
+        return
+
     instance = session.get(model, object_id)
     if instance is None:
         session.add(model(**values))
@@ -471,15 +499,20 @@ def ensure_category_for_product(session, product: dict[str, Any]) -> None:
     if session.get(Category, category_id):
         return
 
-    session.add(
-        Category(
-            id=category_id,
-            name=product.get("categoryName") or "Sin categoria",
-            description="Categoria creada automaticamente para mantener integridad de productos.",
-            image_url="",
-            status="active",
-            payload={},
-        )
+    upsert(
+        session,
+        Category,
+        category_id,
+        {
+            "id": category_id,
+            "name": product.get("categoryName") or "Sin categoria",
+            "description": "Categoria creada automaticamente para mantener integridad de productos.",
+            "image_url": "",
+            "status": "active",
+            "created_at": utc_now_dt(),
+            "updated_at": utc_now_dt(),
+            "payload": {},
+        },
     )
 
 

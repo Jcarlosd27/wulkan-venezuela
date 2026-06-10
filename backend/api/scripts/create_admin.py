@@ -18,7 +18,7 @@ from db import SessionLocal, init_database
 from models import AdminUser
 
 
-ROLES = {"super_admin", "operator", "sales", "inventory", "readonly"}
+ROLES = {"super_admin", "commercial_manager", "operator", "sales", "inventory", "readonly"}
 PASSWORD_MIN_LENGTH = 10
 
 
