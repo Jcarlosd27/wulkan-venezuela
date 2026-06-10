@@ -24,10 +24,9 @@ Elevar la app Android a una experiencia comercial para ferreteros Wulkan: inicio
 - Carrito conectado a la sesion:
   - La orden usa `customer.id` y `customer.name` del cliente autenticado.
   - Si el cliente tiene clave temporal pendiente, se bloquea la creacion de orden hasta actualizarla.
-- Autenticacion movil preparada para tres modos:
-  - `mock` para demo local.
+- Autenticacion movil preparada para dos modos:
+  - `mock` solo para desarrollo local autorizado.
   - `api` contra Flask Admin.
-  - `firebase` como alternativa futura.
 - Contrato operativo con Flask:
   - `GET /api/mobile/products`
   - `GET /api/mobile/categories`

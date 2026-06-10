@@ -1,20 +1,14 @@
-# Setup movil Wulkan
+# Setup Movil Wulkan
 
 Estado actual:
 
 - Flutter SDK instalado en `C:\Users\sidne\development\flutter`.
-- Version validada: Flutter 3.44.0 stable, Dart 3.12.0.
-- Android Studio instalado en `C:\Program Files\Android\Android Studio`.
-- Android SDK instalado en `C:\Users\sidne\AppData\Local\Android\Sdk`.
-- Licencias Android aceptadas.
-- Runner Android creado en `apps/mobile/android`.
 - Android package: `com.wulkan.mobile`.
 - App label: `Wulkan`.
-- `flutter analyze`: OK.
-- `flutter test`: OK.
-- App instalada y ejecutada en telefono fisico `25098RA98G`.
+- Backend productivo: `https://crmwulky.com.ve/api/mobile`.
+- La app movil usa API Flask. No usa Firebase ni Firestore.
 
-## PATH recomendado
+## PATH Recomendado
 
 Agregar a variables de entorno de usuario:
 
@@ -28,55 +22,49 @@ Mientras no este en PATH, usar comandos con ruta completa:
 C:\Users\sidne\development\flutter\bin\flutter.bat doctor -v
 ```
 
-## Comandos del proyecto movil
+## Comandos
 
 Desde `apps/mobile`:
 
 ```powershell
-C:\Users\sidne\development\flutter\bin\flutter.bat analyze
-C:\Users\sidne\development\flutter\bin\flutter.bat test
-C:\Users\sidne\development\flutter\bin\flutter.bat run --dart-define-from-file=dart_defines.example.json
+flutter pub get
+flutter analyze
+flutter test
+flutter run --dart-define-from-file=dart_defines.digitalocean.example.json
 ```
 
-## Estado Android
+Compilar APK contra produccion:
 
-`flutter doctor` detecta Android toolchain completo:
+```powershell
+flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json
+```
 
-- Android Studio instalado.
-- Android SDK 36 instalado.
-- Platform Tools instalado.
-- Build Tools 36 instalado.
-- Licencias Android aceptadas.
-- Telefono fisico `25098RA98G` detectado por ADB.
+Instalar APK en telefono conectado:
 
-No hace falta Visual Studio para Android; ese aviso solo aplica para apps Windows Desktop.
+```powershell
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
 
-## Siguiente paso para telefono
+## Telefono Fisico
 
 1. Conectar telefono Android con depuracion USB.
 2. Verificar dispositivo:
 
 ```powershell
-C:\Users\sidne\development\flutter\bin\flutter.bat doctor -v
+flutter devices
 ```
 
-3. Ejecutar:
+3. Ejecutar en vivo:
 
 ```powershell
-C:\Users\sidne\development\flutter\bin\flutter.bat devices
-C:\Users\sidne\development\flutter\bin\flutter.bat run --dart-define-from-file=dart_defines.example.json
+flutter run --dart-define-from-file=dart_defines.digitalocean.example.json
 ```
 
-## Firebase Emulator en Android
+Mientras `flutter run` esta abierto, cada cambio se puede enviar al movil con `r`. Para reinicio completo usa `R`.
 
-Para Android Emulator usar:
+## Produccion
 
-```json
-"WULKAN_FIRESTORE_EMULATOR_HOST": "10.0.2.2:8085"
-```
+La app instalada por APK no necesita estar conectada a la computadora. Mientras el telefono tenga internet, consulta el backend publico:
 
-Para telefono fisico usar la IP local del equipo donde corre Firebase Emulator, por ejemplo:
-
-```json
-"WULKAN_FIRESTORE_EMULATOR_HOST": "192.168.1.20:8085"
-```
+- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/mobile`
+- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/mobile/orders`

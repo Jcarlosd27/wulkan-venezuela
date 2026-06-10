@@ -3019,7 +3019,7 @@ class ProductDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<MobileProduct?>(
-      future: mobileRepository.getProduct("avalon-wk-bl-43"),
+      future: mobileRepository.getProduct("prod-motosierra-45cc"),
       builder: (context, snapshot) {
         final product = snapshot.data;
 
@@ -3048,10 +3048,6 @@ class ProductDetailScreen extends StatelessWidget {
                 'Precio publico: USD ${product.publicPriceUsd.toStringAsFixed(0)}',
                 'Precio B2B: USD ${product.b2bPriceUsd.toStringAsFixed(0)}',
                 'Stock disponible: ${product.availableStock}',
-                if (product.originalPriceClp != null)
-                  'Precio origen: CLP ${product.originalPriceClp!.toStringAsFixed(0)}',
-                if (product.importExchangeRateClpUsd != null)
-                  'Tasa importacion: ${product.importExchangeRateClpUsd} USD/CLP',
                 'Garantia: 6 meses',
               ],
             ),
@@ -3661,9 +3657,9 @@ class WorkModeScreen extends StatelessWidget {
         _ModuleTile(
             title: 'Ferretero', subtitle: 'Catalogo B2B y ordenes de compra'),
         _InfoPanel(
-          title: 'Orden B2B demo',
+          title: 'Orden B2B asistida',
           lines: [
-            'Ferretero: Ferreteria Demo',
+            'Ferretero: cliente asignado',
             'Producto: WUL-REP-CAD18',
             'Cantidad: 10',
             'Total: USD 150',
@@ -3683,7 +3679,7 @@ class WorkModeScreen extends StatelessWidget {
             title: 'Servicio tecnico',
             subtitle: 'Casos, diagnosticos y repuestos'),
         _InfoPanel(
-          title: 'Caso tecnico demo',
+          title: 'Caso tecnico',
           lines: [
             'Maquina: Motosierra 45cc',
             'Sintoma: No enciende',

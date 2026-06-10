@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../auth/mobile_auth.dart';
 import '../config/mobile_environment.dart';
 import '../domain/mobile_models.dart';
@@ -48,7 +46,7 @@ class PreparedMobileOrderService implements MobileOrderService {
   @override
   Future<String> createSecureOrder(MobileSecureOrderDraft draft) async {
     throw StateError(
-      "La app esta en modo Mock. Compilala con WULKAN_MOBILE_ORDER_API_URL o WULKAN_MOBILE_DATA_SOURCE=firestore para registrar ordenes en el admin.",
+      "La app esta en modo Mock. Compilala con WULKAN_MOBILE_ORDER_API_URL y WULKAN_MOBILE_DATA_SOURCE=api para registrar ordenes en el admin.",
     );
   }
 }
@@ -69,7 +67,8 @@ class ApiMobileOrderService implements MobileOrderService {
     try {
       final session = await mobileAuthRepository.getCurrentSession();
       final targetEndpoint = session.isMobileSalesUser
-          ? endpoint.replace(path: endpoint.path.replaceFirst('/orders', '/seller/orders'))
+          ? endpoint.replace(
+              path: endpoint.path.replaceFirst('/orders', '/seller/orders'))
           : endpoint;
       if (session.isMobileSalesUser && draft.customerId.isEmpty) {
         throw StateError("Selecciona el cliente antes de crear el pedido.");
@@ -146,113 +145,10 @@ class ApiMobileOrderService implements MobileOrderService {
   }
 }
 
-class FirestoreMobileOrderService implements MobileOrderService {
-  FirestoreMobileOrderService({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
-
-  final FirebaseFirestore _firestore;
-
-  @override
-  Future<String> createSecureOrder(MobileSecureOrderDraft draft) async {
-    if (draft.items.isEmpty) {
-      throw StateError("El carrito no tiene productos.");
-    }
-
-    final orderId = "ord-mobile-${DateTime.now().millisecondsSinceEpoch}";
-    final paymentId = "pay-$orderId";
-    final now = FieldValue.serverTimestamp();
-    final requiresOperatorReview = draft.preview.requiresOperatorReview;
-    const firstSellerCompanyId = "wulkan-direct";
-
-    final orderItems = [
-      for (final item in draft.items)
-        {
-          "productId": item.productId,
-          "sku": item.sku,
-          "title": item.title,
-          "quantity": item.quantity,
-          "unitPrice": {
-            "amount": item.unitPriceUsd,
-            "currency": "USD",
-          },
-          "total": {
-            "amount": double.parse(
-              (item.quantity * item.unitPriceUsd).toStringAsFixed(2),
-            ),
-            "currency": "USD",
-          },
-        },
-    ];
-
-    final batch = _firestore.batch();
-    final orderRef = _firestore.collection("orders").doc(orderId);
-    final paymentRef = _firestore.collection("payments").doc(paymentId);
-    final auditRef = _firestore.collection("audit_logs").doc(
-          "audit-$orderId-created",
-        );
-
-    batch.set(paymentRef, {
-      "orderId": orderId,
-      "companyId": firstSellerCompanyId,
-      "method": "whatsapp_assisted",
-      "amountUsd": draft.preview.totalUsd,
-      "amountVes": draft.preview.totalVes,
-      "currency": "USD",
-      "exchangeRate": draft.preview.exchangeRateUsdVes,
-      "status": "under_review",
-      "createdAt": now,
-      "updatedAt": now,
-    });
-
-    batch.set(orderRef, {
-      "customerId": "customer-mobile-demo",
-      "companyId": firstSellerCompanyId,
-      "items": orderItems,
-      "subtotal": {
-        "amount": draft.preview.subtotalUsd,
-        "currency": "USD",
-      },
-      "total": {
-        "amount": draft.preview.totalUsd,
-        "currency": "USD",
-      },
-      "currency": "USD",
-      "exchangeRateUsdVes": draft.preview.exchangeRateUsdVes,
-      "status":
-          requiresOperatorReview ? "payment_under_review" : "pending_payment",
-      "paymentId": paymentId,
-      "notes": "Orden creada desde app movil Wulkan.",
-      "createdAt": now,
-      "updatedAt": now,
-    });
-
-    batch.set(auditRef, {
-      "actorUserId": "customer-mobile-demo",
-      "actorRole": "customer",
-      "action": "order_created",
-      "targetCollection": "orders",
-      "targetId": orderId,
-      "metadata": {
-        "source": "mobile_app",
-        "paymentId": paymentId,
-        "requiresOperatorReview": requiresOperatorReview,
-      },
-      "createdAt": now,
-    });
-
-    await batch.commit();
-    return orderId;
-  }
-}
-
 MobileOrderService createMobileOrderService() {
   if (mobileEnvironment.usesOrderApi) {
     return ApiMobileOrderService(
         endpoint: Uri.parse(mobileEnvironment.orderApiUrl));
-  }
-
-  if (mobileEnvironment.usesFirestore) {
-    return FirestoreMobileOrderService();
   }
 
   return PreparedMobileOrderService();

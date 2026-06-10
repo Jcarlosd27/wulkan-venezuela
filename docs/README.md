@@ -1,15 +1,15 @@
 # Documentacion Wulkan
 
-Esta carpeta contiene la documentacion viva del proyecto. Los documentos originales se mantienen en la raiz por ahora para no romper el flujo de trabajo abierto en el editor.
+Documentacion vigente del proyecto Wulkan Venezuela.
 
-## Documentos base
+## Comercial
 
-- [Arquitectura de negocio](../ARQUITECTURA_NEGOCIO_WULKAN.md)
-- [Stack tecnologico](../STACK_TECNOLOGICO_WULKAN.md)
-
-## Documentos operativos
-
+- [Presentacion comercial de roles](./PRESENTACION_COMERCIAL_ROLES_WULKAN.md)
 - [Roadmap comercial Admin B2B](./product/ROADMAP_COMERCIAL_ADMIN_B2B.md)
+- [Estado del proyecto](./product/ESTADO_PROYECTO.md)
+
+## Avance
+
 - [Avance Fase 0, 1 y 2](./product/AVANCE_FASE_0_1_2.md)
 - [Avance Fase 3 y 4](./product/AVANCE_FASE_3_4.md)
 - [Avance Fase 5 y 6](./product/AVANCE_FASE_5_6.md)
@@ -20,13 +20,10 @@ Esta carpeta contiene la documentacion viva del proyecto. Los documentos origina
 - [Avance Fase 10 - Identidad y readiness](./product/AVANCE_FASE_10_IDENTIDAD_READINESS.md)
 - [Avance Fase 11 - Produccion final](./product/AVANCE_FASE_11_PRODUCCION_FINAL.md)
 - [Avance Fase 12 - App movil B2B](./product/AVANCE_FASE_12_APP_MOVIL_B2B.md)
-- [Roadmap MVP](./product/ROADMAP_MVP.md)
-- [Checklist arquitectura de negocio](./product/CHECKLIST_ARQUITECTURA_NEGOCIO.md)
-- [Estado Fase 0 y Fase 1](./product/FASE_0_1_ESTADO.md)
-- [Modelo de datos](./architecture/MODELO_DATOS.md)
-- [Roles y permisos](./architecture/ROLES_PERMISOS.md)
-- [Decisiones tecnicas](./architecture/ADR.md)
-- [Flujos principales](./product/FLUJOS_MVP.md)
-- [Admin MVP](./operations/ADMIN_MVP.md)
+
+## Operacion
+
 - [Guia de despliegue](./operations/DEPLOYMENT.md)
+- [Setup movil](./operations/MOBILE_SETUP.md)
 - [Guia de soporte](./operations/SOPORTE.md)
+- [Roles y permisos](./architecture/ROLES_PERMISOS.md)

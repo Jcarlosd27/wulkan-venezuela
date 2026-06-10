@@ -1,25 +1,10 @@
-# Dependencies
-node_modules/
-.pnpm-store/
-.npm-cache/
-
 # Builds
-.next/
-.next-logs/
-out/
 dist/
 build/
 coverage/
 __pycache__/
 *.pyc
-*.tsbuildinfo
 *.log
-
-# Firebase
-.firebase/
-firebase-debug.log
-firestore-debug.log
-ui-debug.log
 
 # Flutter / Dart
 .dart_tool/

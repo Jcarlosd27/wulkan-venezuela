@@ -9,7 +9,7 @@ class MobileCartService {
 
   final MobileRepository repository;
 
-  Future<List<MobileCartItem>> loadDemoCart() async {
+  Future<List<MobileCartItem>> loadLocalCart() async {
     final product = await repository.getProduct("prod-motosierra-45cc");
 
     if (product == null) {

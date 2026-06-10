@@ -1,118 +1,60 @@
 # Wulkan Mobile
 
-App Android Flutter para clientes ferreteros Wulkan. La experiencia empieza con inicio de sesion, muestra catalogo/stock sincronizado desde el admin y permite crear ordenes bajo revision operativa, sin pagos online.
+App Android Flutter para clientes ferreteros y vendedores Wulkan. La app inicia con login, consume catalogo/stock desde el admin Flask y crea ordenes sin pagos online, bajo revision operativa de Wulkan.
 
-## Modulos previstos
-
-- `identity`: login, perfil, roles y permisos.
-- `catalog`: verticales, categorias, busqueda y detalle tecnico.
-- `cart`: carrito y checkout.
-- `orders`: historial y seguimiento.
-- `b2b`: catalogo ferretero y ordenes de compra.
-- `service_cases`: casos tecnicos y solicitudes de repuestos.
-- `locations`: puntos cercanos, ferreteros y servicios autorizados.
-- `settings`: tema, pais operativo y soporte.
-
-## Stack previsto
+## Stack
 
 - Flutter.
 - Dart.
 - Riverpod.
 - GoRouter.
-- Firebase SDK.
-- Firebase Cloud Messaging.
-- Firebase Crashlytics.
+- API Flask publica en `https://crmwulky.com.ve/api/mobile`.
+- Storage seguro local para sesion movil.
 
-## Entorno
+La app ya no usa Firebase ni Firestore.
 
-La app ya tiene una frontera de configuracion en `lib/src/config/mobile_environment.dart`.
+## Entornos
 
-Valores de ejemplo:
-
-```bash
-C:\Users\sidne\development\flutter\bin\flutter.bat run --dart-define-from-file=dart_defines.example.json
-```
-
-Desde la raiz del proyecto puedes levantar la app en el telefono o emulador con:
-
-```bash
-npm run mobile:run
-```
-
-Para leer productos y anuncios desde Firestore Emulator:
-
-```bash
-npm run mobile:run:firestore
-```
-
-Para leer productos, anuncios y ordenes desde Flask Admin:
-
-```bash
-npm run mobile:run:api
-```
-
-Para compilar APK de produccion contra la API HTTPS:
-
-```bash
-npm run mobile:build:apk:prod
-```
-
-Para DigitalOcean:
-
-```bash
-npm run mobile:build:apk:do
-```
-
-Antes de compilar, ajusta `dart_defines.production.example.json` con el dominio real:
+Produccion y DigitalOcean usan API:
 
 ```json
 {
   "WULKAN_MOBILE_DATA_SOURCE": "api",
   "WULKAN_MOBILE_AUTH_MODE": "api",
-  "WULKAN_ADMIN_API_URL": "https://tu-dominio.com/api/mobile",
-  "WULKAN_MOBILE_ORDER_API_URL": "https://tu-dominio.com/api/mobile/orders"
-}
-```
-
-Si usas DigitalOcean App Platform, ajusta `dart_defines.digitalocean.example.json`:
-
-```json
-{
   "WULKAN_ADMIN_API_URL": "https://crmwulky.com.ve/api/mobile",
   "WULKAN_MOBILE_ORDER_API_URL": "https://crmwulky.com.ve/api/mobile/orders"
 }
 ```
 
-Mientras `flutter run` esta abierto, cada cambio se puede enviar al movil con `r` en la terminal. Para reinicio completo usa `R`.
+Mock local solo puede usarse en desarrollo con `WULKAN_ALLOW_MOCK=true`.
 
-Para Android Emulator, `WULKAN_FIRESTORE_EMULATOR_HOST` debe apuntar a `10.0.2.2:8085`.
+## Comandos
 
-Para telefono fisico, debe apuntar a la IP local del equipo donde corre Firebase Emulator.
+Desde `apps/mobile`:
 
-## Produccion movil
+```powershell
+flutter pub get
+flutter analyze
+flutter test
+flutter run --dart-define-from-file=dart_defines.digitalocean.example.json
+```
 
-La app queda conectada al backend Flask cuando:
+Compilar APK de produccion:
 
-- `WULKAN_MOBILE_DATA_SOURCE=api`.
-- `WULKAN_MOBILE_AUTH_MODE=api`.
-- `WULKAN_ADMIN_API_URL` apunta al dominio HTTPS del admin.
-- `WULKAN_MOBILE_ORDER_API_URL` apunta a `/api/mobile/orders`.
+```powershell
+flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json
+```
 
-El cliente ferretero debe iniciar sesion con usuario y contrasena creados desde el admin. Si tiene contrasena temporal, la app muestra el panel de cambio de contrasena antes de permitir crear ordenes.
+Instalar en telefono conectado:
 
-## Experiencia actual
+```powershell
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
 
-- Pantalla inicial de login con correo y clave.
-- Home ecommerce con tarjeta de credito B2B, hero, carrusel de anuncios, categorias y destacados.
-- Catalogo con productos, SKU, stock, precios USD/VES y validacion tecnica.
-- Carrito asociado al cliente autenticado.
-- Perfil con linea de credito, ordenes, datos comerciales y cierre de sesion.
-- Ordenes enviadas al admin con `customer.id` y `customer.name` de la sesion activa.
+## Experiencia Actual
 
-## Validacion actual
-
-- Flutter SDK: `C:\Users\sidne\development\flutter`.
-- Runner Android: creado.
-- Android package: `com.wulkan.mobile`.
-- `flutter analyze`: OK.
-- `flutter test`: OK.
+- Login por correo y contrasena creados en el admin.
+- Cliente ferretero ve catalogo, carrusel, categorias, detalle, carrito, credito disponible, ordenes y servicios tecnicos.
+- Vendedor ve catalogo, crea clientes, toma pedidos asistidos, revisa cartera y comisiones propias.
+- Las ordenes se registran en el backend con cliente, vendedor, tipo de venta, saldo, credito consumido y trazabilidad.
+- Las imagenes de producto soportan galeria/carrusel cuando el admin carga mas de una imagen.

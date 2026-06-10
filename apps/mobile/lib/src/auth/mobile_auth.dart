@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/mobile_environment.dart';
@@ -37,7 +36,8 @@ class MobileUserSession {
   bool get isClient => accountRole == "client";
   bool get isSeller => accountRole == "sales";
   bool get isCommercialManager => accountRole == "commercial_manager";
-  bool get isMobileSalesUser => isSeller || isCommercialManager || accountRole == "super_admin";
+  bool get isMobileSalesUser =>
+      isSeller || isCommercialManager || accountRole == "super_admin";
 }
 
 abstract class MobileAuthRepository {
@@ -83,12 +83,8 @@ class MockMobileAuthRepository implements MobileAuthRepository {
         normalizedEmail.contains("ventas");
 
     _session = MobileUserSession(
-      id: isSeller ? "admin-seller-demo" : "client-ferreteria-valencia",
-      name: isSeller
-          ? "Vendedor Wulkan"
-          : (normalizedEmail == "ferreteria@wulkan.local"
-              ? "Ferreteria Demo Valencia"
-              : "Cliente Wulkan"),
+      id: isSeller ? "seller-local-wulkan" : "client-local-wulkan",
+      name: isSeller ? "Vendedor Wulkan" : "Cliente Wulkan",
       email: normalizedEmail,
       roleLabel: isSeller ? "Vendedor" : "Ferretero B2B",
       isAuthenticated: true,
@@ -96,7 +92,7 @@ class MockMobileAuthRepository implements MobileAuthRepository {
       allowedPaymentTermsDays: const [0, 15, 30],
       defaultSaleType: isSeller ? "cash" : "term_credit",
       assignedSeller: const MobileSellerSnapshot(
-        id: "seller-demo",
+        id: "seller-local-wulkan",
         name: "Vendedor Wulkan",
       ),
     );
@@ -335,74 +331,11 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
   }
 }
 
-class FirebaseMobileAuthRepository implements MobileAuthRepository {
-  FirebaseMobileAuthRepository({FirebaseAuth? firebaseAuth})
-      : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance;
-
-  final FirebaseAuth _firebaseAuth;
-
-  @override
-  Future<MobileUserSession> getCurrentSession() async {
-    final user = _firebaseAuth.currentUser;
-
-    if (user == null) {
-      return const MobileUserSession(
-        id: "anonymous",
-        name: "Invitado",
-        email: "",
-        roleLabel: "Sin sesion",
-        isAuthenticated: false,
-      );
-    }
-
-    final token = await user.getIdTokenResult();
-    final role = token.claims?["role"]?.toString();
-
-    return MobileUserSession(
-      id: user.uid,
-      name: user.displayName ?? user.email ?? "Usuario Wulkan",
-      email: user.email ?? "",
-      roleLabel: role ?? "Usuario autenticado",
-      isAuthenticated: true,
-      accountRole: role ?? "client",
-    );
-  }
-
-  @override
-  Future<MobileUserSession> signIn({
-    required String email,
-    required String password,
-  }) async {
-    await _firebaseAuth.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    return getCurrentSession();
-  }
-
-  @override
-  Future<void> changePassword({
-    required String currentPassword,
-    required String newPassword,
-  }) {
-    throw UnsupportedError("Cambio de contrasena disponible en modo API.");
-  }
-
-  @override
-  Future<void> signOut() async {
-    await _firebaseAuth.signOut();
-  }
-}
-
 MobileAuthRepository createMobileAuthRepository() {
   mobileEnvironment.validateRuntime();
 
   if (mobileEnvironment.usesApiAuth) {
     return ApiMobileAuthRepository(baseUrl: mobileEnvironment.adminApiUrl);
-  }
-
-  if (mobileEnvironment.usesFirebaseAuth) {
-    return FirebaseMobileAuthRepository();
   }
 
   return MockMobileAuthRepository();

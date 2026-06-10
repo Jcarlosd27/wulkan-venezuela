@@ -15,7 +15,7 @@ void main() {
     );
 
     expect(session.isAuthenticated, isTrue);
-    expect(session.id, 'client-ferreteria-valencia');
+    expect(session.id, 'client-local-wulkan');
     expect(session.roleLabel, 'Ferretero B2B');
     expect(session.mustChangePassword, isFalse);
     expect(session.defaultSaleType, 'term_credit');

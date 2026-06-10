@@ -1,52 +1,53 @@
-# Wulkan
+# Wulkan Venezuela
 
-Wulkan es una plataforma tecnica B2B2C enfocada inicialmente en Venezuela para venta, abastecimiento, repuestos, servicios tecnicos, instalaciones y soporte autorizado.
+Plataforma ecommerce B2B para Wulkan Venezuela. El sistema permite administrar catalogo, categorias, stock, fotos, PDFs, anuncios moviles, clientes ferreteros, vendedores, credito B2B, ordenes, comisiones, servicios tecnicos, usuarios admin y auditoria.
 
-La base del proyecto sigue una estrategia de monolito modular:
+## Arquitectura Actual
 
-- `apps/mobile`: app Android Flutter para clientes, ferreteros y servicios tecnicos.
-- `apps/admin`: admin web Next.js reservado para evolucion futura.
-- `packages/domain`: contratos y entidades puras del negocio.
-- `packages/shared`: constantes, estados y utilidades comunes.
-- `packages/ui`: componentes visuales compartidos para web.
-- `packages/config`: configuracion compartida de ambientes y colecciones.
-- `backend/functions`: Cloud Functions iniciales para reglas criticas.
-- `backend/api`: admin Flask productivo y API movil para catalogo, clientes, credito, ordenes, imagenes y PDFs.
-- `.do/app.yaml`: spec de DigitalOcean App Platform para backend Flask, PostgreSQL y Spaces.
-- `infra/firebase`: reglas, indices y configuracion Firebase.
-- `docs`: documentacion viva de producto, arquitectura y operacion.
+- `backend/api`: admin web Flask, API movil, modelos SQL, migraciones Alembic, storage S3 compatible y scripts operativos.
+- `apps/mobile`: app Android Flutter para clientes ferreteros y vendedores, conectada al backend Flask.
+- `.do/app.yaml`: spec de DigitalOcean App Platform para desplegar el backend.
+- `infra/digitalocean`: guia y variables de produccion para App Platform, PostgreSQL y Spaces.
+- `infra/docker`: archivos opcionales para operacion con Docker.
+- `docs`: documentacion comercial, operativa y de avance.
 
-## Prioridad MVP
+## Stack Productivo
 
-1. Venezuela como unico pais operativo inicial.
-2. Catalogo tecnico multi-vertical.
-3. Productos, repuestos, compatibilidades simples y busqueda.
-4. Ordenes B2C.
-5. Ordenes B2B para ferreteros.
-6. Casos de servicio tecnico.
-7. Pagos asistidos y validacion por operador.
-8. Auditoria de acciones sensibles.
+- Flask + Bootstrap 5.3 + UIX + Graphify.
+- PostgreSQL en DigitalOcean Managed Database.
+- DigitalOcean Spaces para fotos, banners y PDFs.
+- Flutter Android consumiendo `https://crmwulky.com.ve/api/mobile`.
 
-## Comandos previstos
+El proyecto ya no usa Next.js, Firebase, Firestore, Cloud Functions ni monorepo Node/pnpm.
 
-Estos comandos quedaran activos cuando se instalen dependencias:
+## Comandos Principales
 
-```bash
-pnpm install
-pnpm dev:admin
-pnpm dev:admin:flask
-pnpm mobile:build:apk:do
-pnpm test
-pnpm lint
+Backend:
+
+```powershell
+cd backend/api
+python -m compileall .
+python scripts/readiness_check.py --strict
+python scripts/smoke_production.py --base-url https://crmwulky.com.ve
+```
+
+App movil:
+
+```powershell
+cd apps/mobile
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json
 ```
 
 ## Produccion DigitalOcean
 
 La guia de despliegue esta en `infra/digitalocean/README.md`.
 
-La arquitectura productiva recomendada es:
+La app movil debe compilarse con:
 
-- DigitalOcean App Platform para `backend/api`.
-- DigitalOcean Managed PostgreSQL para datos del ecommerce.
-- DigitalOcean Spaces para imagenes y PDFs.
-- App movil compilada con `apps/mobile/dart_defines.digitalocean.example.json`.
+- `WULKAN_MOBILE_DATA_SOURCE=api`
+- `WULKAN_MOBILE_AUTH_MODE=api`
+- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/mobile`
+- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/mobile/orders`

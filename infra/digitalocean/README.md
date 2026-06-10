@@ -92,13 +92,14 @@ Editar `apps/mobile/dart_defines.digitalocean.example.json` con el dominio real:
 Luego compilar:
 
 ```bash
-npm run mobile:build:apk:do
+cd apps/mobile
+flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json
 ```
 
 Para instalar en el telefono conectado:
 
 ```bash
-adb install -r apps/mobile/build/app/outputs/flutter-apk/app-release.apk
+adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
 
 Con este modo ya no se usa `adb reverse`; la app consulta el backend publico de DigitalOcean.

@@ -8,8 +8,8 @@ void main() {
   group('MobileCartService', () {
     final service = MobileCartService(repository: MockMobileRepository());
 
-    test('loads demo cart from product repository', () async {
-      final items = await service.loadDemoCart();
+    test('loads local cart from product repository', () async {
+      final items = await service.loadLocalCart();
 
       expect(items, hasLength(1));
       expect(items.first.sku, 'WUL-MOT-45CC');

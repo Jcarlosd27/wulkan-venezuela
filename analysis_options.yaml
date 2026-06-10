@@ -1,7 +1,4 @@
 analyzer:
   exclude:
-    - node_modules/**
-    - .next/**
     - build/**
-    - apps/admin/.next/**
     - apps/mobile/build/**

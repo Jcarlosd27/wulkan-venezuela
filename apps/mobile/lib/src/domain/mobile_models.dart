@@ -31,9 +31,6 @@ class MobileProduct {
     this.variants = const [],
     this.specifications = const {},
     this.imageUrl,
-    this.sourceUrl,
-    this.originalPriceClp,
-    this.importExchangeRateClpUsd,
   });
 
   final String id;
@@ -55,9 +52,6 @@ class MobileProduct {
   final List<String> variants;
   final Map<String, String> specifications;
   final String? imageUrl;
-  final String? sourceUrl;
-  final double? originalPriceClp;
-  final double? importExchangeRateClpUsd;
 
   String get categoryName => verticalName;
   bool get hasDiscount =>

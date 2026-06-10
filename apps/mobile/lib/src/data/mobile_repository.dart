@@ -1,12 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../auth/mobile_auth.dart';
 import '../config/mobile_environment.dart';
 import '../domain/mobile_models.dart';
-import 'avalon_garden_catalog.dart';
 
 abstract class MobileRepository {
   Future<List<MobileCategory>> listCategories();
@@ -31,22 +28,17 @@ class MockMobileRepository implements MobileRepository {
     MobileCategory(
       id: "machinery-garden",
       name: "Maquinaria y jardin",
-      description: "Equipos, accesorios y repuestos",
+      description: "Equipos, accesorios y repuestos Wulkan",
     ),
     MobileCategory(
       id: "spare-parts",
       name: "Repuestos",
-      description: "Busca por SKU, modelo o compatibilidad",
-    ),
-    MobileCategory(
-      id: "lighting",
-      name: "Iluminacion",
-      description: "Productos y proyectos con instalacion",
+      description: "Piezas por SKU, modelo o compatibilidad",
     ),
     MobileCategory(
       id: "technical-services",
       name: "Servicios tecnicos",
-      description: "Diagnostico, reparacion y garantia",
+      description: "Soporte autorizado por zona y especialidad",
     ),
   ];
 
@@ -54,9 +46,9 @@ class MockMobileRepository implements MobileRepository {
     MobileProduct(
       id: "prod-motosierra-45cc",
       sku: "WUL-MOT-45CC",
-      name: "Motosierra 45cc",
+      name: "Motosierra Wulkan 45cc",
       verticalName: "Maquinaria y jardin",
-      description: "Equipo principal para venta directa y red ferretera.",
+      description: "Equipo de corte para uso tecnico, finca y jardin.",
       publicPriceUsd: 185,
       b2bPriceUsd: 162,
       availableStock: 12,
@@ -67,41 +59,51 @@ class MockMobileRepository implements MobileRepository {
         "Compatible con cadena WUL-REP-CAD18",
         "Validar largo de espada antes de entregar",
       ],
+      productType: "machine",
+      discountPercent: 12,
+      originalPriceUsd: 185,
+      specifications: {
+        "Motor": "45cc",
+        "Combustible": "Gasolina",
+      },
     ),
     MobileProduct(
       id: "prod-cadena-18",
       sku: "WUL-REP-CAD18",
       name: "Cadena 18 pulgadas compatible",
       verticalName: "Repuestos",
-      description: "Repuesto compatible con motosierra 45cc.",
+      description: "Repuesto compatible con motosierras seleccionadas Wulkan.",
       publicPriceUsd: 18,
       b2bPriceUsd: 15,
-      availableStock: 3,
+      availableStock: 4,
       badge: "Validar",
       requiresQuote: false,
       requiresTechnicalValidation: true,
       compatibilityNotes: [
         "Compatible con WUL-MOT-45CC",
-        "Stock critico, validar antes de prometer entrega",
+        "Validar serie antes de despachar",
       ],
+      productType: "spare_part",
+      discountPercent: 17,
     ),
     MobileProduct(
-      id: "prod-panel-led-60w",
-      sku: "WUL-ILU-LED60",
-      name: "Panel LED tecnico 60W",
-      verticalName: "Iluminacion",
-      description: "Producto para cotizacion e instalacion tecnica.",
-      publicPriceUsd: 42,
-      b2bPriceUsd: 36,
-      availableStock: 0,
-      badge: "Cotizar",
-      requiresQuote: true,
+      id: "prod-motobomba-3x3",
+      sku: "WUL-MB-3X3",
+      name: "Motobomba 3x3 alta presion Wulkan",
+      verticalName: "Industrial",
+      description: "Motobomba para trabajo agricola e industrial.",
+      publicPriceUsd: 535,
+      b2bPriceUsd: 498,
+      availableStock: 7,
+      badge: "Comprar",
+      requiresQuote: false,
       requiresTechnicalValidation: false,
       compatibilityNotes: [
-        "Requiere validacion de metraje y punto de instalacion",
+        "Validar mangueras y accesorios requeridos por cliente",
       ],
+      productType: "machine",
+      discountPercent: 7,
     ),
-    ...avalonGardenProducts,
   ];
 
   static const _locations = [
@@ -111,45 +113,23 @@ class MockMobileRepository implements MobileRepository {
       subtitle: "Retiro, soporte tecnico y recepcion de casos - Chacao",
     ),
     MobileLocation(
-      id: "loc-valencia-demo",
-      name: "Ferreteria Demo Valencia",
-      subtitle: "Venta B2B, retail y retiro - radio 18 km",
+      id: "loc-valencia-service",
+      name: "Servicio tecnico Valencia",
+      subtitle: "Diagnostico, garantia y entrega asistida - Carabobo",
     ),
   ];
 
   static final _announcements = [
     MobileAnnouncement(
-      id: "ann-home-launch",
-      title: "Lanzamiento Wulkan Venezuela",
+      id: "ann-home-local",
+      title: "Catalogo Wulkan",
       body:
-          "Compra equipos Wulkan en USD con referencia en bolivares y soporte tecnico autorizado.",
+          "Conecta la app al backend productivo para ver productos reales del admin.",
       placement: "home",
       priority: 100,
       ctaLabel: "Ver catalogo",
       ctaUrl: "wulkan://catalog",
-      startsAt: DateTime(2026, 6, 1),
-      status: "active",
-    ),
-    MobileAnnouncement(
-      id: "ann-catalog-stock",
-      title: "Stock disponible",
-      body:
-          "Revisa maquinaria, repuestos y productos listos para venta directa.",
-      placement: "catalog",
-      priority: 80,
-      ctaLabel: "Comprar",
-      ctaUrl: "wulkan://catalog?filter=available",
-      startsAt: DateTime(2026, 6, 1),
-      status: "active",
-    ),
-    MobileAnnouncement(
-      id: "ann-checkout-review",
-      title: "Validacion de pagos",
-      body:
-          "Los pagos en bolivares quedan bajo revision Wulkan antes del despacho.",
-      placement: "checkout",
-      priority: 60,
-      startsAt: DateTime(2026, 6, 1),
+      startsAt: DateTime(2026, 1, 1),
       status: "active",
     ),
   ];
@@ -167,10 +147,9 @@ class MockMobileRepository implements MobileRepository {
     final filtered =
         _products.where((product) => _matchesQuery(product, query)).toList();
     final end = (start + pageLimit).clamp(0, filtered.length).toInt();
-    final page = filtered.sublist(start, end);
 
     return MobileProductPage(
-      products: page,
+      products: filtered.sublist(start, end),
       hasMore: end < filtered.length,
       nextCursor: end < filtered.length ? end.toString() : null,
     );
@@ -183,7 +162,6 @@ class MockMobileRepository implements MobileRepository {
         return product;
       }
     }
-
     return null;
   }
 
@@ -203,18 +181,18 @@ class MockMobileRepository implements MobileRepository {
   Future<MobileCreditSnapshot> getCredit(String customerId) async {
     return MobileCreditSnapshot(
       customerId: customerId,
-      creditEnabled: true,
-      creditLimitUsd: 1000,
+      creditEnabled: false,
+      creditLimitUsd: 0,
       creditUsedUsd: 0,
-      creditOrdersUsd: 85,
-      creditExposureUsd: 85,
-      creditAvailableUsd: 915,
-      paymentTermsDays: 15,
-      status: "in_use",
-      allowedPaymentTermsDays: const [0, 15, 30],
-      defaultSaleType: "term_credit",
+      creditOrdersUsd: 0,
+      creditExposureUsd: 0,
+      creditAvailableUsd: 0,
+      paymentTermsDays: 0,
+      status: "without_credit",
+      allowedPaymentTermsDays: const [0],
+      defaultSaleType: "cash",
       assignedSeller: const MobileSellerSnapshot(
-        id: "seller-demo",
+        id: "seller-local-wulkan",
         name: "Vendedor Wulkan",
       ),
     );
@@ -222,57 +200,28 @@ class MockMobileRepository implements MobileRepository {
 
   @override
   Future<List<MobileOrderSummary>> listOrders(String customerId) async {
-    return [
-      MobileOrderSummary(
-        id: "ord-mobile-demo",
-        status: "partial_paid",
-        totalUsd: 185,
-        paidUsd: 100,
-        balanceUsd: 85,
-        itemsCount: 1,
-        createdAt: DateTime(2026, 6, 8),
-        paymentStatus: "partial",
-        stockStatus: "reserved",
-      ),
-    ];
+    return const [];
   }
 
   @override
   Future<MobileSellerSummary> getSellerSummary() async {
     return const MobileSellerSummary(
-      sellerId: "admin-seller-demo",
+      sellerId: "seller-local-wulkan",
       sellerName: "Vendedor Wulkan",
       roleLabel: "Vendedor",
-      clientsCount: 1,
-      ordersCount: 1,
-      pendingCreditRequests: 1,
-      salesUsd: 185,
-      openBalanceUsd: 85,
-      pendingCommissionUsd: 7.4,
+      clientsCount: 0,
+      ordersCount: 0,
+      pendingCreditRequests: 0,
+      salesUsd: 0,
+      openBalanceUsd: 0,
+      pendingCommissionUsd: 0,
       approvedCommissionUsd: 0,
       paidCommissionUsd: 0,
     );
   }
 
   @override
-  Future<List<MobileSellerClient>> listSellerClients() async {
-    return const [
-      MobileSellerClient(
-        id: "client-ferreteria-valencia",
-        businessName: "Ferreteria Demo Valencia",
-        email: "ferreteria@wulkan.local",
-        phone: "+58 000-0000000",
-        city: "Valencia",
-        state: "Carabobo",
-        creditEnabled: true,
-        creditStatus: "in_use",
-        creditLimitUsd: 1000,
-        creditAvailableUsd: 915,
-        creditExposureUsd: 85,
-        creditRequestStatus: "approved",
-      ),
-    ];
-  }
+  Future<List<MobileSellerClient>> listSellerClients() async => const [];
 
   @override
   Future<MobileSellerClientCreated> createSellerClient(
@@ -296,171 +245,6 @@ class MockMobileRepository implements MobileRepository {
         creditRequestStatus: requestedCredit > 0 ? "pending" : "none",
       ),
     );
-  }
-
-  @override
-  Future<List<MobileOrderSummary>> listSellerOrders() async {
-    return listOrders("client-ferreteria-valencia");
-  }
-
-  @override
-  Future<List<MobileOrderSummary>> listSellerCommissions() async {
-    return listSellerOrders();
-  }
-}
-
-class FirestoreMobileRepository implements MobileRepository {
-  FirestoreMobileRepository({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
-
-  final FirebaseFirestore _firestore;
-
-  @override
-  Future<List<MobileCategory>> listCategories() async {
-    final snapshot = await _firestore
-        .collection("business_verticals")
-        .where("status", isEqualTo: "active")
-        .get();
-
-    return snapshot.docs.map((doc) {
-      final data = doc.data();
-
-      return MobileCategory(
-        id: doc.id,
-        name: _asString(data["name"], fallback: doc.id),
-        description:
-            _asString(data["description"], fallback: "Categoria Wulkan"),
-      );
-    }).toList();
-  }
-
-  @override
-  Future<List<MobileProduct>> listProducts() async {
-    final page = await listProductPage(const MobileProductQuery(limit: 100));
-    return page.products;
-  }
-
-  @override
-  Future<MobileProductPage> listProductPage(MobileProductQuery query) async {
-    final requestedLimit = query.limit.clamp(1, 50).toInt();
-    Query<Map<String, dynamic>> firestoreQuery = _firestore
-        .collection("products")
-        .where("status", isEqualTo: "active")
-        .orderBy(FieldPath.documentId)
-        .limit(requestedLimit);
-
-    if (query.cursor?.isNotEmpty == true) {
-      firestoreQuery = firestoreQuery.startAfter([query.cursor]);
-    }
-
-    final snapshot = await firestoreQuery.get();
-
-    final products = snapshot.docs
-        .map((doc) => mapFirestoreProduct(doc.id, doc.data()))
-        .where((product) => _matchesQuery(product, query))
-        .toList();
-    final nextCursor = snapshot.docs.isNotEmpty ? snapshot.docs.last.id : null;
-
-    return MobileProductPage(
-      products: products,
-      hasMore: snapshot.docs.length == requestedLimit,
-      nextCursor: nextCursor,
-    );
-  }
-
-  @override
-  Future<MobileProduct?> getProduct(String id) async {
-    final doc = await _firestore.collection("products").doc(id).get();
-
-    if (!doc.exists) {
-      return null;
-    }
-
-    return mapFirestoreProduct(doc.id, doc.data() ?? {});
-  }
-
-  @override
-  Future<List<MobileLocation>> listLocations() async {
-    final snapshot = await _firestore.collection("locations").limit(30).get();
-
-    return snapshot.docs.map((doc) {
-      final data = doc.data();
-      final address = _asMap(data["address"]);
-      final city = _asString(address["city"]);
-      final services =
-          (data["availableServices"] as List<dynamic>? ?? []).join(", ");
-
-      return MobileLocation(
-        id: doc.id,
-        name: _asString(data["name"], fallback: doc.id),
-        subtitle: [services, city].where((item) => item.isNotEmpty).join(" - "),
-      );
-    }).toList();
-  }
-
-  @override
-  Future<List<MobileAnnouncement>> listAnnouncements(String placement) async {
-    final snapshot = await _firestore
-        .collection("mobile_announcements")
-        .where("status", isEqualTo: "active")
-        .where("placement", isEqualTo: placement)
-        .get();
-    final announcements = snapshot.docs
-        .map((doc) => mapFirestoreAnnouncement(doc.id, doc.data()))
-        .where((announcement) => announcement.isActive)
-        .toList()
-      ..sort(_sortAnnouncements);
-
-    return announcements;
-  }
-
-  @override
-  Future<MobileCreditSnapshot> getCredit(String customerId) async {
-    return MobileCreditSnapshot(
-      customerId: customerId,
-      creditEnabled: false,
-      creditLimitUsd: 0,
-      creditUsedUsd: 0,
-      creditOrdersUsd: 0,
-      creditExposureUsd: 0,
-      creditAvailableUsd: 0,
-      paymentTermsDays: 0,
-      status: "without_credit",
-      allowedPaymentTermsDays: const [0],
-      defaultSaleType: "cash",
-    );
-  }
-
-  @override
-  Future<List<MobileOrderSummary>> listOrders(String customerId) async {
-    return const [];
-  }
-
-  @override
-  Future<MobileSellerSummary> getSellerSummary() async {
-    return const MobileSellerSummary(
-      sellerId: "",
-      sellerName: "Vendedor Wulkan",
-      roleLabel: "Vendedor",
-      clientsCount: 0,
-      ordersCount: 0,
-      pendingCreditRequests: 0,
-      salesUsd: 0,
-      openBalanceUsd: 0,
-      pendingCommissionUsd: 0,
-      approvedCommissionUsd: 0,
-      paidCommissionUsd: 0,
-    );
-  }
-
-  @override
-  Future<List<MobileSellerClient>> listSellerClients() async => const [];
-
-  @override
-  Future<MobileSellerClientCreated> createSellerClient(
-    MobileSellerClientDraft draft,
-  ) {
-    throw UnsupportedError("Alta de clientes disponible en modo API.");
   }
 
   @override
@@ -746,59 +530,6 @@ bool _matchesQuery(MobileProduct product, MobileProductQuery query) {
       matchesValidation;
 }
 
-MobileProduct mapFirestoreProduct(String id, Map<String, dynamic> data) {
-  final publicPrice = _asMap(data["publicPrice"]);
-  final b2bPriceData = _asMap(data["b2bPrice"]);
-  final price = _asDouble(
-    data["publicPriceUsd"] ?? data["priceUsd"] ?? publicPrice["amount"],
-  );
-  final b2bPrice = _asDouble(
-    data["b2bPriceUsd"] ?? b2bPriceData["amount"],
-    fallback: price,
-  );
-  final stock = _asInt(data["availableStock"] ?? data["stock"]);
-  final requiresQuote = data["requiresQuote"] == true;
-  final requiresTechnicalValidation =
-      data["requiresTechnicalValidation"] == true;
-  final imageUrls = data["imageUrls"];
-
-  return MobileProduct(
-    id: id,
-    sku: _asString(data["sku"], fallback: id),
-    name: _asString(data["name"] ?? data["title"], fallback: id),
-    verticalName: _asString(
-      data["verticalName"] ?? data["verticalId"],
-      fallback: "Categoria Wulkan",
-    ),
-    description: _asString(
-      data["description"],
-      fallback: "Producto tecnico Wulkan",
-    ),
-    publicPriceUsd: price,
-    b2bPriceUsd: b2bPrice,
-    availableStock: stock,
-    badge: requiresQuote
-        ? "Cotizar"
-        : (requiresTechnicalValidation ? "Validar" : "Comprar"),
-    requiresQuote: requiresQuote,
-    requiresTechnicalValidation: requiresTechnicalValidation,
-    compatibilityNotes: const [
-      "Compatibilidad pendiente de cargar desde Firestore",
-    ],
-    productType:
-        _asString(data["productType"] ?? data["type"], fallback: "machine"),
-    imageUrls: _asStringList(imageUrls),
-    discountPercent: _asDouble(data["discountPercent"]),
-    originalPriceUsd: _asDouble(data["originalPriceUsd"], fallback: price),
-    variants: _asStringList(data["variants"]),
-    specifications: _asStringMap(data["specifications"]),
-    imageUrl: imageUrls is List && imageUrls.isNotEmpty
-        ? _asString(imageUrls.first)
-        : _asString(data["imageUrl"]),
-    sourceUrl: _asString(data["sourceUrl"] ?? data["permalink"]),
-  );
-}
-
 MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
   final requiresQuote = data["requiresQuote"] == true;
   final requiresTechnicalValidation =
@@ -837,25 +568,6 @@ MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
     variants: _asStringList(data["variants"]),
     specifications: _asStringMap(data["specifications"]),
     imageUrl: _asString(data["imageUrl"]),
-  );
-}
-
-MobileAnnouncement mapFirestoreAnnouncement(
-  String id,
-  Map<String, dynamic> data,
-) {
-  return MobileAnnouncement(
-    id: id,
-    title: _asString(data["title"], fallback: "Anuncio Wulkan"),
-    body: _asString(data["body"], fallback: "Promocion activa"),
-    placement: _asString(data["placement"], fallback: "home"),
-    priority: _asInt(data["priority"], fallback: 50),
-    ctaLabel: _asString(data["ctaLabel"]),
-    ctaUrl: _asString(data["ctaUrl"]),
-    imageUrl: _asString(data["imageUrl"]),
-    startsAt: _asDateTime(data["startsAt"]),
-    endsAt: _asNullableDateTime(data["endsAt"]),
-    status: _asString(data["status"], fallback: "pending"),
   );
 }
 
@@ -935,18 +647,6 @@ MobileSellerClient mapApiSellerClient(Map<String, dynamic> data) {
   );
 }
 
-Map<String, dynamic> _asMap(Object? value) {
-  if (value is Map<String, dynamic>) {
-    return value;
-  }
-
-  if (value is Map) {
-    return value.map((key, mapValue) => MapEntry(key.toString(), mapValue));
-  }
-
-  return {};
-}
-
 String _asString(Object? value, {String fallback = ""}) {
   return value is String && value.isNotEmpty ? value : fallback;
 }
@@ -1007,10 +707,6 @@ DateTime _asDateTime(Object? value) {
 }
 
 DateTime? _asNullableDateTime(Object? value) {
-  if (value is Timestamp) {
-    return value.toDate();
-  }
-
   if (value is String && value.isNotEmpty) {
     return DateTime.tryParse(value);
   }
@@ -1023,10 +719,6 @@ MobileRepository createMobileRepository() {
 
   if (mobileEnvironment.usesApi) {
     return ApiMobileRepository(baseUrl: mobileEnvironment.adminApiUrl);
-  }
-
-  if (mobileEnvironment.usesFirestore) {
-    return FirestoreMobileRepository();
   }
 
   return MockMobileRepository();

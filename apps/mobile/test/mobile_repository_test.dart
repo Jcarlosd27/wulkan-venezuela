@@ -16,25 +16,24 @@ void main() {
     test('returns technical catalog products', () async {
       final products = await repository.listProducts();
 
-      expect(products.length, greaterThan(50));
+      expect(products.length, 3);
       expect(products.map((product) => product.sku), contains('WUL-MOT-45CC'));
-      expect(products.map((product) => product.sku), contains('WK-BL-43'));
       expect(products.any((product) => product.requiresTechnicalValidation),
           isTrue);
     });
 
     test('paginates catalog without loading the full product set', () async {
       final firstPage = await repository.listProductPage(
-        const MobileProductQuery(limit: 10),
+        const MobileProductQuery(limit: 2),
       );
       final secondPage = await repository.listProductPage(
-        MobileProductQuery(limit: 10, cursor: firstPage.nextCursor),
+        MobileProductQuery(limit: 2, cursor: firstPage.nextCursor),
       );
 
-      expect(firstPage.products, hasLength(10));
+      expect(firstPage.products, hasLength(2));
       expect(firstPage.hasMore, isTrue);
       expect(firstPage.nextCursor, isNotNull);
-      expect(secondPage.products, hasLength(10));
+      expect(secondPage.products, hasLength(1));
       expect(
         firstPage.products.map((product) => product.id).toSet().intersection(
               secondPage.products.map((product) => product.id).toSet(),
@@ -78,29 +77,28 @@ void main() {
     });
 
     test('returns B2B credit and order summaries', () async {
-      final credit = await repository.getCredit('client-ferreteria-valencia');
-      final orders = await repository.listOrders('client-ferreteria-valencia');
+      final credit = await repository.getCredit('client-local-wulkan');
+      final orders = await repository.listOrders('client-local-wulkan');
 
-      expect(credit.creditAvailableUsd, 915);
-      expect(credit.status, 'in_use');
-      expect(credit.defaultSaleType, 'term_credit');
-      expect(credit.allowedPaymentTermsDays, contains(30));
+      expect(credit.creditAvailableUsd, 0);
+      expect(credit.status, 'without_credit');
+      expect(credit.defaultSaleType, 'cash');
+      expect(credit.allowedPaymentTermsDays, contains(0));
       expect(credit.assignedSeller.name, 'Vendedor Wulkan');
-      expect(orders, isNotEmpty);
-      expect(orders.first.status, 'partial_paid');
+      expect(orders, isEmpty);
     });
   });
 
-  group('Firestore mappers', () {
-    test('maps seeded product shape into mobile product', () {
-      final product = mapFirestoreProduct('prod-motosierra-45cc', {
+  group('API mappers', () {
+    test('maps API product shape into mobile product', () {
+      final product = mapApiProduct('prod-motosierra-45cc', {
         'sku': 'WUL-MOT-45CC',
-        'title': 'Motosierra 45cc',
+        'name': 'Motosierra 45cc',
         'description': 'Equipo de corte para uso tecnico y jardin.',
-        'verticalId': 'machinery-garden',
-        'publicPrice': {'amount': 185, 'currency': 'USD'},
-        'b2bPrice': {'amount': 162, 'currency': 'USD'},
-        'stock': 12,
+        'categoryName': 'Maquinaria y jardin',
+        'publicPriceUsd': 185,
+        'b2bPriceUsd': 162,
+        'availableStock': 12,
         'requiresQuote': false,
         'requiresTechnicalValidation': false,
       });
@@ -113,12 +111,12 @@ void main() {
     });
 
     test('marks technical validation products with validar badge', () {
-      final product = mapFirestoreProduct('prod-cadena-18', {
+      final product = mapApiProduct('prod-cadena-18', {
         'sku': 'WUL-REP-CAD18',
-        'title': 'Cadena 18 pulgadas compatible',
-        'publicPrice': {'amount': 18, 'currency': 'USD'},
-        'b2bPrice': {'amount': 15, 'currency': 'USD'},
-        'stock': 4,
+        'name': 'Cadena 18 pulgadas compatible',
+        'publicPriceUsd': 18,
+        'b2bPriceUsd': 15,
+        'availableStock': 4,
         'requiresTechnicalValidation': true,
       });
 

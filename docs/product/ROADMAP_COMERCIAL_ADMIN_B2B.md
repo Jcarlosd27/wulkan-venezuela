@@ -373,11 +373,11 @@ App movil:
 - Riverpod.
 - GoRouter.
 - API Flask productiva.
-- Firebase Auth opcional si se decide usar identidad gestionada.
+- Autenticacion movil por API Flask con token.
 
 Storage:
 
-- Firebase Storage, S3 compatible o Cloudinary.
+- DigitalOcean Spaces o storage S3 compatible.
 - No guardar imagenes comerciales solo en disco local.
 
 Deploy:
