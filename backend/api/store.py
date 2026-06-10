@@ -24,6 +24,29 @@ INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS = {"svc-caracas-central"}
 INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS = {"mov-001", "mov-002", "mov-003"}
 
 
+def is_insecure_production_client(client: dict[str, Any]) -> bool:
+    email = client.get("email", "").strip().lower()
+    client_id = client.get("id", "").strip().lower()
+    business_name = client.get("businessName", "").strip().lower()
+    return (
+        client_id in INSECURE_PRODUCTION_CLIENT_IDS
+        or email in INSECURE_PRODUCTION_CLIENT_EMAILS
+        or email.endswith("@wulkan.local")
+        or "demo" in business_name
+    )
+
+
+def is_insecure_production_order(order: dict[str, Any], removed_client_ids: set[str]) -> bool:
+    order_id = order.get("id", "") or order.get("orderId", "")
+    customer = order.get("customer") or {}
+    customer_name = str(customer.get("name", "")).strip().lower()
+    return (
+        order.get("customerId", "").strip().lower() in removed_client_ids
+        or any(order_id.startswith(prefix) for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES)
+        or "demo" in customer_name
+    )
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -266,25 +289,23 @@ def production_safe_seed(store: dict[str, list[dict[str, Any]]]) -> dict[str, li
         for user in sanitized.get("admin_users", [])
         if user.get("email", "").strip().lower() not in INSECURE_PRODUCTION_ADMIN_EMAILS
     ]
-    sanitized["clients"] = [
-        client
+    removed_client_ids = {
+        client.get("id", "").strip().lower()
         for client in sanitized.get("clients", [])
-        if client.get("email", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_EMAILS
-        and client.get("id", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_IDS
+        if is_insecure_production_client(client)
+    }
+    sanitized["clients"] = [
+        client for client in sanitized.get("clients", []) if not is_insecure_production_client(client)
     ]
     sanitized["orders"] = [
         order
         for order in sanitized.get("orders", [])
-        if order.get("customerId", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_IDS
-        and not any(
-            (order.get("id", "") or order.get("orderId", "")).startswith(prefix)
-            for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
-        )
+        if not is_insecure_production_order(order, removed_client_ids)
     ]
     sanitized["credit_movements"] = [
         movement
         for movement in sanitized.get("credit_movements", [])
-        if movement.get("clientId", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_IDS
+        if movement.get("clientId", "").strip().lower() not in removed_client_ids
         and not any(
             movement.get("orderId", "").startswith(prefix)
             for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
@@ -344,6 +365,8 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
             if not store.get("admin_users") and not store.get("products"):
                 sync_store_to_sql(production_safe_seed(load_json_store()))
                 store = load_sql_store()
+            if is_production():
+                store = production_safe_seed(store)
             normalize_store(store)
             return store
         except Exception:
@@ -499,6 +522,8 @@ def save_json_store(store: dict[str, list[dict[str, Any]]]) -> None:
 
 
 def save_store(store: dict[str, list[dict[str, Any]]]) -> None:
+    if is_production():
+        store = production_safe_seed(store)
     normalize_store(store)
     if use_sql_backend():
         try:
