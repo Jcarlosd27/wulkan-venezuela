@@ -14,7 +14,9 @@ STORE_PATH = DATA_DIR / "wulkan_store.json"
 SQL_BACKEND_NAMES = {"sql", "database", "db"}
 PRODUCTION_ENV_NAME = "production"
 INSECURE_PRODUCTION_ADMIN_EMAILS = {"admin@wulkan.local"}
+INSECURE_PRODUCTION_CLIENT_IDS = {"client-ferreteria-valencia"}
 INSECURE_PRODUCTION_CLIENT_EMAILS = {"ferreteria@wulkan.local"}
+INSECURE_PRODUCTION_ORDER_PREFIXES = ("ord-mobile-checkout-",)
 INSECURE_PRODUCTION_CATEGORY_IDS = {"machinery-garden", "spare-parts", "industrial"}
 INSECURE_PRODUCTION_PRODUCT_IDS = {"prod-motosierra-45cc", "prod-cadena-18", "prod-motobomba-3x3"}
 INSECURE_PRODUCTION_ANNOUNCEMENT_IDS = {"ann-home-launch", "ann-checkout-payment"}
@@ -268,6 +270,25 @@ def production_safe_seed(store: dict[str, list[dict[str, Any]]]) -> dict[str, li
         client
         for client in sanitized.get("clients", [])
         if client.get("email", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_EMAILS
+        and client.get("id", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_IDS
+    ]
+    sanitized["orders"] = [
+        order
+        for order in sanitized.get("orders", [])
+        if order.get("customerId", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_IDS
+        and not any(
+            (order.get("id", "") or order.get("orderId", "")).startswith(prefix)
+            for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
+        )
+    ]
+    sanitized["credit_movements"] = [
+        movement
+        for movement in sanitized.get("credit_movements", [])
+        if movement.get("clientId", "").strip().lower() not in INSECURE_PRODUCTION_CLIENT_IDS
+        and not any(
+            movement.get("orderId", "").startswith(prefix)
+            for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
+        )
     ]
     sanitized["categories"] = [
         category

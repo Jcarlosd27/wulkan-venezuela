@@ -16,7 +16,9 @@ from store import (
     INSECURE_PRODUCTION_ADMIN_EMAILS,
     INSECURE_PRODUCTION_ANNOUNCEMENT_IDS,
     INSECURE_PRODUCTION_CATEGORY_IDS,
+    INSECURE_PRODUCTION_CLIENT_IDS,
     INSECURE_PRODUCTION_CLIENT_EMAILS,
+    INSECURE_PRODUCTION_ORDER_PREFIXES,
     INSECURE_PRODUCTION_PRODUCT_IDS,
     INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS,
     load_store,
@@ -129,6 +131,16 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         client.get("email", "")
         for client in active_clients
         if client.get("email", "").lower() in INSECURE_PRODUCTION_CLIENT_EMAILS
+        or client.get("id", "").lower() in INSECURE_PRODUCTION_CLIENT_IDS
+    ]
+    demo_orders = [
+        order.get("orderId") or order.get("id", "")
+        for order in store.get("orders", [])
+        if order.get("customerId", "").lower() in INSECURE_PRODUCTION_CLIENT_IDS
+        or any(
+            (order.get("orderId") or order.get("id", "")).startswith(prefix)
+            for prefix in INSECURE_PRODUCTION_ORDER_PREFIXES
+        )
     ]
     demo_products = [
         product.get("sku") or product.get("id", "")
@@ -155,6 +167,8 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         add(findings, "error" if strict else "warn", "demo-admin", f"Cuentas admin demo activas: {', '.join(insecure_admins)}.")
     if insecure_clients:
         add(findings, "error" if strict else "warn", "demo-client", f"Clientes demo activos: {', '.join(insecure_clients)}.")
+    if demo_orders:
+        add(findings, "error" if strict else "warn", "demo-orders", f"Ordenes demo presentes: {', '.join(demo_orders)}.")
     if demo_products:
         add(findings, "error" if strict else "warn", "demo-products", f"Productos demo activos: {', '.join(demo_products)}.")
     if demo_categories:
