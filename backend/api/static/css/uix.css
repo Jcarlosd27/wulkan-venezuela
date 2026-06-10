@@ -300,6 +300,128 @@ body {
   color: var(--wulkan-orange);
 }
 
+.template-help {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.template-help > div {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 4px 10px;
+  border: 1px solid var(--wulkan-line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+}
+
+.template-help i {
+  grid-row: span 2;
+  color: var(--wulkan-orange);
+  font-size: 22px;
+}
+
+.template-help strong,
+.template-card h2 {
+  color: var(--wulkan-black);
+  font-weight: 900;
+}
+
+.template-help span,
+.template-card p,
+.template-meta {
+  color: var(--wulkan-muted);
+}
+
+.section-label {
+  width: min(100%, 1248px);
+  margin: 0 auto 10px;
+  color: #7a8391;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.template-grid {
+  display: grid;
+  width: min(100%, 1248px);
+  margin: 0 auto;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-card {
+  display: grid;
+  gap: 14px;
+  border-radius: 18px;
+  background: #fff;
+  padding: 18px;
+  box-shadow: var(--shadow-soft);
+}
+
+.template-card-head {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.template-card h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.template-card p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.template-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 14px;
+  background: #e7f1ff;
+  color: var(--wulkan-orange);
+  font-size: 20px;
+}
+
+.template-meta,
+.template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: #f8f9fa;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.template-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.template-columns code {
+  border: 1px solid var(--wulkan-line);
+  border-radius: 999px;
+  background: #f8f9fa;
+  color: var(--wulkan-black);
+  padding: 4px 8px;
+}
+
 .content {
   padding: 0 16px 24px;
   min-width: 0;
@@ -1377,6 +1499,11 @@ body {
 
   .top-actions {
     justify-content: flex-start;
+  }
+
+  .template-help,
+  .template-grid {
+    grid-template-columns: 1fr;
   }
 }
 

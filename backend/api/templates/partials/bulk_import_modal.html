@@ -19,7 +19,14 @@
           required
         >
         <div class="bg-light rounded-3 p-3 mt-3">
-          <strong class="d-block mb-2">Columnas sugeridas</strong>
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <strong>Columnas sugeridas</strong>
+            {% if can_access_module('import_templates') %}
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('import_templates') }}">
+              <i class="bi bi-download"></i> Ver plantillas
+            </a>
+            {% endif %}
+          </div>
           <div class="d-flex flex-wrap gap-2">
             {% for column in bulk_columns %}
             <code class="bg-white border rounded-pill px-2 py-1">{{ column }}</code>

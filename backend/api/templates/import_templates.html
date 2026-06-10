@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% set heading = "Plantillas de carga" %}
+{% set description = "Formatos oficiales para importar informacion real de Wulkan sin errores de columnas." %}
+
+{% block content %}
+<section class="panel mb-3">
+  <div class="panel-header">
+    <div>
+      <h2>Centro de plantillas</h2>
+      <span>Descarga el formato, completa la hoja Carga y subelo en el modulo correspondiente.</span>
+    </div>
+    <span>{{ total_templates }} formatos</span>
+  </div>
+  <div class="template-help">
+    <div>
+      <i class="bi bi-1-circle"></i>
+      <strong>Descarga Excel</strong>
+      <span>La hoja Carga viene limpia para importar. La guia y el ejemplo quedan separados.</span>
+    </div>
+    <div>
+      <i class="bi bi-2-circle"></i>
+      <strong>Completa datos reales</strong>
+      <span>No cambies los encabezados. Usa URLs publicas para imagenes y PDFs.</span>
+    </div>
+    <div>
+      <i class="bi bi-3-circle"></i>
+      <strong>Importa en su modulo</strong>
+      <span>El sistema crea o actualiza registros segun SKU, email o nombre.</span>
+    </div>
+  </div>
+</section>
+
+{% for group in template_groups %}
+<section class="mb-4">
+  <div class="section-label">{{ group["label"] }}</div>
+  <div class="template-grid">
+    {% for template in group["items"] %}
+    {% set required_columns = template.columns | selectattr("required") | list %}
+    <article class="template-card">
+      <div class="template-card-head">
+        <div class="template-icon"><i class="bi bi-file-earmark-spreadsheet"></i></div>
+        <div>
+          <h2>{{ template.title }}</h2>
+          <p>{{ template.description }}</p>
+        </div>
+      </div>
+      <div class="template-meta">
+        <span><i class="bi bi-check2-circle"></i> {{ required_columns | length }} obligatorios</span>
+        <span><i class="bi bi-columns-gap"></i> {{ template.columns | length }} columnas</span>
+      </div>
+      <div class="template-columns">
+        {% for column in required_columns %}
+        <code>{{ column.name }}</code>
+        {% endfor %}
+      </div>
+      <div class="template-actions">
+        <a class="btn btn-primary btn-sm" href="{{ url_for('download_import_template', template_key=template.key, file_format='xlsx') }}">
+          <i class="bi bi-download"></i> Excel
+        </a>
+        <a class="btn btn-light btn-sm" href="{{ url_for('download_import_template', template_key=template.key, file_format='csv') }}">
+          CSV
+        </a>
+        <a class="btn btn-outline-secondary btn-sm ms-auto" href="{{ url_for(template.endpoint) }}">
+          Ir al modulo
+        </a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<section class="panel">
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-lock"></i></div>
+    <strong>Sin plantillas disponibles</strong>
+    <span>Tu rol actual no tiene modulos de importacion asignados.</span>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

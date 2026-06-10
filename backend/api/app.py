@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import Markup
 from werkzeug.exceptions import BadRequest
@@ -116,6 +116,7 @@ DELETE_ROLES = {"super_admin"}
 MODULE_ACCESS = {
     "admin_users": ADMIN_ONLY_ROLES,
     "audit": ADMIN_ONLY_ROLES,
+    "import_templates": WEB_ADMIN_ROLES,
     "sellers": {"super_admin", "commercial_manager", "operator", "readonly"},
     "clients": {"super_admin", "commercial_manager", "operator", "readonly"},
     "credit": {"super_admin", "commercial_manager"},
@@ -164,11 +165,185 @@ ADMIN_MENU_GROUPS = [
         "label": "Sistema",
         "icon": "bi-shield-lock",
         "items": [
+            {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit"]},
             {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete"]},
         ],
     },
 ]
+
+IMPORT_TEMPLATE_GROUPS = [
+    {
+        "label": "Comercial",
+        "items": [
+            {
+                "key": "vendedores",
+                "module": "sellers",
+                "endpoint": "sellers",
+                "title": "Vendedores",
+                "description": "Usuarios de venta para app movil, zonas, metas y comision.",
+                "columns": [
+                    {"name": "nombre", "required": True, "example": "Carlos Perez", "help": "Nombre visible del vendedor."},
+                    {"name": "email", "required": True, "example": "carlos@wulkanvenezuela.com", "help": "Correo unico para login movil."},
+                    {"name": "telefono", "required": False, "example": "+584120000000", "help": "Telefono o WhatsApp."},
+                    {"name": "codigo_vendedor", "required": False, "example": "VEN-CAR-01", "help": "Codigo interno comercial."},
+                    {"name": "zona", "required": False, "example": "Caracas", "help": "Zona o cartera principal."},
+                    {"name": "comision", "required": False, "example": "5", "help": "Porcentaje de comision."},
+                    {"name": "meta_usd", "required": False, "example": "2500", "help": "Meta comercial mensual."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
+                    {"name": "clave", "required": False, "example": "Temporal2026", "help": "Si viene vacia se genera clave temporal."},
+                ],
+            },
+            {
+                "key": "clientes",
+                "module": "clients",
+                "endpoint": "clients",
+                "title": "Clientes ferreteros",
+                "description": "Cartera B2B con datos fiscales, direccion, vendedor y credito.",
+                "columns": [
+                    {"name": "cliente", "required": True, "example": "Ferreteria Principal C.A.", "help": "Razon social o nombre comercial."},
+                    {"name": "email", "required": True, "example": "compras@ferreteriaprincipal.com", "help": "Correo unico para acceso movil."},
+                    {"name": "rif", "required": False, "example": "J-12345678-9", "help": "Identificacion fiscal."},
+                    {"name": "contacto", "required": False, "example": "Maria Gonzalez", "help": "Responsable de compras."},
+                    {"name": "telefono", "required": False, "example": "+584140000000", "help": "Telefono o WhatsApp."},
+                    {"name": "direccion", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal o despacho."},
+                    {"name": "ciudad", "required": False, "example": "Valencia", "help": "Ciudad del cliente."},
+                    {"name": "estado_ubicacion", "required": False, "example": "Carabobo", "help": "Estado o region."},
+                    {"name": "zona", "required": False, "example": "Centro", "help": "Zona de despacho o cartera."},
+                    {"name": "vendedor_email", "required": False, "example": "carlos@wulkanvenezuela.com", "help": "Asigna cartera por email del vendedor."},
+                    {"name": "tipo_venta_default", "required": False, "example": "credit_line", "help": "cash, term_credit o credit_line."},
+                    {"name": "cupo_usd", "required": False, "example": "1000", "help": "Linea aprobada si el rol puede aprobar."},
+                    {"name": "credito_aprobado", "required": False, "example": "si", "help": "si/no. Solo gerente o super admin aprueba."},
+                    {"name": "plazos", "required": False, "example": "0,15,30", "help": "Dias permitidos separados por coma."},
+                    {"name": "clave", "required": False, "example": "Temporal2026", "help": "Si viene vacia se genera clave temporal."},
+                ],
+            },
+        ],
+    },
+    {
+        "label": "Catalogo",
+        "items": [
+            {
+                "key": "productos",
+                "module": "products",
+                "endpoint": "products",
+                "title": "Productos",
+                "description": "Catalogo con SKU, precios, stock, galeria movil, PDFs y variantes.",
+                "columns": [
+                    {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Codigo unico del producto."},
+                    {"name": "nombre", "required": True, "example": "Motosierra Wulkan 45cc", "help": "Nombre visible comercial."},
+                    {"name": "categoria", "required": True, "example": "Maquinaria y jardin", "help": "Familia del catalogo."},
+                    {"name": "precio_publico_usd", "required": True, "example": "185", "help": "Precio PVP en dolares."},
+                    {"name": "precio_b2b_usd", "required": False, "example": "162", "help": "Precio ferretero."},
+                    {"name": "stock", "required": False, "example": "12", "help": "Stock fisico inicial."},
+                    {"name": "descripcion", "required": False, "example": "Equipo para uso tecnico y jardin.", "help": "Descripcion app movil."},
+                    {"name": "tipo_producto", "required": False, "example": "machine", "help": "machine, spare_part, accessory."},
+                    {"name": "precio_anterior_usd", "required": False, "example": "210", "help": "Precio antes del descuento."},
+                    {"name": "descuento_porcentaje", "required": False, "example": "12", "help": "Descuento visible."},
+                    {"name": "tasa_usd_ves", "required": False, "example": "38.5", "help": "Referencia VES."},
+                    {"name": "imagen_principal", "required": False, "example": "https://cdn.wulkan/producto.jpg", "help": "Imagen principal."},
+                    {"name": "imagenes", "required": False, "example": "https://cdn.wulkan/1.jpg|https://cdn.wulkan/2.jpg", "help": "Galeria separada por |, coma o salto de linea."},
+                    {"name": "pdf_tecnicos", "required": False, "example": "https://cdn.wulkan/ficha.pdf", "help": "Fichas tecnicas."},
+                    {"name": "variantes", "required": False, "example": "18 pulgadas|20 pulgadas", "help": "Opciones visibles."},
+                    {"name": "especificaciones", "required": False, "example": "Motor:45cc|Garantia:6 meses", "help": "Formato clave:valor."},
+                    {"name": "requiere_cotizacion", "required": False, "example": "no", "help": "si/no."},
+                    {"name": "requiere_validacion_tecnica", "required": False, "example": "si", "help": "si/no."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active, inactive o deleted."},
+                ],
+            },
+            {
+                "key": "categorias",
+                "module": "categories",
+                "endpoint": "categories",
+                "title": "Categorias",
+                "description": "Familias del catalogo con imagen para app movil.",
+                "columns": [
+                    {"name": "nombre", "required": True, "example": "Repuestos", "help": "Nombre de categoria."},
+                    {"name": "descripcion", "required": False, "example": "Piezas y consumibles compatibles por SKU.", "help": "Texto visible."},
+                    {"name": "imagen_url", "required": False, "example": "https://cdn.wulkan/categorias/repuestos.jpg", "help": "Imagen de categoria."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
+                ],
+            },
+            {
+                "key": "stock",
+                "module": "stock",
+                "endpoint": "stock",
+                "title": "Stock",
+                "description": "Actualizacion masiva de inventario final por SKU.",
+                "columns": [
+                    {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Debe existir en productos."},
+                    {"name": "cantidad", "required": True, "example": "25", "help": "Stock fisico final."},
+                    {"name": "tipo", "required": False, "example": "bulk_excel_set", "help": "Tipo de movimiento."},
+                    {"name": "nota", "required": False, "example": "Inventario inicial junio", "help": "Comentario operativo."},
+                ],
+            },
+            {
+                "key": "biblioteca_tecnica",
+                "module": "media_library",
+                "endpoint": "media_library",
+                "title": "Biblioteca tecnica",
+                "description": "Imagenes y PDFs asociados a productos por SKU.",
+                "columns": [
+                    {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Producto asociado."},
+                    {"name": "titulo", "required": False, "example": "Ficha tecnica motosierra", "help": "Nombre interno."},
+                    {"name": "tipo", "required": True, "example": "pdf", "help": "image o pdf."},
+                    {"name": "url", "required": True, "example": "https://cdn.wulkan/ficha.pdf", "help": "URL publica del recurso."},
+                ],
+            },
+        ],
+    },
+    {
+        "label": "App movil",
+        "items": [
+            {
+                "key": "anuncios_app",
+                "module": "announcements",
+                "endpoint": "announcements",
+                "title": "Anuncios app",
+                "description": "Banners para carrusel, campanas, vigencia y accion movil.",
+                "columns": [
+                    {"name": "titulo", "required": True, "example": "Oferta repuestos", "help": "Titulo interno y visible."},
+                    {"name": "mensaje", "required": False, "example": "Descuentos especiales por temporada.", "help": "Texto de apoyo."},
+                    {"name": "ubicacion", "required": False, "example": "home", "help": "home, catalog o checkout."},
+                    {"name": "prioridad", "required": False, "example": "80", "help": "Mayor numero aparece primero."},
+                    {"name": "imagen_url", "required": False, "example": "https://cdn.wulkan/banners/oferta.jpg", "help": "Imagen del carrusel."},
+                    {"name": "boton", "required": False, "example": "Ver catalogo", "help": "Texto del CTA."},
+                    {"name": "url_accion", "required": False, "example": "wulkan://catalogo", "help": "Accion o enlace."},
+                    {"name": "inicio", "required": False, "example": "2026-06-10T00:00:00Z", "help": "Fecha inicio opcional."},
+                    {"name": "cierre", "required": False, "example": "2026-06-30T23:59:59Z", "help": "Fecha cierre opcional."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
+                ],
+            },
+            {
+                "key": "servicios_tecnicos",
+                "module": "service_technicians",
+                "endpoint": "service_technicians",
+                "title": "Servicios tecnicos",
+                "description": "Directorio publico/app de soporte tecnico autorizado.",
+                "columns": [
+                    {"name": "nombre", "required": True, "example": "Servicio Tecnico Caracas", "help": "Nombre comercial."},
+                    {"name": "empresa", "required": False, "example": "Taller Central C.A.", "help": "Empresa asociada."},
+                    {"name": "contacto", "required": False, "example": "Luis Martinez", "help": "Persona responsable."},
+                    {"name": "telefono", "required": False, "example": "+584120000000", "help": "Telefono principal."},
+                    {"name": "whatsapp", "required": False, "example": "+584120000000", "help": "WhatsApp."},
+                    {"name": "email", "required": False, "example": "servicio@wulkanvenezuela.com", "help": "Correo de contacto."},
+                    {"name": "estado_ubicacion", "required": False, "example": "Distrito Capital", "help": "Estado o region."},
+                    {"name": "ciudad", "required": False, "example": "Caracas", "help": "Ciudad."},
+                    {"name": "direccion", "required": False, "example": "Zona industrial, local 8", "help": "Direccion visible."},
+                    {"name": "especialidades", "required": False, "example": "Motosierras|Motobombas", "help": "Separadas por |, coma o salto."},
+                    {"name": "cobertura", "required": False, "example": "Caracas y Miranda", "help": "Zona cubierta."},
+                    {"name": "visible_app", "required": False, "example": "si", "help": "si/no."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
+                ],
+            },
+        ],
+    },
+]
+IMPORT_TEMPLATE_INDEX = {
+    item["key"]: item
+    for group in IMPORT_TEMPLATE_GROUPS
+    for item in group["items"]
+}
 
 
 def csrf_token() -> str:
@@ -379,6 +554,102 @@ def can_access_module(module: str) -> bool:
 
 def can_delete_data() -> bool:
     return role_allowed(DELETE_ROLES)
+
+
+def visible_import_template_groups() -> list[dict]:
+    groups: list[dict] = []
+    for group in IMPORT_TEMPLATE_GROUPS:
+        visible_items = [
+            item for item in group["items"]
+            if can_access_module(item["module"])
+        ]
+        if visible_items:
+            groups.append({"label": group["label"], "items": visible_items})
+    return groups
+
+
+def import_template_filename(spec: dict, file_format: str) -> str:
+    return f"plantilla_wulkan_{spec['key']}.{file_format}"
+
+
+def build_csv_template(spec: dict) -> Response:
+    headers = [column["name"] for column in spec["columns"]]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=headers, lineterminator="\n")
+    writer.writeheader()
+    payload = "\ufeff" + output.getvalue()
+    return Response(
+        payload,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename={import_template_filename(spec, 'csv')}"
+        },
+    )
+
+
+def build_xlsx_template(spec: dict):
+    from openpyxl import Workbook
+    from openpyxl.comments import Comment
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    workbook = Workbook()
+    data_sheet = workbook.active
+    data_sheet.title = "Carga"
+    headers = [column["name"] for column in spec["columns"]]
+    data_sheet.append(headers)
+    data_sheet.freeze_panes = "A2"
+    data_sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    required_fill = PatternFill("solid", fgColor="DDEBFF")
+    optional_fill = PatternFill("solid", fgColor="F8F9FA")
+    header_font = Font(bold=True, color="202224")
+    for index, column in enumerate(spec["columns"], start=1):
+        cell = data_sheet.cell(row=1, column=index)
+        cell.font = header_font
+        cell.fill = required_fill if column["required"] else optional_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.comment = Comment(
+            f"{'Obligatorio' if column['required'] else 'Opcional'} - {column['help']}",
+            "Wulkan",
+        )
+        data_sheet.column_dimensions[cell.column_letter].width = min(max(len(column["name"]) + 4, 16), 36)
+
+    guide_sheet = workbook.create_sheet("Guia")
+    guide_sheet.append(["Campo", "Obligatorio", "Ejemplo", "Descripcion"])
+    for column in spec["columns"]:
+        guide_sheet.append([
+            column["name"],
+            "SI" if column["required"] else "NO",
+            column["example"],
+            column["help"],
+        ])
+    for cell in guide_sheet[1]:
+        cell.font = header_font
+        cell.fill = required_fill
+    guide_sheet.column_dimensions["A"].width = 28
+    guide_sheet.column_dimensions["B"].width = 14
+    guide_sheet.column_dimensions["C"].width = 38
+    guide_sheet.column_dimensions["D"].width = 70
+
+    example_sheet = workbook.create_sheet("Ejemplo")
+    example_sheet.append(headers)
+    example_sheet.append([column["example"] for column in spec["columns"]])
+    for cell in example_sheet[1]:
+        cell.font = header_font
+        cell.fill = optional_fill
+    for index, column in enumerate(spec["columns"], start=1):
+        example_sheet.column_dimensions[example_sheet.cell(row=1, column=index).column_letter].width = min(max(len(column["name"]) + 4, 16), 36)
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=import_template_filename(spec, "xlsx"),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def admin_menu_groups() -> list[dict]:
@@ -2664,6 +2935,34 @@ def dashboard():
         rotation_chart=rotation_chart(products),
         recent_orders=sorted(enriched_orders, key=lambda item: item.get("createdAt", ""), reverse=True)[:6],
     )
+
+
+@app.get("/plantillas")
+@require_roles(*WEB_ADMIN_ROLES)
+def import_templates():
+    template_groups = visible_import_template_groups()
+    return render_template(
+        "import_templates.html",
+        template_groups=template_groups,
+        total_templates=sum(len(group["items"]) for group in template_groups),
+    )
+
+
+@app.get("/plantillas/<template_key>.<file_format>")
+@require_roles(*WEB_ADMIN_ROLES)
+def download_import_template(template_key: str, file_format: str):
+    spec = IMPORT_TEMPLATE_INDEX.get(template_key)
+    if not spec:
+        raise BadRequest("Plantilla no encontrada.")
+    if not can_access_module(spec["module"]):
+        return forbidden_response()
+
+    normalized_format = file_format.strip().lower()
+    if normalized_format == "csv":
+        return build_csv_template(spec)
+    if normalized_format == "xlsx":
+        return build_xlsx_template(spec)
+    raise BadRequest("Formato no soportado. Descarga xlsx o csv.")
 
 
 @app.route("/admin-users", methods=["GET", "POST"])
