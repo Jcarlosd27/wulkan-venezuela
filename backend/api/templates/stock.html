@@ -1,68 +1,161 @@
 {% extends "base.html" %}
 {% set heading = "Stock masivo" %}
 {% set description = "Control operativo de inventario por SKU para sincronizar la app movil." %}
+{% set stock_badges = {
+  "available": "success",
+  "low": "warning",
+  "replenishment": "info",
+  "out": "danger",
+  "overstock": "primary",
+  "without_movement": "secondary"
+} %}
+
+{% macro stock_graph(title, chart, empty_text) -%}
+<article class="panel stock-panel">
+  <div class="panel-header">
+    <h2>{{ title }}</h2>
+    <span>Graphify</span>
+  </div>
+  {% if chart.values %}
+  <div
+    class="graphify-bars"
+    data-labels='{{ chart["labels"] | tojson }}'
+    data-values='{{ chart["values"] | tojson }}'
+  ></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-bar-chart"></i></div>
+    <strong>Sin datos</strong>
+    <span>{{ empty_text }}</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
 
 {% block top_action %}
 <div class="d-flex flex-wrap gap-2">
+  {% if can_export_stock %}
+  <a class="btn btn-light" href="{{ url_for('stock_export', **request.args.to_dict()) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+  {% endif %}
+  {% if can_import_stock %}
   <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#stockImportModal">
     <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
   </button>
+  {% endif %}
+  {% if can_edit_stock %}
   <button class="btn btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#bulkStockModal">
     <i class="bi bi-list-check"></i> Pegado rapido
   </button>
   <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#stockMoveModal">
     <i class="bi bi-plus-circle"></i> Nuevo movimiento
   </button>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block content %}
 {% include "partials/bulk_import_result.html" %}
 
-{% set total_physical = products | sum(attribute="physicalStock") %}
-{% set total_available = products | sum(attribute="availableStock") %}
-{% set total_reserved = products | sum(attribute="committedStock") %}
-{% set total_rotation = products | sum(attribute="rotationLast30Days") %}
-{% set low = namespace(count=0) %}
-{% for product in products %}
-  {% if product.availableStock <= 5 %}
-    {% set low.count = low.count + 1 %}
-  {% endif %}
-{% endfor %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
 
-<section class="row g-3 stock-summary">
-  <div class="col-12 col-sm-6 col-xl-3">
-    <article class="metric-card metric-active">
+<section class="row g-3 mb-3">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-boxes"></i></div>
-      <em>Total</em>
       <span>Stock fisico</span>
-      <strong>{{ total_physical }}</strong>
+      <strong>{{ metrics.physical }}</strong>
+      <em>Total</em>
     </article>
   </div>
-  <div class="col-12 col-sm-6 col-xl-3">
-    <article class="metric-card metric-sales">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-bag-check"></i></div>
-      <em>Reservado</em>
-      <span>Comprometido</span>
-      <strong>{{ total_reserved }}</strong>
+      <span>Reservado</span>
+      <strong>{{ metrics.reserved }}</strong>
+      <em>Ordenes</em>
     </article>
   </div>
-  <div class="col-12 col-sm-6 col-xl-3">
-    <article class="metric-card metric-stock">
-      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
-      <em>Alerta</em>
-      <span>Stock bajo</span>
-      <strong>{{ low.count }}</strong>
-    </article>
-  </div>
-  <div class="col-12 col-sm-6 col-xl-3">
-    <article class="metric-card metric-ads">
-      <div class="metric-icon"><i class="bi bi-arrow-repeat"></i></div>
-      <em>30 dias</em>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
       <span>Disponible real</span>
-      <strong>{{ total_available }}</strong>
+      <strong>{{ metrics.available }}</strong>
+      <em>App</em>
     </article>
   </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <span>Stock bajo</span>
+      <strong>{{ metrics.low }}</strong>
+      <em>Minimo</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-slash-circle"></i></div>
+      <span>Agotados</span>
+      <strong>{{ metrics.out }}</strong>
+      <em>Critico</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-clock-history"></i></div>
+      <span>Sin movimiento</span>
+      <strong>{{ metrics.without_movement }}</strong>
+      <em>{{ metrics.sku }} SKU</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel product-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label">Buscar SKU</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="SKU, producto, categoria, ubicacion o nota">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in stock_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Ubicacion</label>
+      <select class="form-select" name="location">
+        <option value="">Todas</option>
+        {% for location in locations %}
+        <option value="{{ location }}" {% if filters.location == location %}selected{% endif %}>{{ location }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Movimiento</label>
+      <select class="form-select" name="movement">
+        <option value="">Todos</option>
+        {% for value, label in stock_movement_options %}
+        <option value="{{ value }}" {% if filters.movement == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
 </section>
 
 <section class="row g-3">
@@ -71,7 +164,7 @@
       <div class="panel-header">
         <div>
           <h2>Inventario por producto</h2>
-          <span>Stock disponible, reservado y rotacion sincronizada con ecommerce movil.</span>
+          <span>Fisico, reservado, disponible real, puntos de alerta y trazabilidad.</span>
         </div>
         <span>{{ products | length }} SKU</span>
       </div>
@@ -81,9 +174,10 @@
             <tr>
               <th>Producto</th>
               <th>Disponible</th>
-              <th>Fisico</th>
-              <th>Reservado</th>
-              <th>Rotacion</th>
+              <th>Fisico / reservado</th>
+              <th>Min / max</th>
+              <th>Ubicacion</th>
+              <th>Ultimo movimiento</th>
               <th>Estado</th>
             </tr>
           </thead>
@@ -100,28 +194,50 @@
                     {% endif %}
                   </div>
                   <div>
-                    <strong>{{ product.title }}</strong>
-                    <small>{{ product.sku }} - {{ product.categoryName }}</small>
+                    <strong>{{ product.sku }}</strong>
+                    <small>{{ product.title }} - {{ product.categoryName }}</small>
                   </div>
                 </div>
               </td>
-              <td><strong class="stock-number">{{ product.availableStock }}</strong></td>
-              <td>{{ product.physicalStock }}</td>
-              <td>{{ product.committedStock }}</td>
               <td>
-                <div class="stock-rotation">
-                  <span style="width: {{ [product.rotationLast30Days * 4, 100] | min }}%"></span>
-                </div>
-                <small class="text-secondary">{{ product.rotationLast30Days }} uds</small>
+                <strong class="stock-number">{{ product.availableStock }}</strong>
+                <small class="d-block text-secondary">real para app</small>
               </td>
               <td>
-                {% if product.availableStock <= 0 %}
-                <span class="badge rounded-pill text-bg-danger">Agotado</span>
-                {% elif product.availableStock <= 5 %}
-                <span class="badge rounded-pill text-bg-warning">Reposicion</span>
-                {% else %}
-                <span class="badge rounded-pill text-bg-success">Disponible</span>
+                <strong>{{ product.physicalStock }}</strong>
+                <small class="d-block text-secondary">{{ product.committedStock }} reservado</small>
+              </td>
+              <td>
+                <strong>{{ product.minimumStock }} / {{ product.maximumStock or "-" }}</strong>
+                {% if product.replenishmentQty %}
+                <small class="d-block text-secondary">reposicion {{ product.replenishmentQty }}</small>
                 {% endif %}
+              </td>
+              <td>
+                <span>{{ product.stockLocation or "Sin ubicacion" }}</span>
+                {% if product.stockNotes %}
+                <small class="d-block text-secondary">{{ product.stockNotes }}</small>
+                {% endif %}
+              </td>
+              <td>
+                <strong>{{ product.lastMovementTypeLabel }}</strong>
+                <small class="d-block text-secondary">{{ product.lastMovementBy or "Sin responsable" }}</small>
+                <small class="d-block text-secondary">{{ product.lastMovementAt or "Sin fecha" }}</small>
+              </td>
+              <td>
+                <span class="badge rounded-pill text-bg-{{ stock_badges.get(product.stockStatus, 'secondary') }}">
+                  {{ product.stockStatusLabel }}
+                </span>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7">
+                <div class="empty-state compact">
+                  <div class="empty-icon"><i class="bi bi-inboxes"></i></div>
+                  <strong>Sin inventario</strong>
+                  <span>Crea productos o importa una planilla para iniciar el control operativo.</span>
+                </div>
               </td>
             </tr>
             {% endfor %}
@@ -131,88 +247,90 @@
     </article>
   </div>
   <div class="col-12 col-xl-4">
-    <article class="panel stock-panel">
-      <div class="panel-header">
-        <h2>Rotacion</h2>
-        <span>Graphify</span>
-      </div>
-      <div
-        class="graphify-bars"
-        data-labels='{{ rotation_chart["labels"] | tojson }}'
-        data-values='{{ rotation_chart["values"] | tojson }}'
-      ></div>
-    </article>
-    <article class="panel stock-panel mt-3">
-      <div class="panel-header">
-        <h2>Movimientos recientes</h2>
-        <span>{{ movements | length }} registros</span>
-      </div>
-      <div class="stock-feed">
-        {% for movement in movements[:6] %}
-        <div class="stock-feed-item">
-          <div class="stock-feed-icon"><i class="bi bi-arrow-left-right"></i></div>
-          <div>
-            <strong>{{ movement.sku }}</strong>
-            <small>{{ movement.type }} - {{ movement.createdAt }}</small>
-            {% if movement.orderId %}<small>Orden {{ movement.orderId }}</small>{% endif %}
+    <div class="d-grid gap-3">
+      {{ stock_graph("Disponible por SKU", stock_charts.available, "La curva aparece cuando existan productos con stock.") }}
+      {{ stock_graph("Movimientos por tipo", stock_charts.movement_types, "Los movimientos se agruparan por tipo.") }}
+      <article class="panel stock-panel">
+        <div class="panel-header">
+          <h2>Movimientos recientes</h2>
+          <span>{{ movements | length }} registros</span>
+        </div>
+        <div class="stock-feed">
+          {% for movement in movements[:8] %}
+          <div class="stock-feed-item">
+            <div class="stock-feed-icon"><i class="bi bi-arrow-left-right"></i></div>
+            <div>
+              <strong>{{ movement.sku }}</strong>
+              <small>{{ movement.typeLabel }} - {{ movement.createdAt }}</small>
+              {% if movement.orderId %}<small>Orden {{ movement.orderId }}</small>{% endif %}
+            </div>
+            <span>{{ movement.quantity }}</span>
           </div>
-          <span>{{ movement.quantity }}</span>
+          {% else %}
+          <div class="empty-state compact">
+            <div class="empty-icon"><i class="bi bi-inboxes"></i></div>
+            <strong>Sin movimientos</strong>
+            <span>Las entradas, salidas y reservas apareceran aqui.</span>
+          </div>
+          {% endfor %}
         </div>
-        {% else %}
-        <div class="empty-state compact">
-          <div class="empty-icon"><i class="bi bi-inboxes"></i></div>
-          <strong>Sin movimientos</strong>
-          <span>Los cambios de stock apareceran aqui.</span>
-        </div>
-        {% endfor %}
-      </div>
-    </article>
+      </article>
+    </div>
   </div>
 </section>
 
+{% if can_edit_stock %}
 <div class="modal fade" id="stockMoveModal" tabindex="-1" aria-labelledby="stockMoveModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <form class="modal-content" method="post">
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title fs-5" id="stockMoveModalLabel">Nuevo movimiento</h2>
-          <p class="mb-0 text-secondary">Registra entrada o salida de inventario por producto.</p>
+          <p class="mb-0 text-secondary">Registra entradas, salidas, ajustes o devoluciones con trazabilidad.</p>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Producto</label>
-          <select class="form-select" name="productId">
-            {% for product in products %}
-            <option value="{{ product.id }}">{{ product.sku }} - {{ product.title }}</option>
-            {% endfor %}
-          </select>
-        </div>
         <div class="row g-3">
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Tipo</label>
-            <select class="form-select" name="type">
-              <option value="entry">Entrada</option>
-              <option value="sale">Salida / venta</option>
-              <option value="adjustment">Ajuste manual</option>
+          <div class="col-12 col-lg-7">
+            <label class="form-label fw-semibold">Producto</label>
+            <select class="form-select" name="productId" required>
+              {% for product in all_products %}
+              <option value="{{ product.id }}">{{ product.sku }} - {{ product.title }}</option>
+              {% endfor %}
             </select>
           </div>
-          <div class="col-12 col-md-6">
+          <div class="col-12 col-lg-5">
+            <label class="form-label fw-semibold">Tipo</label>
+            <select class="form-select" name="type">
+              {% for value, label in manual_movement_options %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-lg-4">
             <label class="form-label fw-semibold">Cantidad</label>
             <input class="form-control" name="quantity" inputmode="numeric" required>
-            <small class="text-secondary">En ajuste manual corresponde al stock fisico final.</small>
+            <small class="text-secondary">En ajuste final, es el stock fisico resultante.</small>
           </div>
-        </div>
-        <div class="mt-3">
-          <label class="form-label fw-semibold">Motivo</label>
-          <input class="form-control" name="note" placeholder="Compra, ajuste de inventario, merma o correccion">
+          <div class="col-12 col-lg-8">
+            <label class="form-label fw-semibold">Ubicacion</label>
+            <input class="form-control" name="location" placeholder="Almacen, pasillo, bodega o sucursal">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Motivo</label>
+            <input class="form-control" name="note" placeholder="Compra, ajuste de inventario, merma, entrega o devolucion">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Observacion operativa del SKU</label>
+            <textarea class="form-control" name="stockNotes" rows="2" placeholder="Nota fija para bodega o reposicion"></textarea>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
-        <button class="btn btn-primary" type="submit"><i class="bi bi-save2"></i> Actualizar stock</button>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-save2"></i> Registrar movimiento</button>
       </div>
     </form>
   </div>
@@ -224,7 +342,7 @@
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
-          <h2 class="modal-title fs-5" id="bulkStockModalLabel">Carga masiva</h2>
+          <h2 class="modal-title fs-5" id="bulkStockModalLabel">Pegado rapido</h2>
           <p class="mb-0 text-secondary">Actualiza inventario completo usando SKU y cantidad final.</p>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -232,7 +350,7 @@
       <div class="modal-body">
         <label class="form-label fw-semibold">Listado SKU</label>
         <textarea class="form-control" name="bulkStock" rows="7" placeholder="WUL-MOT-45CC: 12&#10;WUL-REP-CAD18: 30"></textarea>
-        <small class="text-secondary d-block mt-2">Formato permitido: <code>SKU: cantidad</code> o <code>SKU, cantidad</code>.</small>
+        <small class="text-secondary d-block mt-2">Formato permitido: <code>SKU: cantidad</code> o <code>SKU, cantidad</code>. No baja por debajo de unidades reservadas.</small>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
@@ -241,13 +359,16 @@
     </form>
   </div>
 </div>
+{% endif %}
 
+{% if can_import_stock %}
 {% set bulk_modal_id = "stockImportModal" %}
 {% set bulk_action = url_for("stock_import") %}
 {% set bulk_title = "Importar stock por SKU" %}
-{% set bulk_help = "Actualiza stock fisico final desde Excel o CSV. Nunca baja por debajo del stock reservado en ordenes." %}
-{% set bulk_columns = ["sku", "cantidad", "tipo", "nota"] %}
+{% set bulk_help = "Actualiza inventario fisico, minimo, maximo, reposicion y ubicacion. Antes de guardar se previsualiza fila por fila." %}
+{% set bulk_columns = ["sku", "cantidad", "stock_minimo", "stock_maximo", "stock_reposicion", "ubicacion", "tipo", "nota"] %}
 {% include "partials/bulk_import_modal.html" %}
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

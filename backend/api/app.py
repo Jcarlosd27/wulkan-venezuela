@@ -112,6 +112,32 @@ PRODUCT_STATUS_OPTIONS = [
     ("hidden", "Oculto en app"),
     ("discontinued", "Descontinuado"),
 ]
+STOCK_MOVEMENT_OPTIONS = [
+    ("entry", "Entrada"),
+    ("exit", "Salida"),
+    ("sale", "Salida / venta"),
+    ("adjustment_positive", "Ajuste positivo"),
+    ("adjustment_negative", "Ajuste negativo"),
+    ("adjustment", "Ajuste a cantidad final"),
+    ("bulk_set", "Carga masiva"),
+    ("bulk_excel_set", "Carga Excel/CSV"),
+    ("reserved", "Reserva por orden"),
+    ("released", "Liberacion"),
+    ("commit", "Compromiso por orden"),
+    ("delivered", "Descuento por entrega"),
+    ("annulment", "Anulacion"),
+    ("return", "Devolucion"),
+]
+STOCK_MOVEMENT_LABELS = dict(STOCK_MOVEMENT_OPTIONS)
+STOCK_STATUS_OPTIONS = [
+    ("available", "Disponible"),
+    ("low", "Bajo minimo"),
+    ("replenishment", "Reposicion"),
+    ("out", "Agotado"),
+    ("overstock", "Sobre maximo"),
+    ("without_movement", "Sin movimiento"),
+]
+STOCK_STATUS_LABELS = dict(STOCK_STATUS_OPTIONS)
 PRODUCT_TYPE_OPTIONS = [
     ("machine", "Maquina"),
     ("spare_part", "Repuesto"),
@@ -366,7 +392,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "products_export", "product_duplicate", "product_delete"]},
             {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "categories_export", "category_status", "category_delete"]},
             {"module": "media_library", "endpoint": "media_library", "label": "Biblioteca tecnica", "icon": "bi-folder2-open", "active": ["media_library", "media_library_import", "media_asset_delete"]},
-            {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import"]},
+            {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import", "stock_export"]},
         ],
     },
     {
@@ -526,11 +552,15 @@ IMPORT_TEMPLATE_GROUPS = [
                 "module": "stock",
                 "endpoint": "stock",
                 "title": "Stock",
-                "description": "Actualizacion masiva de inventario final por SKU.",
+                "description": "Actualizacion masiva de inventario fisico, minimo, maximo, ubicacion y observacion por SKU.",
                 "columns": [
                     {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Debe existir en productos."},
                     {"name": "cantidad", "required": True, "example": "25", "help": "Stock fisico final."},
-                    {"name": "tipo", "required": False, "example": "bulk_excel_set", "help": "Tipo de movimiento."},
+                    {"name": "stock_minimo", "required": False, "example": "3", "help": "Punto de alerta operativa."},
+                    {"name": "stock_maximo", "required": False, "example": "40", "help": "Stock objetivo o maximo sugerido."},
+                    {"name": "stock_reposicion", "required": False, "example": "15", "help": "Cantidad sugerida para reposicion."},
+                    {"name": "ubicacion", "required": False, "example": "Almacen Valencia A-02", "help": "Ubicacion fisica o bodega."},
+                    {"name": "tipo", "required": False, "example": "bulk_excel_set", "help": "entry, exit, adjustment, bulk_excel_set o return."},
                     {"name": "nota", "required": False, "example": "Inventario inicial junio", "help": "Comentario operativo."},
                 ],
             },
@@ -2601,25 +2631,74 @@ def import_stock_rows(store: dict, rows: list[dict]) -> dict:
         if raw_quantity == "":
             bulk_error(result, row_number, f"SKU {sku} sin cantidad.")
             continue
-        quantity = max(parse_import_int(raw_quantity), reserved_by_product.get(product["id"], 0))
-        before = int(product.get("stock") or 0)
-        product["stock"] = quantity
-        product["updatedAt"] = utc_now()
-        store.setdefault("stock_movements", []).append(
-            {
-                "id": next_id("mov", product["sku"]),
-                "productId": product["id"],
-                "sku": product["sku"],
-                "type": row_value(row, "type", "tipo", default="bulk_excel_set") or "bulk_excel_set",
-                "quantity": quantity,
-                "note": row_value(row, "note", "nota", "motivo", default="Carga masiva Excel/CSV."),
-                "createdBy": session.get("admin_name", "Admin"),
-                "createdAt": utc_now(),
-            }
+        requested_quantity = parse_import_int(raw_quantity)
+        if requested_quantity < 0:
+            bulk_error(result, row_number, f"SKU {sku}: cantidad no puede ser negativa.")
+            continue
+        reserved = reserved_by_product.get(product["id"], 0)
+        quantity = requested_quantity
+        if quantity < reserved:
+            quantity = reserved
+            bulk_warning(result, row_number, f"SKU {sku}: cantidad ajustada a {reserved} porque hay stock reservado.")
+        minimum_stock = parse_import_int(
+            row_value(row, "stock_minimo", "minimumStock", "stock_min"),
+            int(product.get("minimumStock") or 0),
         )
-        action = "updated" if before != quantity else "skipped"
+        maximum_stock = parse_import_int(
+            row_value(row, "stock_maximo", "maximumStock", "stock_max"),
+            int(product.get("maximumStock") or 0),
+        )
+        replenishment_qty = parse_import_int(
+            row_value(row, "stock_reposicion", "replenishmentQty", "reposicion"),
+            int(product.get("replenishmentQty") or 0),
+        )
+        if min(minimum_stock, maximum_stock, replenishment_qty) < 0:
+            bulk_error(result, row_number, f"SKU {sku}: minimo, maximo o reposicion no pueden ser negativos.")
+            continue
+        if maximum_stock and minimum_stock and maximum_stock < minimum_stock:
+            bulk_error(result, row_number, f"SKU {sku}: stock_maximo no puede ser menor que stock_minimo.")
+            continue
+        movement_type = normalize_stock_movement_type(row_value(row, "type", "tipo", default="bulk_excel_set") or "bulk_excel_set")
+        note = row_value(row, "note", "nota", "motivo", "observacion", default="Carga masiva Excel/CSV.")
+        location = row_value(row, "ubicacion", "location", "bodega", "almacen", default=product.get("stockLocation", ""))
+        before = int(product.get("stock") or 0)
+        before_snapshot = {
+            "stock": before,
+            "minimumStock": int(product.get("minimumStock") or 0),
+            "maximumStock": int(product.get("maximumStock") or 0),
+            "replenishmentQty": int(product.get("replenishmentQty") or 0),
+            "stockLocation": product.get("stockLocation", ""),
+            "stockNotes": product.get("stockNotes", ""),
+        }
+        product["stock"] = quantity
+        product["minimumStock"] = minimum_stock
+        product["maximumStock"] = maximum_stock
+        product["replenishmentQty"] = replenishment_qty
+        product["stockLocation"] = location
+        if row_value(row, "observacion", "stockNotes", "nota_stock"):
+            product["stockNotes"] = row_value(row, "observacion", "stockNotes", "nota_stock")
+        after_snapshot = {
+            "stock": product.get("stock"),
+            "minimumStock": product.get("minimumStock"),
+            "maximumStock": product.get("maximumStock"),
+            "replenishmentQty": product.get("replenishmentQty"),
+            "stockLocation": product.get("stockLocation", ""),
+            "stockNotes": product.get("stockNotes", ""),
+        }
+        action = "updated" if before_snapshot != after_snapshot else "skipped"
+        if action == "updated":
+            append_stock_movement(
+                store,
+                product,
+                movement_type,
+                quantity,
+                note=note,
+                before_stock=before,
+                after_stock=quantity,
+                location=location,
+            )
         result[action] += 1
-        bulk_row(result, action, row_number, f"{sku}: {before} -> {quantity}")
+        bulk_row(result, action, row_number, f"{sku}: fisico {before} -> {quantity}, ubicacion {location or 'sin ubicacion'}")
     return result
 
 
@@ -3580,26 +3659,137 @@ def stock_reserved_quantities(orders: list[dict]) -> dict[str, int]:
     return reserved
 
 
-def enrich_inventory_product(product: dict, orders: list[dict]) -> dict:
+def stock_movement_label(value: str) -> str:
+    return STOCK_MOVEMENT_LABELS.get(value, str(value or "Movimiento").replace("_", " ").title())
+
+
+def stock_status_label(value: str) -> str:
+    return STOCK_STATUS_LABELS.get(value, "Disponible")
+
+
+def normalize_stock_movement_type(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    aliases = {
+        "entrada": "entry",
+        "ingreso": "entry",
+        "salida": "exit",
+        "venta": "sale",
+        "ajuste": "adjustment",
+        "ajuste_final": "adjustment",
+        "ajuste_positivo": "adjustment_positive",
+        "ajuste_negativo": "adjustment_negative",
+        "devolucion": "return",
+        "carga": "bulk_excel_set",
+        "carga_masiva": "bulk_excel_set",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in STOCK_MOVEMENT_LABELS else "bulk_excel_set"
+
+
+def latest_stock_movement_for(product_id: str, movements: list[dict]) -> dict:
+    related = [
+        movement
+        for movement in movements or []
+        if movement.get("productId") == product_id
+    ]
+    if not related:
+        return {}
+    return sorted(related, key=lambda item: item.get("createdAt", ""), reverse=True)[0]
+
+
+def enrich_stock_movement(movement: dict) -> dict:
+    enriched = dict(movement)
+    movement_type = enriched.get("type") or enriched.get("movementType") or ""
+    enriched["type"] = movement_type
+    enriched["typeLabel"] = stock_movement_label(movement_type)
+    enriched["quantity"] = safe_int(enriched.get("quantity"), 0)
+    enriched["beforeStock"] = "" if enriched.get("beforeStock") in {None, ""} else safe_int(enriched.get("beforeStock"), 0)
+    enriched["afterStock"] = "" if enriched.get("afterStock") in {None, ""} else safe_int(enriched.get("afterStock"), 0)
+    return enriched
+
+
+def touch_product_stock_metadata(
+    product: dict,
+    movement_type: str,
+    note: str = "",
+    location: str = "",
+) -> None:
+    product["lastStockMovementAt"] = utc_now()
+    product["lastStockMovementBy"] = session.get("admin_name", "Sistema")
+    product["lastStockMovementType"] = movement_type
+    product["lastStockMovementNote"] = note
+    if location:
+        product["stockLocation"] = location
+    product["updatedAt"] = utc_now()
+
+
+def append_stock_movement(
+    store: dict,
+    product: dict,
+    movement_type: str,
+    quantity: int,
+    order: dict | None = None,
+    note: str = "",
+    before_stock: int | None = None,
+    after_stock: int | None = None,
+    location: str = "",
+) -> None:
+    normalized_type = normalize_stock_movement_type(movement_type)
+    movement = {
+        "id": next_id("mov", f"{product.get('sku', '')}-{normalized_type}"),
+        "productId": product.get("id", ""),
+        "sku": product.get("sku", ""),
+        "type": normalized_type,
+        "quantity": safe_int(quantity, 0),
+        "beforeStock": "" if before_stock is None else safe_int(before_stock, 0),
+        "afterStock": "" if after_stock is None else safe_int(after_stock, 0),
+        "location": location or product.get("stockLocation", ""),
+        "orderId": (order or {}).get("orderId", ""),
+        "note": note,
+        "createdBy": session.get("admin_name", "Sistema"),
+        "createdAt": utc_now(),
+    }
+    store.setdefault("stock_movements", []).append(movement)
+    touch_product_stock_metadata(product, normalized_type, note, location)
+
+
+def enrich_inventory_product(product: dict, orders: list[dict], movements: list[dict] | None = None) -> dict:
     reserved_by_product = stock_reserved_quantities(orders)
     enriched = enrich_product(product)
     physical_stock = int(enriched.get("stock") or 0)
     committed = int(reserved_by_product.get(enriched["id"], 0))
     available = max(0, physical_stock - committed)
     minimum_stock = max(0, safe_int(enriched.get("minimumStock"), 0))
+    maximum_stock = max(0, safe_int(enriched.get("maximumStock"), 0))
+    replenishment_qty = max(0, safe_int(enriched.get("replenishmentQty"), 0))
+    last_movement = latest_stock_movement_for(enriched["id"], movements or [])
+    if last_movement:
+        last_movement = enrich_stock_movement(last_movement)
     enriched["physicalStock"] = physical_stock
     enriched["reserved"] = committed
     enriched["availableStock"] = available
     enriched["committedStock"] = committed
-    enriched["stockStatus"] = "out"
+    enriched["minimumStock"] = minimum_stock
+    enriched["maximumStock"] = maximum_stock
+    enriched["replenishmentQty"] = replenishment_qty
+    enriched["stockLocation"] = enriched.get("stockLocation", "")
+    enriched["stockNotes"] = enriched.get("stockNotes", "")
+    enriched["lastMovement"] = last_movement
+    enriched["lastMovementAt"] = last_movement.get("createdAt") or enriched.get("lastStockMovementAt", "")
+    enriched["lastMovementBy"] = last_movement.get("createdBy") or enriched.get("lastStockMovementBy", "")
+    enriched["lastMovementType"] = last_movement.get("type") or enriched.get("lastStockMovementType", "")
+    enriched["lastMovementTypeLabel"] = stock_movement_label(enriched["lastMovementType"]) if enriched["lastMovementType"] else "Sin movimiento"
+    enriched["stockCoveragePercent"] = round((available / maximum_stock) * 100, 1) if maximum_stock else 0
+    enriched["stockStatus"] = "available"
     if available <= 0 or enriched.get("status") == "out":
         enriched["stockStatus"] = "out"
     elif minimum_stock and available <= minimum_stock:
         enriched["stockStatus"] = "low"
-    elif available > 0:
-        enriched["stockStatus"] = "available"
+    elif maximum_stock and physical_stock > maximum_stock:
+        enriched["stockStatus"] = "overstock"
     if enriched.get("status") == "replenishment":
         enriched["stockStatus"] = "replenishment"
+    enriched["stockStatusLabel"] = stock_status_label(enriched["stockStatus"])
     return enriched
 
 
@@ -3615,29 +3805,6 @@ def order_has_sufficient_stock(store: dict, order: dict) -> bool:
         if not product or available_stock_for_product(product, store.get("orders", [])) < quantity:
             return False
     return True
-
-
-def append_stock_movement(
-    store: dict,
-    product: dict,
-    movement_type: str,
-    quantity: int,
-    order: dict | None = None,
-    note: str = "",
-) -> None:
-    store.setdefault("stock_movements", []).append(
-        {
-            "id": next_id("mov", f"{product.get('sku', '')}-{movement_type}"),
-            "productId": product.get("id", ""),
-            "sku": product.get("sku", ""),
-            "type": movement_type,
-            "quantity": quantity,
-            "orderId": (order or {}).get("orderId", ""),
-            "note": note,
-            "createdBy": session.get("admin_name", "Sistema"),
-            "createdAt": utc_now(),
-        }
-    )
 
 
 def reserve_stock_for_order(store: dict, order: dict) -> bool:
@@ -4671,7 +4838,7 @@ def products_page_context(store: dict, error: str = "", include_bulk: bool = Tru
         "visibility": request.args.get("visibility", "").strip(),
     }
     all_products = [
-        enrich_inventory_product(product, store.get("orders", []))
+        enrich_inventory_product(product, store.get("orders", []), store.get("stock_movements", []))
         for product in store.get("products", [])
     ]
     products = all_products
@@ -4747,6 +4914,107 @@ def products_page_context(store: dict, error: str = "", include_bulk: bool = Tru
         "can_edit_products": can_module_action("products", "edit"),
         "error": error,
         "bulk_result": consume_bulk_result("products") if include_bulk and not error else None,
+    }
+
+
+def stock_page_context(store: dict, error: str = "", include_bulk: bool = True) -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "location": request.args.get("location", "").strip(),
+        "movement": request.args.get("movement", "").strip(),
+    }
+    movements = [enrich_stock_movement(movement) for movement in store.get("stock_movements", [])]
+    all_products = [
+        enrich_inventory_product(product, store.get("orders", []), movements)
+        for product in store.get("products", [])
+    ]
+    products = all_products
+    if filters["q"]:
+        products = [
+            product
+            for product in products
+            if filters["q"] in " ".join(
+                [
+                    product.get("sku", ""),
+                    product.get("title", ""),
+                    product.get("categoryName", ""),
+                    product.get("stockLocation", ""),
+                    product.get("stockNotes", ""),
+                    product.get("lastMovementTypeLabel", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        if filters["status"] == "without_movement":
+            products = [product for product in products if not product.get("lastMovementAt")]
+        else:
+            products = [product for product in products if product.get("stockStatus") == filters["status"]]
+    if filters["location"]:
+        products = [product for product in products if product.get("stockLocation") == filters["location"]]
+    if filters["movement"]:
+        products = [product for product in products if product.get("lastMovementType") == filters["movement"]]
+
+    sorted_movements = sorted(movements, key=lambda item: item.get("createdAt", ""), reverse=True)
+    movement_counts: dict[str, int] = {}
+    for movement in movements:
+        label = movement.get("typeLabel", "Movimiento")
+        movement_counts[label] = movement_counts.get(label, 0) + 1
+    locations = sorted(
+        {
+            product.get("stockLocation", "")
+            for product in all_products
+            if product.get("stockLocation")
+        }
+    )
+    metrics = {
+        "sku": len(all_products),
+        "physical": sum(int(product.get("physicalStock") or 0) for product in all_products),
+        "reserved": sum(int(product.get("committedStock") or 0) for product in all_products),
+        "available": sum(int(product.get("availableStock") or 0) for product in all_products),
+        "low": sum(1 for product in all_products if product.get("stockStatus") in {"low", "replenishment"}),
+        "out": sum(1 for product in all_products if product.get("stockStatus") == "out"),
+        "without_movement": sum(1 for product in all_products if not product.get("lastMovementAt")),
+        "overstock": sum(1 for product in all_products if product.get("stockStatus") == "overstock"),
+    }
+    return {
+        "products": sorted(products, key=lambda item: (item.get("stockStatus", ""), item.get("sku", ""))),
+        "all_products": all_products,
+        "movements": sorted_movements,
+        "filters": filters,
+        "locations": locations,
+        "metrics": metrics,
+        "stock_status_options": STOCK_STATUS_OPTIONS,
+        "stock_movement_options": STOCK_MOVEMENT_OPTIONS,
+        "manual_movement_options": [
+            ("entry", "Entrada"),
+            ("exit", "Salida"),
+            ("adjustment_positive", "Ajuste positivo"),
+            ("adjustment_negative", "Ajuste negativo"),
+            ("adjustment", "Ajuste a cantidad final"),
+            ("return", "Devolucion"),
+        ],
+        "stock_charts": {
+            "available": graphify_from_pairs(
+                [(product.get("sku", ""), float(product.get("availableStock") or 0)) for product in products],
+                8,
+            ),
+            "movement_types": graphify_from_pairs(list(movement_counts.items()), 6),
+            "critical": graphify_from_pairs(
+                [
+                    (product.get("sku", ""), float(product.get("minimumStock") or 0) - float(product.get("availableStock") or 0))
+                    for product in all_products
+                    if product.get("stockStatus") in {"low", "out", "replenishment"}
+                ],
+                6,
+            ),
+        },
+        "rotation_chart": rotation_chart(products),
+        "can_edit_stock": can_module_action("stock", "edit"),
+        "can_import_stock": can_module_action("stock", "import"),
+        "can_export_stock": can_module_action("stock", "export"),
+        "error": error,
+        "bulk_result": consume_bulk_result("stock") if include_bulk and not error else None,
     }
 
 
@@ -5589,11 +5857,15 @@ def stock():
             product["id"]: {
                 "sku": product.get("sku", ""),
                 "stock": int(product.get("stock") or 0),
+                "minimumStock": int(product.get("minimumStock") or 0),
+                "maximumStock": int(product.get("maximumStock") or 0),
+                "stockLocation": product.get("stockLocation", ""),
+                "stockNotes": product.get("stockNotes", ""),
             }
             for product in store.get("products", [])
         }
         bulk_payload = request.form.get("bulkStock", "").strip()
-        movement_type = request.form.get("type", "entry")
+        movement_type = normalize_stock_movement_type(request.form.get("type", "entry"))
         reserved_by_product = stock_reserved_quantities(store.get("orders", []))
         if bulk_payload:
             stock_by_sku = {}
@@ -5604,56 +5876,74 @@ def stock():
                     sku, quantity = line.split(",", 1)
                 else:
                     continue
-                stock_by_sku[sku.strip().upper()] = int(quantity.strip() or 0)
-            for product in store["products"]:
+                stock_by_sku[sku.strip().upper()] = safe_int(quantity.strip(), 0)
+            for product in store.get("products", []):
                 if product["sku"] in stock_by_sku:
                     reserved = reserved_by_product.get(product["id"], 0)
+                    before = int(product.get("stock") or 0)
                     quantity = max(stock_by_sku[product["sku"]], reserved)
+                    if quantity == before:
+                        continue
                     product["stock"] = quantity
-                    product["updatedAt"] = utc_now()
-                    store["stock_movements"].append(
-                        {
-                            "id": next_id("mov", product["sku"]),
-                            "productId": product["id"],
-                            "sku": product["sku"],
-                            "type": "bulk_set",
-                            "quantity": quantity,
-                            "note": "Carga masiva de stock fisico.",
-                            "createdBy": session.get("admin_name", "Admin"),
-                            "createdAt": utc_now(),
-                        }
+                    append_stock_movement(
+                        store,
+                        product,
+                        "bulk_set",
+                        quantity,
+                        note="Carga rapida de stock fisico.",
+                        before_stock=before,
+                        after_stock=quantity,
                     )
         else:
             product_id = request.form.get("productId")
-            quantity = int(request.form.get("quantity") or 0)
-            for product in store["products"]:
-                if product["id"] == product_id:
-                    current_stock = int(product.get("stock") or 0)
-                    reserved = reserved_by_product.get(product["id"], 0)
-                    if movement_type == "entry":
-                        product["stock"] = current_stock + quantity
-                    elif movement_type == "adjustment":
-                        product["stock"] = max(reserved, quantity)
-                    else:
-                        product["stock"] = max(reserved, current_stock - quantity)
-                    product["updatedAt"] = utc_now()
-                    store["stock_movements"].append(
-                        {
-                            "id": next_id("mov", product["sku"]),
-                            "productId": product["id"],
-                            "sku": product["sku"],
-                            "type": movement_type,
-                            "quantity": quantity,
-                            "note": request.form.get("note", "").strip(),
-                            "createdBy": session.get("admin_name", "Admin"),
-                            "createdAt": utc_now(),
-                        }
-                    )
-                    break
+            product = find_by_id(store.get("products", []), product_id)
+            quantity = safe_int(request.form.get("quantity"), 0)
+            location = request.form.get("location", "").strip()
+            note = request.form.get("note", "").strip()
+            stock_notes = request.form.get("stockNotes", "").strip()
+            if not product:
+                return render_template("stock.html", **stock_page_context(store, "Producto no encontrado.")), 400
+            if quantity < 0:
+                return render_template("stock.html", **stock_page_context(store, "La cantidad no puede ser negativa.")), 400
+            current_stock = int(product.get("stock") or 0)
+            reserved = reserved_by_product.get(product["id"], 0)
+            if movement_type in {"entry", "adjustment_positive", "return"}:
+                target_stock = current_stock + quantity
+            elif movement_type in {"exit", "sale", "adjustment_negative"}:
+                target_stock = current_stock - quantity
+            else:
+                target_stock = quantity
+            if target_stock < reserved:
+                return render_template(
+                    "stock.html",
+                    **stock_page_context(
+                        store,
+                        f"No puedes dejar {product.get('sku', 'SKU')} en {target_stock}; tiene {reserved} unidades reservadas.",
+                    ),
+                ), 400
+            product["stock"] = target_stock
+            if location:
+                product["stockLocation"] = location
+            if stock_notes:
+                product["stockNotes"] = stock_notes
+            append_stock_movement(
+                store,
+                product,
+                movement_type,
+                quantity,
+                note=note,
+                before_stock=current_stock,
+                after_stock=target_stock,
+                location=location,
+            )
         stock_after = {
             product["id"]: {
                 "sku": product.get("sku", ""),
                 "stock": int(product.get("stock") or 0),
+                "minimumStock": int(product.get("minimumStock") or 0),
+                "maximumStock": int(product.get("maximumStock") or 0),
+                "stockLocation": product.get("stockLocation", ""),
+                "stockNotes": product.get("stockNotes", ""),
             }
             for product in store.get("products", [])
         }
@@ -5669,13 +5959,56 @@ def stock():
         save_store(store)
         return redirect(url_for("stock"))
 
-    products = [enrich_inventory_product(product, store["orders"]) for product in store["products"]]
-    return render_template(
-        "stock.html",
-        products=products,
-        movements=list(reversed(store["stock_movements"][-20:])),
-        rotation_chart=rotation_chart(products),
-        bulk_result=consume_bulk_result("stock"),
+    return render_template("stock.html", **stock_page_context(store))
+
+
+@app.get("/stock/export")
+@require_roles(*roles_for_action("stock", "export"))
+def stock_export():
+    store = load_store()
+    context = stock_page_context(store, include_bulk=False)
+    output = io.StringIO()
+    fieldnames = [
+        "sku",
+        "nombre",
+        "categoria",
+        "stock_fisico",
+        "reservado",
+        "disponible_real",
+        "stock_minimo",
+        "stock_maximo",
+        "stock_reposicion",
+        "ubicacion",
+        "estado_stock",
+        "ultimo_movimiento",
+        "responsable",
+        "observacion",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for product in context["products"]:
+        writer.writerow(
+            {
+                "sku": product.get("sku", ""),
+                "nombre": product.get("title", ""),
+                "categoria": product.get("categoryName", ""),
+                "stock_fisico": product.get("physicalStock", 0),
+                "reservado": product.get("committedStock", 0),
+                "disponible_real": product.get("availableStock", 0),
+                "stock_minimo": product.get("minimumStock", 0),
+                "stock_maximo": product.get("maximumStock", 0),
+                "stock_reposicion": product.get("replenishmentQty", 0),
+                "ubicacion": product.get("stockLocation", ""),
+                "estado_stock": product.get("stockStatusLabel", ""),
+                "ultimo_movimiento": product.get("lastMovementAt", ""),
+                "responsable": product.get("lastMovementBy", ""),
+                "observacion": product.get("stockNotes", ""),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=stock_wulkan.csv"},
     )
 
 

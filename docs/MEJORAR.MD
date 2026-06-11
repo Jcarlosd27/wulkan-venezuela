@@ -10,8 +10,8 @@
 - [x] Fase 1.4 - Clientes B2B / Ferreteros: ficha comercial completa con razon social, RIF, contactos, WhatsApp, direccion fiscal/despacho, vendedor asignado, lista de precios, descuento autorizado, estados de cliente, cobranza, riesgo, credito, filtros, acciones de activar/revisar/bloquear, detalle con ordenes recientes, importacion Excel ampliada, datos sincronizados hacia app movil y auditoria before/after.
 - [x] Fase 1.5 - Vendedores: ficha comercial completa con codigo, zona, territorio, supervisor, fecha ingreso, acceso movil, comision, meta mensual, observaciones, filtros por estado/zona/busqueda, ranking, avance de meta, ticket promedio, cartera asignada, ventas, comisiones, creditos pendientes, detalle operativo, importacion Excel ampliada, bloqueo real de acceso movil y resumen sincronizado hacia la app vendedor.
 - [x] Fase 1.6 - Productos / Catalogo: ficha comercial completa, importacion Excel ampliada, filtros compactos, export CSV, duplicado como borrador oculto, validaciones de precio/stock/estado, galeria y PDFs, publicacion movil controlada por estado/visibleInApp, Graphify de stock/media y bloqueo de mock movil en produccion.
-- [x] Fase 1.7 - Categorias: CRUD profesional con slug, imagen, icono, orden, jerarquia, visibilidad app, filtros compactos, export CSV, importacion Excel/CSV con previsualizacion crear/actualizar/error, Graphify de productos/visibilidad, API movil filtrada y auditoria before/after.
-- [ ] Fase 1.8 - Inventario / Stock.
+- [x] Fase 1.7 - Categorias: CRUD profesional con slug, imagen, icono, orden, jerarquia, visibilidad app, import/export, borrado seguro y API movil filtrada por categorias activas.
+- [x] Fase 1.8 - Inventario / Stock: fisico, reservado, disponible real, minimo/maximo, reposicion, ubicacion, ultimo movimiento, importacion con preview, export CSV, filtros y trazabilidad before/after.
 - [ ] Fase 1.9 - Ordenes.
 - [ ] Fase 1.10 - Credito B2B.
 - [ ] Fase 1.11 - Cobranza.
@@ -506,6 +506,15 @@ El inventario debe diferenciar stock físico, reservado, comprometido y disponib
 * Productos sin movimiento.
 * Exportar stock.
 * Importar stock.
+
+### Check implementado
+
+* [x] Pantalla de stock reorganizada con KPIs, filtros compactos, tabla operativa y Graphify.
+* [x] Stock por SKU diferencia fisico, reservado, disponible real, minimo, maximo, reposicion y ubicacion.
+* [x] Movimientos manuales registran tipo, cantidad, antes/despues, responsable, nota, ubicacion y fecha.
+* [x] Carga masiva Excel/CSV previsualiza cambios antes de guardar y valida que el fisico no baje del reservado.
+* [x] Export CSV de stock respeta filtros del modulo.
+* [x] Reservas, liberaciones y entregas de orden siguen dejando movimiento de inventario y auditoria.
 
 ---
 

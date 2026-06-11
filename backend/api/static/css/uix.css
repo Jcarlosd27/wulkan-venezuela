@@ -1603,6 +1603,10 @@ body {
   padding: 20px;
 }
 
+.stock-table {
+  min-width: 1120px;
+}
+
 .stock-table tbody td {
   vertical-align: middle;
 }
