@@ -1005,6 +1005,86 @@ body {
   min-width: 1120px;
 }
 
+.client-filter-panel {
+  padding: 16px;
+}
+
+.client-table {
+  min-width: 1320px;
+}
+
+.client-form-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.form-section {
+  border: 1px solid var(--wulkan-line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+}
+
+.form-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.form-section-head strong,
+.client-detail-title {
+  color: var(--dash-text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.form-section-head span {
+  color: var(--wulkan-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.client-detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.client-detail-card {
+  border: 1px solid var(--wulkan-line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+}
+
+.client-detail-card span,
+.client-detail-card small {
+  display: block;
+  color: var(--wulkan-muted);
+  font-weight: 700;
+}
+
+.client-detail-card strong {
+  display: block;
+  margin: 4px 0;
+  color: var(--dash-text);
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.client-detail-title {
+  margin: 0 0 8px;
+}
+
+.client-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .permission-legend-panel,
 .permission-panel {
   padding: 16px;
@@ -1806,7 +1886,8 @@ body {
   .template-grid,
   .bulk-result-grid,
   .dashboard-filter-grid,
-  .admin-user-notice {
+  .admin-user-notice,
+  .client-detail-grid {
     grid-template-columns: 1fr;
   }
 }

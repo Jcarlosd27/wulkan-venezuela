@@ -1,17 +1,43 @@
 {% extends "base.html" %}
 {% set heading = "Clientes ferreteros" %}
-{% set description = "Administra acceso B2B, linea de credito y estado comercial de cada cliente." %}
+{% set description = "Administra cartera B2B, acceso movil, credito, cobranza y trazabilidad comercial." %}
 
 {% block top_action %}
 <div class="d-flex flex-wrap gap-2">
+  {% if can_module_action('clients', 'import') %}
   <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#clientsImportModal">
     <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
   </button>
+  {% endif %}
+  {% if can_create_clients %}
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newClientModal">
     <i class="bi bi-plus-lg"></i> Nuevo cliente
   </button>
+  {% endif %}
 </div>
 {% endblock %}
+
+{% macro client_status_forms(client) -%}
+<div class="client-status-actions">
+  {% if can_edit_clients %}
+  <form method="post" action="{{ url_for('client_status_update', client_id=client.id) }}">
+    {{ csrf_field() }}
+    <input type="hidden" name="status" value="active">
+    <button class="btn btn-sm btn-outline-success" type="submit">Activar</button>
+  </form>
+  <form method="post" action="{{ url_for('client_status_update', client_id=client.id) }}">
+    {{ csrf_field() }}
+    <input type="hidden" name="status" value="review">
+    <button class="btn btn-sm btn-outline-warning" type="submit">Revision</button>
+  </form>
+  <form method="post" action="{{ url_for('client_status_update', client_id=client.id) }}">
+    {{ csrf_field() }}
+    <input type="hidden" name="status" value="blocked_debt">
+    <button class="btn btn-sm btn-outline-danger" type="submit">Bloquear deuda</button>
+  </form>
+  {% endif %}
+</div>
+{%- endmacro %}
 
 {% block content %}
 {% include "partials/bulk_import_result.html" %}
@@ -24,7 +50,7 @@
 {% endif %}
 
 <section class="row g-3 mb-3">
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-xl-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-shop"></i></div>
       <span>Clientes</span>
@@ -32,100 +58,157 @@
       <em>B2B</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
-    <article class="metric-card">
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-active">
       <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
       <span>Activos</span>
       <strong>{{ metrics.active }}</strong>
       <em>App</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
-    <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-credit-card"></i></div>
-      <span>Solicitudes</span>
-      <strong>{{ metrics.credit_requested }}</strong>
-      <em>Credito</em>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
+      <span>Credito expuesto</span>
+      <strong>{{ money_usd(metrics.credit_exposure) }}</strong>
+      <em>Riesgo</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
-    <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
-      <span>Credito disponible</span>
-      <strong>{{ money_usd(metrics.credit_available) }}</strong>
-      <em>Total</em>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
+      <span>Vencido</span>
+      <strong>{{ money_usd(metrics.overdue_balance) }}</strong>
+      <em>Cobranza</em>
     </article>
   </div>
 </section>
 
-<section class="panel category-panel">
+<section class="panel client-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label">Buscar cliente</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Nombre, RIF, email, zona o telefono">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in client_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in sellers %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Cobranza</label>
+      <select class="form-select" name="collection">
+        <option value="">Todas</option>
+        {% for value, label in collection_status_options %}
+        <option value="{{ value }}" {% if filters.collection == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2 d-flex gap-2">
+      <button class="btn btn-primary flex-fill" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+      <a class="btn btn-light" href="{{ url_for('clients') }}" aria-label="Limpiar"><i class="bi bi-x-lg"></i></a>
+    </div>
+  </form>
+</section>
+
+<section class="panel category-panel client-panel">
   <div class="panel-header">
     <div>
       <h2>Cartera de ferreteros</h2>
-      <span>Acceso movil, credito asignado y disponibilidad comercial.</span>
+      <span>Acceso movil, condicion comercial, credito disponible y cobranza.</span>
     </div>
     <span>{{ clients | length }} registros</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table">
+    <table class="table align-middle category-table client-table">
       <thead>
         <tr>
           <th>Cliente</th>
-          <th>Contacto</th>
-          <th>Vendedor</th>
+          <th>Contactos</th>
+          <th>Cartera</th>
+          <th>Comercial</th>
           <th>Credito</th>
-          <th>Comprometido</th>
-          <th>Disponible</th>
-          <th>Estado</th>
+          <th>Cobranza</th>
+          <th>Trazabilidad</th>
           <th class="text-end">Acciones</th>
         </tr>
       </thead>
       <tbody>
         {% for client in clients %}
+        {% set client_orders = orders_by_client.get(client.id, []) %}
         <tr>
           <td>
             <div class="category-cell">
               <div class="category-thumb"><i class="bi bi-shop"></i></div>
               <div>
                 <strong>{{ client.businessName }}</strong>
-                <small>{{ client.taxId or client.id }} - {{ client.city or 'Sin ciudad' }}</small>
+                <small>{{ client.taxId or 'Sin RIF' }} - {{ client.city or 'Sin ciudad' }}</small>
+                <span class="badge {{ client.status | badge_class }} mt-1">{{ client.statusLabel }}</span>
               </div>
             </div>
           </td>
           <td>
             <strong class="d-block">{{ client.contactName or 'Sin responsable' }}</strong>
-            <small class="text-secondary">{{ client.email }}</small>
+            <small class="d-block text-secondary">{{ client.email }}</small>
+            <small class="d-block text-secondary">{{ client.whatsapp or client.phone or 'Sin telefono' }}</small>
           </td>
           <td>
             <strong class="d-block">{{ client.assignedSellerName or 'Sin vendedor' }}</strong>
-            <small class="text-secondary">{{ client.deliveryZone or client.state or 'Sin zona' }}</small>
+            <small class="d-block text-secondary">{{ client.deliveryZone or client.state or 'Sin zona' }}</small>
+            <small class="d-block text-secondary">{{ client.country or 'VE' }}</small>
+          </td>
+          <td>
+            <span class="badge text-bg-light">{{ client.clientTypeLabel }}</span>
+            <small class="d-block text-secondary mt-1">{{ client.priceList|upper }} · {{ client.authorizedDiscountPercent }}% desc.</small>
+            <small class="d-block text-secondary">{{ sale_type_label(client.defaultSaleType) }}</small>
           </td>
           <td>
             {% if client.creditEnabled %}
-            <span class="badge text-bg-primary">{{ money_usd(client.creditLimitUsd) }}</span>
+            <strong class="d-block">{{ money_usd(client.creditAvailableUsd) }}</strong>
+            <small class="d-block text-secondary">Limite {{ money_usd(client.creditLimitUsd) }}</small>
             {% elif client.creditRequestStatus == 'pending' %}
-            <span class="badge text-bg-warning">{{ money_usd(client.creditRequestedUsd) }}</span>
+            <span class="badge text-bg-warning">{{ money_usd(client.creditRequestedUsd) }} solicitado</span>
             {% else %}
-            <span class="badge text-bg-secondary">Sin credito</span>
+            <span class="badge text-bg-secondary">Sin linea</span>
             {% endif %}
+            <small class="d-block text-secondary">{{ client.creditStatus }}</small>
           </td>
           <td>
-            <strong>{{ money_usd(client.creditExposureUsd) }}</strong>
-            <small class="d-block text-secondary">Ordenes {{ money_usd(client.creditOrdersUsd) }}</small>
+            <span class="badge {{ client.collectionStatus | badge_class }}">{{ client.collectionStatusLabel }}</span>
+            <strong class="d-block mt-1">{{ money_usd(client.openBalanceUsd) }}</strong>
+            <small class="d-block text-secondary">Vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
           </td>
-          <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
           <td>
-            <span class="badge {{ client.status | badge_class }}">{{ client.status }}</span>
-            <span class="badge {{ client.creditStatus | badge_class }} d-inline-block mt-1">{{ client.creditStatus }}</span>
-            {% if client.mustChangePassword %}
-            <span class="badge text-bg-warning d-inline-block mt-1">Clave temporal</span>
-            {% endif %}
+            <strong class="d-block">{{ client.ordersCount }} ordenes</strong>
+            <small class="d-block text-secondary">{{ client.lastPurchaseAt or 'Sin compra' }}</small>
+            <small class="d-block text-secondary">{{ client.lastOrderId or 'Sin orden' }}</small>
           </td>
           <td class="text-end">
             <div class="d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#detailClient{{ loop.index }}">
+                <i class="bi bi-eye"></i>
+              </button>
+              {% if can_edit_clients %}
               <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}">
                 <i class="bi bi-pencil"></i> Editar
               </button>
+              {% endif %}
               {% if can_delete_data() %}
               <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}">
                 {{ csrf_field() }}
@@ -135,20 +218,31 @@
             </div>
           </td>
         </tr>
+        {% else %}
+        <tr>
+          <td colspan="8">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-shop"></i></div>
+              <strong>Sin clientes registrados</strong>
+              <span>Importa la plantilla oficial o crea el primer ferretero desde este modulo.</span>
+            </div>
+          </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 
+{% if can_create_clients %}
 <div class="modal fade" id="newClientModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
     <form class="modal-content" method="post">
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Nuevo cliente ferretero</h2>
-          <p class="mb-0 text-secondary">Crea acceso movil y linea de credito B2B.</p>
+          <p class="mb-0 text-secondary">Crea acceso movil, cartera comercial y condiciones B2B.</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
@@ -162,16 +256,106 @@
     </form>
   </div>
 </div>
+{% endif %}
 
 {% for client in clients %}
+{% set client_orders = orders_by_client.get(client.id, []) %}
+<div class="modal fade" id="detailClient{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">{{ client.businessName }}</h2>
+          <p class="mb-0 text-secondary">{{ client.taxId or 'Sin RIF' }} · {{ client.email }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="client-detail-grid">
+          <article class="client-detail-card">
+            <span>Comercial</span>
+            <strong>{{ client.assignedSellerName or 'Sin vendedor' }}</strong>
+            <small>{{ client.clientTypeLabel }} · {{ client.priceList|upper }} · {{ client.authorizedDiscountPercent }}% desc.</small>
+          </article>
+          <article class="client-detail-card">
+            <span>Credito disponible</span>
+            <strong>{{ money_usd(client.creditAvailableUsd) }}</strong>
+            <small>Limite {{ money_usd(client.creditLimitUsd) }} · {{ client.creditStatus }}</small>
+          </article>
+          <article class="client-detail-card">
+            <span>Cobranza</span>
+            <strong>{{ client.collectionStatusLabel }}</strong>
+            <small>Saldo {{ money_usd(client.openBalanceUsd) }} · vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
+          </article>
+        </div>
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-lg-4">
+            <h3 class="client-detail-title">Contactos</h3>
+            <p class="mb-1"><strong>Compras:</strong> {{ client.contactName or 'Sin contacto' }}</p>
+            <p class="mb-1"><strong>Administracion:</strong> {{ client.administrativeContact or 'Sin contacto' }}</p>
+            <p class="mb-1"><strong>Recepcion:</strong> {{ client.receivingContact or 'Sin contacto' }}</p>
+            <p class="mb-0"><strong>WhatsApp:</strong> {{ client.whatsapp or client.phone or 'Sin telefono' }}</p>
+          </div>
+          <div class="col-12 col-lg-4">
+            <h3 class="client-detail-title">Direcciones</h3>
+            <p class="mb-1"><strong>Fiscal:</strong> {{ client.fiscalAddress or 'Sin direccion' }}</p>
+            <p class="mb-1"><strong>Despacho:</strong> {{ client.shippingAddress or 'Sin direccion' }}</p>
+            <p class="mb-0"><strong>Zona:</strong> {{ client.deliveryZone or client.city or 'Sin zona' }}</p>
+          </div>
+          <div class="col-12 col-lg-4">
+            <h3 class="client-detail-title">Trazabilidad</h3>
+            <p class="mb-1"><strong>Creado:</strong> {{ client.createdAt }}</p>
+            <p class="mb-1"><strong>Actualizado:</strong> {{ client.updatedAt }}</p>
+            <p class="mb-0"><strong>Ultima compra:</strong> {{ client.lastPurchaseAt or 'Sin compra' }}</p>
+          </div>
+        </div>
+        <div class="mt-3">
+          <h3 class="client-detail-title">Ordenes recientes</h3>
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Orden</th>
+                  <th>Tipo</th>
+                  <th>Total</th>
+                  <th>Saldo</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for order in client_orders[:5] %}
+                <tr>
+                  <td>{{ order.orderId or order.id }}</td>
+                  <td>{{ order.saleTypeLabel }}</td>
+                  <td>{{ money_usd(order.totalUsd) }}</td>
+                  <td>{{ money_usd(order.balanceUsd) }}</td>
+                  <td><span class="badge {{ order.status | badge_class }}">{{ order.statusLabel }}</span></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-secondary">Sin ordenes registradas.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {{ client_status_forms(client) }}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if can_edit_clients %}
 <div class="modal fade" id="editClient{{ loop.index }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
     <form class="modal-content" method="post" action="{{ url_for('client_edit', client_id=client.id) }}">
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Editar {{ client.businessName }}</h2>
-          <p class="mb-0 text-secondary">Actualiza acceso, estado y linea de credito.</p>
+          <p class="mb-0 text-secondary">Actualiza datos, cartera, condiciones y estado comercial.</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
@@ -185,13 +369,14 @@
     </form>
   </div>
 </div>
+{% endif %}
 {% endfor %}
 
 {% set bulk_modal_id = "clientsImportModal" %}
 {% set bulk_action = url_for("clients_import") %}
 {% set bulk_title = "Importar clientes ferreteros" %}
-{% set bulk_help = "Crea o actualiza clientes B2B, asignacion de vendedor, direccion, condiciones y solicitud de credito." %}
-{% set bulk_columns = ["cliente", "email", "rif", "telefono", "direccion", "ciudad", "vendedor_email", "tipo_venta_default", "cupo_usd", "plazos"] %}
+{% set bulk_help = "Crea o actualiza clientes B2B, asignacion de vendedor, direcciones, contactos, condiciones comerciales y solicitudes de credito." %}
+{% set bulk_columns = ["cliente", "email", "rif", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "cupo_usd", "plazos"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 

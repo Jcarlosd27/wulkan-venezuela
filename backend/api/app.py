@@ -94,6 +94,47 @@ SALE_TYPE_OPTIONS = [
     ("phone_request", "Solicitud telefonica"),
 ]
 PAYMENT_TERM_OPTIONS = [0, 10, 15, 20, 30, 40]
+CLIENT_STATUS_OPTIONS = [
+    ("prospect", "Prospecto"),
+    ("active", "Activo"),
+    ("inactive", "Inactivo"),
+    ("review", "En revision"),
+    ("blocked_debt", "Bloqueado por deuda"),
+    ("blocked_credit", "Bloqueado por credito"),
+    ("blocked_manual", "Bloqueado manual"),
+    ("suspended", "Suspendido"),
+]
+CLIENT_TYPE_OPTIONS = [
+    ("ferretero", "Ferretero"),
+    ("distribuidor", "Distribuidor"),
+    ("cliente_especial", "Cliente especial"),
+]
+CLIENT_CATEGORY_OPTIONS = [
+    ("standard", "Estandar"),
+    ("preferential", "Preferencial"),
+    ("strategic", "Estrategico"),
+    ("wholesale", "Mayorista"),
+]
+PRICE_LIST_OPTIONS = [
+    ("b2b", "B2B"),
+    ("retail", "Retail"),
+    ("wholesale", "Mayorista"),
+    ("special", "Especial"),
+]
+COLLECTION_STATUS_OPTIONS = [
+    ("current", "Al dia"),
+    ("due_soon", "Por vencer"),
+    ("overdue", "Vencido"),
+    ("promise", "Promesa de pago"),
+    ("blocked", "Bloqueado por cobranza"),
+    ("without_debt", "Sin deuda"),
+]
+CREDIT_RISK_OPTIONS = [
+    ("low", "Bajo"),
+    ("medium", "Medio"),
+    ("high", "Alto"),
+    ("critical", "Critico"),
+]
 ROLE_LABELS = {
     "super_admin": "Super admin",
     "general_manager": "Gerente general",
@@ -286,7 +327,7 @@ ADMIN_MENU_GROUPS = [
         "icon": "bi-briefcase",
         "items": [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
-            {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "clients_import", "client_delete"]},
+            {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "client_status_update", "clients_import", "client_delete"]},
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
@@ -352,15 +393,30 @@ IMPORT_TEMPLATE_GROUPS = [
                 "description": "Cartera B2B con datos fiscales, direccion, vendedor y credito.",
                 "columns": [
                     {"name": "cliente", "required": True, "example": "Ferreteria Principal C.A.", "help": "Razon social o nombre comercial."},
+                    {"name": "razon_social", "required": False, "example": "Ferreteria Principal C.A.", "help": "Nombre legal para documentos fiscales."},
+                    {"name": "nombre_comercial", "required": False, "example": "Ferreteria Principal", "help": "Nombre visible en app y cartera."},
                     {"name": "email", "required": True, "example": "compras@ferreteriaprincipal.com", "help": "Correo unico para acceso movil."},
                     {"name": "rif", "required": False, "example": "J-12345678-9", "help": "Identificacion fiscal."},
                     {"name": "contacto", "required": False, "example": "Maria Gonzalez", "help": "Responsable de compras."},
+                    {"name": "contacto_administrativo", "required": False, "example": "Luis Perez", "help": "Responsable de pagos o administracion."},
+                    {"name": "contacto_recepcion", "required": False, "example": "Ana Torres", "help": "Responsable de recibir mercancia."},
                     {"name": "telefono", "required": False, "example": "+584140000000", "help": "Telefono o WhatsApp."},
+                    {"name": "whatsapp", "required": False, "example": "+584120000000", "help": "WhatsApp principal si es distinto al telefono."},
                     {"name": "direccion", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal o despacho."},
+                    {"name": "direccion_fiscal", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal."},
+                    {"name": "direccion_despacho", "required": False, "example": "Galpon 4, Zona Industrial", "help": "Direccion de entrega."},
                     {"name": "ciudad", "required": False, "example": "Valencia", "help": "Ciudad del cliente."},
                     {"name": "estado_ubicacion", "required": False, "example": "Carabobo", "help": "Estado o region."},
+                    {"name": "pais", "required": False, "example": "VE", "help": "Pais del cliente."},
                     {"name": "zona", "required": False, "example": "Centro", "help": "Zona de despacho o cartera."},
                     {"name": "vendedor_email", "required": False, "example": "carlos@wulkanvenezuela.com", "help": "Asigna cartera por email del vendedor."},
+                    {"name": "tipo_cliente", "required": False, "example": "ferretero", "help": "ferretero, distribuidor o cliente_especial."},
+                    {"name": "categoria_comercial", "required": False, "example": "preferential", "help": "standard, preferential, strategic o wholesale."},
+                    {"name": "lista_precios", "required": False, "example": "b2b", "help": "b2b, retail, wholesale o special."},
+                    {"name": "descuento_autorizado", "required": False, "example": "5", "help": "Descuento comercial maximo autorizado."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active, prospect, review, inactive, suspended o bloqueos."},
+                    {"name": "estado_cobranza", "required": False, "example": "without_debt", "help": "without_debt, current, due_soon, overdue, promise o blocked."},
+                    {"name": "riesgo_credito", "required": False, "example": "low", "help": "low, medium, high o critical."},
                     {"name": "tipo_venta_default", "required": False, "example": "credit_line", "help": "cash, term_credit o credit_line."},
                     {"name": "cupo_usd", "required": False, "example": "1000", "help": "Linea aprobada si el rol puede aprobar."},
                     {"name": "credito_aprobado", "required": False, "example": "si", "help": "si/no. Solo gerente o super admin aprueba."},
@@ -611,6 +667,18 @@ def current_seller_assignment(store: dict) -> tuple[str, str]:
 
 def sale_type_label(value: str) -> str:
     return dict(SALE_TYPE_OPTIONS).get(value, value or "Sin definir")
+
+
+def client_status_label(value: str) -> str:
+    return dict(CLIENT_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
+def collection_status_label(value: str) -> str:
+    return dict(COLLECTION_STATUS_OPTIONS).get(value, value or "Sin cobranza")
+
+
+def client_type_label(value: str) -> str:
+    return dict(CLIENT_TYPE_OPTIONS).get(value, value or "Sin tipo")
 
 
 def order_status_label(value: str) -> str:
@@ -1211,6 +1279,9 @@ def security_context():
         "permission_actions": PERMISSION_ACTIONS,
         "role_labels": ROLE_LABELS,
         "sale_type_label": sale_type_label,
+        "client_status_label": client_status_label,
+        "collection_status_label": collection_status_label,
+        "client_type_label": client_type_label,
         "commission_status_label": commission_status_label,
     }
 
@@ -1551,8 +1622,28 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
         "customer": {
             "id": enriched["id"],
             "businessName": enriched["businessName"],
+            "legalName": enriched.get("legalName", ""),
+            "commercialName": enriched.get("commercialName", ""),
             "email": enriched["email"],
             "clientType": enriched["clientType"],
+            "clientCategory": enriched.get("clientCategory", "standard"),
+            "priceList": enriched.get("priceList", "b2b"),
+            "authorizedDiscountPercent": enriched.get("authorizedDiscountPercent", 0),
+            "status": enriched.get("status", ""),
+            "statusLabel": enriched.get("statusLabel", ""),
+            "taxId": enriched.get("taxId", ""),
+            "phone": enriched.get("phone", ""),
+            "whatsapp": enriched.get("whatsapp", ""),
+            "address": enriched.get("address", ""),
+            "fiscalAddress": enriched.get("fiscalAddress", ""),
+            "shippingAddress": enriched.get("shippingAddress", ""),
+            "city": enriched.get("city", ""),
+            "state": enriched.get("state", ""),
+            "country": enriched.get("country", "VE"),
+            "deliveryZone": enriched.get("deliveryZone", ""),
+            "contactName": enriched.get("contactName", ""),
+            "administrativeContact": enriched.get("administrativeContact", ""),
+            "receivingContact": enriched.get("receivingContact", ""),
             "accountRole": "client",
             "roleLabel": "Ferretero B2B",
             "creditEnabled": enriched["creditEnabled"],
@@ -1564,6 +1655,12 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
             "paymentTermsDays": enriched["paymentTermsDays"],
             "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
             "defaultSaleType": enriched.get("defaultSaleType", "cash"),
+            "collectionStatus": enriched.get("collectionStatus", "without_debt"),
+            "collectionStatusLabel": enriched.get("collectionStatusLabel", ""),
+            "creditRiskLevel": enriched.get("creditRiskLevel", "low"),
+            "openBalanceUsd": enriched.get("openBalanceUsd", 0.0),
+            "overdueBalanceUsd": enriched.get("overdueBalanceUsd", 0.0),
+            "lastPurchaseAt": enriched.get("lastPurchaseAt", ""),
             "assignedSeller": {
                 "id": enriched.get("assignedSellerId", ""),
                 "name": enriched.get("assignedSellerName", ""),
@@ -1636,19 +1733,38 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
     return {
         "id": enriched.get("id", ""),
         "businessName": enriched.get("businessName", ""),
+        "legalName": enriched.get("legalName", ""),
+        "commercialName": enriched.get("commercialName", ""),
         "email": enriched.get("email", ""),
         "phone": enriched.get("phone", ""),
+        "whatsapp": enriched.get("whatsapp", ""),
         "contactName": enriched.get("contactName", ""),
+        "administrativeContact": enriched.get("administrativeContact", ""),
+        "receivingContact": enriched.get("receivingContact", ""),
         "taxId": enriched.get("taxId", ""),
         "state": enriched.get("state", ""),
         "city": enriched.get("city", ""),
         "address": enriched.get("address", ""),
+        "fiscalAddress": enriched.get("fiscalAddress", ""),
+        "shippingAddress": enriched.get("shippingAddress", ""),
+        "country": enriched.get("country", "VE"),
+        "deliveryZone": enriched.get("deliveryZone", ""),
+        "clientType": enriched.get("clientType", "ferretero"),
+        "clientCategory": enriched.get("clientCategory", "standard"),
+        "priceList": enriched.get("priceList", "b2b"),
+        "authorizedDiscountPercent": enriched.get("authorizedDiscountPercent", 0),
+        "status": enriched.get("status", ""),
+        "statusLabel": enriched.get("statusLabel", ""),
         "creditEnabled": bool(enriched.get("creditEnabled")),
         "creditStatus": enriched.get("creditStatus", "without_credit"),
         "creditLimitUsd": enriched.get("creditLimitUsd", 0.0),
         "creditAvailableUsd": enriched.get("creditAvailableUsd", 0.0),
         "creditExposureUsd": enriched.get("creditExposureUsd", 0.0),
         "creditRequestStatus": enriched.get("creditRequestStatus", "none"),
+        "collectionStatus": enriched.get("collectionStatus", "without_debt"),
+        "openBalanceUsd": enriched.get("openBalanceUsd", 0.0),
+        "overdueBalanceUsd": enriched.get("overdueBalanceUsd", 0.0),
+        "lastPurchaseAt": enriched.get("lastPurchaseAt", ""),
         "assignedSeller": {
             "id": enriched.get("assignedSellerId", ""),
             "name": enriched.get("assignedSellerName", ""),
@@ -2319,9 +2435,11 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     can_approve = role_allowed(CREDIT_APPROVAL_ROLES)
     seen_emails: dict[str, int] = {}
+    seen_tax_ids: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
         business_name = row_value(row, "businessName", "razon_social", "nombre_comercial", "cliente")
+        tax_id = row_value(row, "taxId", "rif", "rut")
         if not email or not business_name:
             bulk_error(result, row_number, "cliente requiere nombre comercial y email.")
             continue
@@ -2329,7 +2447,14 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         if duplicate_message:
             bulk_error(result, row_number, f"{email}: {duplicate_message}")
             continue
+        if tax_id:
+            duplicate_tax = duplicate_in_upload(seen_tax_ids, tax_id.lower(), row_number)
+            if duplicate_tax:
+                bulk_error(result, row_number, f"{tax_id}: {duplicate_tax}")
+                continue
         client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == email), None)
+        if not client and tax_id:
+            client = next((item for item in store.get("clients", []) if item.get("taxId", "").lower() == tax_id.lower()), None)
         password = row_value(row, "password", "contrasena", "clave")
         if password and password_errors(password):
             bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
@@ -2353,14 +2478,25 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         ] or list((client or {}).get("allowedPaymentTermsDays") or [0])
         payment_term = parse_import_int(row_value(row, "paymentTermsDays", "plazo_default", "dias_credito"), int((client or {}).get("paymentTermsDays") or 0))
         payload = {
+            "legalName": row_value(row, "legalName", "razon_social", default=(client or {}).get("legalName", business_name)) or business_name,
+            "commercialName": row_value(row, "commercialName", "nombre_comercial", default=(client or {}).get("commercialName", business_name)) or business_name,
             "businessName": business_name,
-            "taxId": row_value(row, "taxId", "rif", "rut", default=(client or {}).get("taxId", "")),
+            "taxId": tax_id or (client or {}).get("taxId", ""),
             "contactName": row_value(row, "contactName", "contacto", "responsable", default=(client or {}).get("contactName", "")),
+            "administrativeContact": row_value(row, "administrativeContact", "contacto_administrativo", "admin_contacto", default=(client or {}).get("administrativeContact", "")),
+            "receivingContact": row_value(row, "receivingContact", "contacto_recepcion", "recepcion_contacto", default=(client or {}).get("receivingContact", "")),
             "phone": row_value(row, "phone", "telefono", "whatsapp", default=(client or {}).get("phone", "")),
+            "whatsapp": row_value(row, "whatsapp", "telefono_whatsapp", default=(client or {}).get("whatsapp", "")),
             "email": email,
             "clientType": row_value(row, "clientType", "tipo_cliente", default=(client or {}).get("clientType", "ferretero")) or "ferretero",
+            "clientCategory": row_value(row, "clientCategory", "categoria_comercial", default=(client or {}).get("clientCategory", "standard")) or "standard",
+            "priceList": row_value(row, "priceList", "lista_precios", default=(client or {}).get("priceList", "b2b")) or "b2b",
+            "authorizedDiscountPercent": parse_import_float(row_value(row, "authorizedDiscountPercent", "descuento_autorizado"), float((client or {}).get("authorizedDiscountPercent") or 0)),
             "status": row_value(row, "status", "estado", default=(client or {}).get("status", "active")) or "active",
             "address": row_value(row, "address", "direccion", default=(client or {}).get("address", "")),
+            "fiscalAddress": row_value(row, "fiscalAddress", "direccion_fiscal", default=(client or {}).get("fiscalAddress", "")),
+            "shippingAddress": row_value(row, "shippingAddress", "direccion_despacho", "direccion_entrega", default=(client or {}).get("shippingAddress", "")),
+            "country": row_value(row, "country", "pais", default=(client or {}).get("country", "VE")) or "VE",
             "state": row_value(row, "state", "estado_ubicacion", "provincia", default=(client or {}).get("state", "")),
             "city": row_value(row, "city", "ciudad", default=(client or {}).get("city", "")),
             "deliveryZone": row_value(row, "deliveryZone", "zona", default=(client or {}).get("deliveryZone", "")),
@@ -2368,6 +2504,8 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "assignedSellerName": (seller or {}).get("name", (client or {}).get("assignedSellerName", "")),
             "defaultSaleType": row_value(row, "defaultSaleType", "tipo_venta_default", default=(client or {}).get("defaultSaleType", "cash")) or "cash",
             "allowedPaymentTermsDays": sorted(set(terms)),
+            "collectionStatus": row_value(row, "collectionStatus", "estado_cobranza", default=(client or {}).get("collectionStatus", "without_debt")) or "without_debt",
+            "creditRiskLevel": row_value(row, "creditRiskLevel", "riesgo_credito", default=(client or {}).get("creditRiskLevel", "low")) or "low",
             "creditRequestStatus": credit_status,
             "creditRequestedUsd": credit_requested,
             "creditEnabled": credit_enabled and credit_status == "approved",
@@ -2377,6 +2515,10 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
             "updatedAt": utc_now(),
         }
+        payload["whatsapp"] = payload["whatsapp"] or payload["phone"]
+        payload["fiscalAddress"] = payload["fiscalAddress"] or payload["address"]
+        payload["shippingAddress"] = payload["shippingAddress"] or payload["address"]
+        payload["address"] = payload["address"] or payload["shippingAddress"] or payload["fiscalAddress"]
         if not payload.get("taxId"):
             bulk_warning(result, row_number, f"{business_name} no tiene RIF/taxId.")
         if not payload.get("contactName"):
@@ -3001,6 +3143,19 @@ def enrich_client(
     movements: list[dict] | None = None,
 ) -> dict:
     enriched = dict(client)
+    enriched["legalName"] = enriched.get("legalName") or enriched.get("businessName", "")
+    enriched["commercialName"] = enriched.get("commercialName") or enriched.get("businessName", "")
+    enriched["whatsapp"] = enriched.get("whatsapp") or enriched.get("phone", "")
+    enriched["fiscalAddress"] = enriched.get("fiscalAddress") or enriched.get("address", "")
+    enriched["shippingAddress"] = enriched.get("shippingAddress") or enriched.get("address", "")
+    enriched["address"] = enriched.get("address") or enriched["shippingAddress"] or enriched["fiscalAddress"]
+    enriched["country"] = enriched.get("country") or "VE"
+    enriched["administrativeContact"] = enriched.get("administrativeContact", "")
+    enriched["receivingContact"] = enriched.get("receivingContact", "")
+    enriched["clientCategory"] = enriched.get("clientCategory") or "standard"
+    enriched["priceList"] = enriched.get("priceList") or "b2b"
+    enriched["authorizedDiscountPercent"] = float(enriched.get("authorizedDiscountPercent") or 0)
+    enriched["creditRiskLevel"] = enriched.get("creditRiskLevel") or "low"
     enriched["creditLimitUsd"] = float(enriched.get("creditLimitUsd") or 0)
     enriched["creditUsedUsd"] = float(enriched.get("creditUsedUsd") or 0)
     enriched["creditRequestedUsd"] = float(enriched.get("creditRequestedUsd") or 0)
@@ -3016,6 +3171,40 @@ def enrich_client(
     )
     enriched["creditExposureUsd"] = round(enriched["creditUsedUsd"] + enriched["creditOrdersUsd"], 2)
     enriched["creditAvailableUsd"] = credit_available(enriched, orders, movements)
+    client_orders = [
+        enrich_order(order, movements)
+        for order in orders or []
+        if order.get("customerId") == enriched.get("id", "")
+    ]
+    enriched["ordersCount"] = len(client_orders)
+    enriched["totalPurchasedUsd"] = round(sum(float(order.get("totalUsd") or 0) for order in client_orders), 2)
+    open_orders = [
+        order for order in client_orders
+        if float(order.get("balanceUsd") or 0) > 0 and order.get("status") != "cancelled"
+    ]
+    enriched["openBalanceUsd"] = round(sum(float(order.get("balanceUsd") or 0) for order in open_orders), 2)
+    enriched["overdueBalanceUsd"] = round(
+        sum(float(order.get("balanceUsd") or 0) for order in open_orders if order.get("dueStatus") == "overdue"),
+        2,
+    )
+    delivered_or_paid_orders = [
+        order for order in client_orders
+        if order.get("status") in {"delivered", "paid", "partial_paid", "approved_with_credit", "preparing"}
+    ]
+    latest_order = max(delivered_or_paid_orders or client_orders, key=lambda order: order.get("createdAt", ""), default={})
+    enriched["lastPurchaseAt"] = enriched.get("lastPurchaseAt") or latest_order.get("createdAt", "")
+    enriched["lastOrderId"] = latest_order.get("orderId") or latest_order.get("id", "")
+    explicit_collection = enriched.get("collectionStatus", "")
+    if enriched.get("status") == "blocked_debt":
+        enriched["collectionStatus"] = "blocked"
+    elif enriched["overdueBalanceUsd"] > 0:
+        enriched["collectionStatus"] = "overdue"
+    elif any(order.get("dueStatus") == "due_soon" for order in open_orders):
+        enriched["collectionStatus"] = "due_soon"
+    elif enriched["openBalanceUsd"] > 0:
+        enriched["collectionStatus"] = explicit_collection if explicit_collection in {"promise", "current"} else "current"
+    else:
+        enriched["collectionStatus"] = explicit_collection if explicit_collection == "promise" else "without_debt"
     enriched["creditStatus"] = "without_credit"
     if enriched.get("creditEnabled"):
         if enriched["creditAvailableUsd"] <= 0:
@@ -3028,6 +3217,9 @@ def enrich_client(
         enriched["creditStatus"] = "credit_requested"
     elif enriched.get("creditRequestStatus") == "rejected":
         enriched["creditStatus"] = "rejected"
+    enriched["statusLabel"] = client_status_label(enriched.get("status", ""))
+    enriched["collectionStatusLabel"] = collection_status_label(enriched.get("collectionStatus", ""))
+    enriched["clientTypeLabel"] = client_type_label(enriched.get("clientType", ""))
     return enriched
 
 
@@ -3396,6 +3588,14 @@ def seller_form_error(store: dict, existing: dict | None = None) -> str:
 def client_form_error(store: dict, existing: dict | None = None) -> str:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
+    business_name = (
+        request.form.get("businessName", "").strip()
+        or request.form.get("commercialName", "").strip()
+        or request.form.get("legalName", "").strip()
+    )
+    tax_id = request.form.get("taxId", "").strip().lower()
+    if not business_name:
+        return "La razon social o nombre comercial del cliente es obligatoria."
     if not email:
         return "El email del cliente ferretero es obligatorio."
     duplicated = any(
@@ -3405,6 +3605,13 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
     )
     if duplicated:
         return f"Ya existe un cliente con el email {email}."
+    duplicated_tax_id = bool(tax_id) and any(
+        client.get("taxId", "").strip().lower() == tax_id
+        and (existing is None or client.get("id") != existing.get("id"))
+        for client in store["clients"]
+    )
+    if duplicated_tax_id:
+        return f"Ya existe un cliente con el RIF {request.form.get('taxId', '').strip()}."
     return credential_form_error(password, existing)
 
 
@@ -3532,14 +3739,25 @@ def client_payload(existing: dict | None = None) -> dict:
             requested_credit_status = existing_credit_status
 
     payload = {
+        "legalName": request.form.get("legalName", "").strip(),
+        "commercialName": request.form.get("commercialName", "").strip(),
         "businessName": request.form.get("businessName", "").strip(),
         "taxId": request.form.get("taxId", "").strip(),
         "contactName": request.form.get("contactName", "").strip(),
+        "administrativeContact": request.form.get("administrativeContact", "").strip(),
+        "receivingContact": request.form.get("receivingContact", "").strip(),
         "phone": request.form.get("phone", "").strip(),
+        "whatsapp": request.form.get("whatsapp", "").strip(),
         "email": email,
         "clientType": request.form.get("clientType", "ferretero"),
+        "clientCategory": request.form.get("clientCategory", "standard"),
+        "priceList": request.form.get("priceList", "b2b"),
+        "authorizedDiscountPercent": float(request.form.get("authorizedDiscountPercent") or 0),
         "status": request.form.get("status", "active"),
         "address": request.form.get("address", "").strip(),
+        "fiscalAddress": request.form.get("fiscalAddress", "").strip(),
+        "shippingAddress": request.form.get("shippingAddress", "").strip(),
+        "country": request.form.get("country", "VE").strip() or "VE",
         "state": request.form.get("state", "").strip(),
         "city": request.form.get("city", "").strip(),
         "deliveryZone": request.form.get("deliveryZone", "").strip(),
@@ -3547,6 +3765,8 @@ def client_payload(existing: dict | None = None) -> dict:
         "assignedSellerName": seller_name,
         "defaultSaleType": request.form.get("defaultSaleType", "cash"),
         "allowedPaymentTermsDays": selected_payment_terms(),
+        "collectionStatus": request.form.get("collectionStatus", "without_debt"),
+        "creditRiskLevel": request.form.get("creditRiskLevel", "low"),
         "creditRequestStatus": requested_credit_status,
         "creditRequestedUsd": credit_requested,
         "creditEnabled": credit_enabled,
@@ -3556,6 +3776,13 @@ def client_payload(existing: dict | None = None) -> dict:
         "notes": request.form.get("notes", "").strip(),
         "updatedAt": now,
     }
+    payload["businessName"] = payload["businessName"] or payload["commercialName"] or payload["legalName"]
+    payload["commercialName"] = payload["commercialName"] or payload["businessName"]
+    payload["legalName"] = payload["legalName"] or payload["businessName"]
+    payload["whatsapp"] = payload["whatsapp"] or payload["phone"]
+    payload["fiscalAddress"] = payload["fiscalAddress"] or payload["address"]
+    payload["shippingAddress"] = payload["shippingAddress"] or payload["address"]
+    payload["address"] = payload["address"] or payload["shippingAddress"] or payload["fiscalAddress"]
     if approval_allowed and requested_credit_status == "approved":
         payload["creditApprovedBy"] = session.get("admin_name", "Admin")
         payload["creditApprovedAt"] = now
@@ -3582,21 +3809,74 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         enrich_client(client, store["orders"], store.get("credit_movements", []))
         for client in visible_clients_for_current_user(store)
     ]
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "collection": request.args.get("collection", "").strip(),
+        "credit": request.args.get("credit", "").strip(),
+    }
+    if filters["q"]:
+        query = filters["q"].lower()
+        clients_list = [
+            client for client in clients_list
+            if query in " ".join(
+                [
+                    client.get("businessName", ""),
+                    client.get("legalName", ""),
+                    client.get("commercialName", ""),
+                    client.get("taxId", ""),
+                    client.get("email", ""),
+                    client.get("phone", ""),
+                    client.get("whatsapp", ""),
+                    client.get("city", ""),
+                    client.get("deliveryZone", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        clients_list = [client for client in clients_list if client.get("status") == filters["status"]]
+    if filters["seller"]:
+        clients_list = [client for client in clients_list if client.get("assignedSellerId") == filters["seller"]]
+    if filters["collection"]:
+        clients_list = [client for client in clients_list if client.get("collectionStatus") == filters["collection"]]
+    if filters["credit"]:
+        clients_list = [client for client in clients_list if client.get("creditStatus") == filters["credit"] or client.get("creditRequestStatus") == filters["credit"]]
+    client_ids = {client.get("id", "") for client in clients_list}
+    orders_by_client: dict[str, list[dict]] = {}
+    for order in sorted(store.get("orders", []), key=lambda item: item.get("createdAt", ""), reverse=True):
+        if order.get("customerId") not in client_ids:
+            continue
+        orders_by_client.setdefault(order.get("customerId", ""), []).append(enrich_order(order, store.get("credit_movements", [])))
     metrics = {
         "clients": len(clients_list),
         "active": sum(1 for client in clients_list if client.get("status") == "active"),
+        "prospects": sum(1 for client in clients_list if client.get("status") == "prospect"),
+        "blocked": sum(1 for client in clients_list if str(client.get("status", "")).startswith("blocked")),
         "credit_enabled": sum(1 for client in clients_list if client.get("creditEnabled")),
         "credit_requested": sum(1 for client in clients_list if client.get("creditRequestStatus") == "pending"),
         "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
         "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
+        "open_balance": sum(float(client.get("openBalanceUsd") or 0) for client in clients_list),
+        "overdue_balance": sum(float(client.get("overdueBalanceUsd") or 0) for client in clients_list),
     }
     return {
         "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
         "sellers": sales_users(store),
         "payment_terms": PAYMENT_TERM_OPTIONS,
         "sale_type_options": SALE_TYPE_OPTIONS,
-        "can_approve_credit": role_allowed(CREDIT_APPROVAL_ROLES),
+        "client_status_options": CLIENT_STATUS_OPTIONS,
+        "client_type_options": CLIENT_TYPE_OPTIONS,
+        "client_category_options": CLIENT_CATEGORY_OPTIONS,
+        "price_list_options": PRICE_LIST_OPTIONS,
+        "collection_status_options": COLLECTION_STATUS_OPTIONS,
+        "credit_risk_options": CREDIT_RISK_OPTIONS,
+        "can_approve_credit": can_module_action("credit", "approve"),
+        "can_edit_clients": can_module_action("clients", "edit"),
+        "can_create_clients": can_module_action("clients", "create"),
         "metrics": metrics,
+        "filters": filters,
+        "orders_by_client": orders_by_client,
         "error": error,
         "bulk_result": consume_bulk_result("clients") if not error else None,
     }
@@ -4177,6 +4457,37 @@ def client_edit(client_id: str):
             updated,
         )
         save_store(store)
+    return redirect(url_for("clients"))
+
+
+@app.post("/clients/<client_id>/status")
+@require_roles(*roles_for_action("clients", "edit"))
+def client_status_update(client_id: str):
+    store = load_store()
+    client = find_by_id(store.get("clients", []), client_id)
+    if not can_access_client_record(client):
+        return forbidden_response()
+    target_status = request.form.get("status", "").strip()
+    allowed_statuses = {status for status, _label in CLIENT_STATUS_OPTIONS}
+    if not client or target_status not in allowed_statuses:
+        return redirect(url_for("clients"))
+    before = copy.deepcopy(client)
+    client["status"] = target_status
+    client["updatedAt"] = utc_now()
+    if target_status == "blocked_debt":
+        client["collectionStatus"] = "blocked"
+    elif target_status == "active" and client.get("collectionStatus") == "blocked":
+        client["collectionStatus"] = "without_debt"
+    record_change_event(
+        store,
+        "status_update",
+        "client",
+        client_id,
+        f"Cliente marcado como {client_status_label(target_status)}: {client.get('businessName', client_id)}.",
+        before,
+        client,
+    )
+    save_store(store)
     return redirect(url_for("clients"))
 
 
@@ -5390,14 +5701,26 @@ def api_mobile_seller_clients():
         temporary_password = str(payload.get("password") or secrets.token_urlsafe(10))
         client = {
             "id": next_id("client", email or business_name),
+            "legalName": str(payload.get("legalName") or business_name).strip(),
+            "commercialName": str(payload.get("commercialName") or business_name).strip(),
             "businessName": business_name,
             "taxId": str(payload.get("taxId") or "").strip(),
             "contactName": str(payload.get("contactName") or "").strip(),
+            "administrativeContact": str(payload.get("administrativeContact") or "").strip(),
+            "receivingContact": str(payload.get("receivingContact") or "").strip(),
             "phone": str(payload.get("phone") or "").strip(),
+            "whatsapp": str(payload.get("whatsapp") or payload.get("phone") or "").strip(),
             "email": email,
             "clientType": "ferretero",
+            "clientCategory": str(payload.get("clientCategory") or "standard"),
+            "priceList": str(payload.get("priceList") or "b2b"),
+            "authorizedDiscountPercent": float(payload.get("authorizedDiscountPercent") or 0),
             "status": "active",
+            "onboardingStatus": "pending_review",
             "address": str(payload.get("address") or "").strip(),
+            "fiscalAddress": str(payload.get("fiscalAddress") or payload.get("address") or "").strip(),
+            "shippingAddress": str(payload.get("shippingAddress") or payload.get("address") or "").strip(),
+            "country": str(payload.get("country") or "VE").strip(),
             "state": str(payload.get("state") or "").strip(),
             "city": str(payload.get("city") or "").strip(),
             "deliveryZone": str(payload.get("deliveryZone") or "").strip(),
@@ -5405,6 +5728,8 @@ def api_mobile_seller_clients():
             "assignedSellerName": seller_name,
             "defaultSaleType": str(payload.get("defaultSaleType") or "cash"),
             "allowedPaymentTermsDays": terms,
+            "collectionStatus": "without_debt",
+            "creditRiskLevel": "low",
             "creditRequestStatus": "pending" if requested_credit > 0 else "none",
             "creditRequestedUsd": requested_credit,
             "creditEnabled": False,
@@ -5516,6 +5841,12 @@ def api_client_credit():
                 "paymentTermsDays": enriched["paymentTermsDays"],
                 "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
                 "defaultSaleType": enriched.get("defaultSaleType", "cash"),
+                "collectionStatus": enriched.get("collectionStatus", "without_debt"),
+                "collectionStatusLabel": enriched.get("collectionStatusLabel", ""),
+                "creditRiskLevel": enriched.get("creditRiskLevel", "low"),
+                "openBalanceUsd": enriched.get("openBalanceUsd", 0.0),
+                "overdueBalanceUsd": enriched.get("overdueBalanceUsd", 0.0),
+                "lastPurchaseAt": enriched.get("lastPurchaseAt", ""),
                 "assignedSeller": {
                     "id": enriched.get("assignedSellerId", ""),
                     "name": enriched.get("assignedSellerName", ""),

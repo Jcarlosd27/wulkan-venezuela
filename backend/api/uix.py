@@ -3,9 +3,13 @@ from __future__ import annotations
 
 STATUS_BADGES = {
     "active": "text-bg-success",
+    "prospect": "text-bg-info",
     "pending": "text-bg-warning",
     "inactive": "text-bg-secondary",
     "blocked": "text-bg-danger",
+    "blocked_debt": "text-bg-danger",
+    "blocked_credit": "text-bg-danger",
+    "blocked_manual": "text-bg-danger",
     "suspended": "text-bg-warning",
     "commercial_manager": "text-bg-primary",
     "sales": "text-bg-info",
@@ -47,7 +51,12 @@ STATUS_BADGES = {
     "current": "text-bg-success",
     "due_soon": "text-bg-warning",
     "overdue": "text-bg-danger",
+    "promise": "text-bg-info",
     "without_due_date": "text-bg-secondary",
+    "without_debt": "text-bg-success",
+    "medium": "text-bg-warning",
+    "high": "text-bg-danger",
+    "critical": "text-bg-danger",
     "visible": "text-bg-success",
     "hidden": "text-bg-secondary",
 }
