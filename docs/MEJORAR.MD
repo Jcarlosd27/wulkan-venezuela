@@ -9,7 +9,7 @@
 - [x] Fase 1.3 - Roles y Permisos granulares: matriz centralizada por rol, modulo y accion; menu y rutas principales conectadas a permisos de ver/crear/editar/importar/aprobar/eliminar; vista profesional para Super Admin con KPIs de cobertura y validacion por roles internos.
 - [x] Fase 1.4 - Clientes B2B / Ferreteros: ficha comercial completa con razon social, RIF, contactos, WhatsApp, direccion fiscal/despacho, vendedor asignado, lista de precios, descuento autorizado, estados de cliente, cobranza, riesgo, credito, filtros, acciones de activar/revisar/bloquear, detalle con ordenes recientes, importacion Excel ampliada, datos sincronizados hacia app movil y auditoria before/after.
 - [x] Fase 1.5 - Vendedores: ficha comercial completa con codigo, zona, territorio, supervisor, fecha ingreso, acceso movil, comision, meta mensual, observaciones, filtros por estado/zona/busqueda, ranking, avance de meta, ticket promedio, cartera asignada, ventas, comisiones, creditos pendientes, detalle operativo, importacion Excel ampliada, bloqueo real de acceso movil y resumen sincronizado hacia la app vendedor.
-- [ ] Fase 1.6 - Productos / Catalogo.
+- [x] Fase 1.6 - Productos / Catalogo: ficha comercial completa, importacion Excel ampliada, filtros compactos, export CSV, duplicado como borrador oculto, validaciones de precio/stock/estado, galeria y PDFs, publicacion movil controlada por estado/visibleInApp, Graphify de stock/media y bloqueo de mock movil en produccion.
 - [ ] Fase 1.7 - Categorias.
 - [ ] Fase 1.8 - Inventario / Stock.
 - [ ] Fase 1.9 - Ordenes.
@@ -399,6 +399,19 @@ El módulo de productos debe ser muy sólido.
 * Ver historial de cambios.
 * Ver movimientos de stock.
 * Ver ventas del producto.
+
+### Check implementado
+
+* [x] Formulario comercial por bloques: identificacion, publicacion, precios, stock, media y ficha tecnica.
+* [x] SKU obligatorio y unico, codigo interno, subcategoria, marca, modelo y unidad de venta.
+* [x] Estados completos: activo, inactivo, agotado, reposicion, oculto y descontinuado.
+* [x] Validacion de precios, descuento, costo, margen, stock minimo/maximo y categoria obligatoria.
+* [x] Importacion Excel/CSV con columnas ampliadas y previsualizacion create/update/error.
+* [x] Exportacion CSV respetando filtros del modulo.
+* [x] Galeria de multiples imagenes y PDFs tecnicos sincronizados hacia app movil.
+* [x] API movil solo entrega productos activos y visibles en app.
+* [x] Duplicado de producto crea borrador oculto sin copiar inventario.
+* [x] Runtime movil bloquea mock en produccion para evitar productos fantasma.
 
 ---
 

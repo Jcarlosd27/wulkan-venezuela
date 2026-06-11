@@ -21,6 +21,7 @@ const _wulkanLine = Color(0xFFEDE8E4);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  mobileEnvironment.validateRuntime();
   await configureMobileRuntime();
   runApp(const WulkanApp());
 }

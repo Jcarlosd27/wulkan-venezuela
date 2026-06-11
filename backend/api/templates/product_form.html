@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set heading = mode ~ " producto" %}
-{% set description = "Producto ecommerce con SKU, precio USD/VES, stock, media y ficha tecnica." %}
+{% set description = "Ficha ecommerce con SKU, precios, stock, galeria, PDFs y publicacion movil." %}
 
 {% block top_action %}
 <a class="btn btn-light" href="{{ url_for('products') }}"><i class="bi bi-arrow-left"></i> Volver</a>
@@ -10,123 +10,219 @@
 <form class="product-form" method="post" enctype="multipart/form-data">
   {{ csrf_field() }}
   {% if error %}
-  <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+  <div class="alert alert-warning d-flex align-items-center gap-2 border-0 shadow-sm" role="alert">
     <i class="bi bi-exclamation-triangle"></i>
     <strong>{{ error }}</strong>
   </div>
   {% endif %}
 
   <section class="row g-3">
-    <div class="col-12 col-xl-7">
+    <div class="col-12 col-xl-8">
       <article class="panel product-form-panel">
         <div class="panel-header">
           <div>
-            <h2>Identificacion del producto</h2>
-            <span>Datos principales visibles en el catalogo movil.</span>
+            <h2>Identificacion comercial</h2>
+            <span>Datos visibles en la app movil y usados por ordenes, stock e importaciones.</span>
           </div>
         </div>
         <div class="row g-3">
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-3">
             <label class="form-label fw-semibold">SKU</label>
             <input class="form-control text-uppercase" name="sku" required autofocus placeholder="WUL-MOT-45CC" value="{{ product.sku if product else '' }}">
-            <small class="text-secondary">Codigo unico para stock y ordenes.</small>
+            <small class="text-secondary">Unico para stock y pedidos.</small>
           </div>
-          <div class="col-12 col-md-8">
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Codigo interno</label>
+            <input class="form-control text-uppercase" name="internalCode" placeholder="ERP-001" value="{{ product.internalCode if product else '' }}">
+          </div>
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">Nombre comercial</label>
             <input class="form-control" name="title" required placeholder="Motosierra Wulkan 45cc" value="{{ product.title if product else '' }}">
           </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Marca</label>
+            <input class="form-control" name="brand" placeholder="Wulkan" value="{{ product.brand if product else 'Wulkan' }}">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Modelo</label>
+            <input class="form-control" name="model" placeholder="45CC" value="{{ product.model if product else '' }}">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Tipo</label>
+            <select class="form-select" name="productType">
+              {% set selected_type = product.productType if product else 'machine' %}
+              {% for value, label in product_type_options %}
+              <option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Unidad de venta</label>
+            <input class="form-control" name="unitOfSale" placeholder="unidad" value="{{ product.unitOfSale if product else 'unidad' }}">
+          </div>
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">Categoria</label>
-            <select class="form-select" name="categoryId">
+            <select class="form-select" name="categoryId" {% if not categories %}disabled{% endif %}>
               {% for category in categories %}
               <option value="{{ category.id }}" {% if product and product.categoryId == category.id %}selected{% endif %}>{{ category.name }}</option>
+              {% else %}
+              <option value="">Crea una categoria primero</option>
               {% endfor %}
             </select>
           </div>
           <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Tipo</label>
-            <select class="form-select" name="productType">
-              {% set selected_type = product.productType if product else 'machine' %}
-              <option value="machine" {% if selected_type == 'machine' %}selected{% endif %}>Maquina</option>
-              <option value="spare_part" {% if selected_type == 'spare_part' %}selected{% endif %}>Repuesto</option>
-              <option value="accessory" {% if selected_type == 'accessory' %}selected{% endif %}>Accesorio</option>
-              <option value="service" {% if selected_type == 'service' %}selected{% endif %}>Servicio</option>
-            </select>
+            <label class="form-label fw-semibold">Subcategoria</label>
+            <input class="form-control" name="subCategory" placeholder="Motosierras, cadenas, bombas..." value="{{ product.subCategory if product else '' }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Descripcion corta</label>
+            <textarea class="form-control" name="shortDescription" rows="3" placeholder="Resumen para cards y buscadores">{{ product.shortDescription if product else '' }}</textarea>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Descripcion larga</label>
+            <textarea class="form-control" name="longDescription" rows="3" placeholder="Beneficios, uso recomendado, garantia, contenido de caja">{{ product.longDescription if product else '' }}</textarea>
           </div>
           <div class="col-12">
-            <label class="form-label fw-semibold">Descripcion para ecommerce</label>
-            <textarea class="form-control" name="description" rows="4" placeholder="Uso recomendado, beneficios, contenido de caja, garantia...">{{ product.description if product else '' }}</textarea>
+            <label class="form-label fw-semibold">Descripcion principal</label>
+            <textarea class="form-control" name="description" rows="3" placeholder="Texto principal que vera el cliente en detalle de producto">{{ product.description if product else '' }}</textarea>
           </div>
         </div>
       </article>
     </div>
 
-    <div class="col-12 col-xl-5">
+    <div class="col-12 col-xl-4">
       <article class="panel product-form-panel">
         <div class="panel-header">
           <div>
-            <h2>Precio y disponibilidad</h2>
-            <span>Valores comerciales y control de publicacion.</span>
+            <h2>Publicacion en app</h2>
+            <span>Controla que se publica y como se destaca en Android.</span>
           </div>
         </div>
         <div class="row g-3">
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Precio publico USD</label>
-            <input class="form-control" name="publicPriceUsd" inputmode="decimal" required value="{{ product.publicPriceUsd if product else '' }}">
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Precio anterior USD</label>
-            <input class="form-control" name="originalPriceUsd" inputmode="decimal" value="{{ product.originalPriceUsd if product else '' }}">
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Descuento %</label>
-            <input class="form-control" name="discountPercent" inputmode="decimal" value="{{ product.discountPercent if product else 0 }}">
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Precio B2B USD</label>
-            <input class="form-control" name="b2bPriceUsd" inputmode="decimal" value="{{ product.b2bPriceUsd if product else '' }}">
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Tasa USD/VES</label>
-            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ product.exchangeRateUsdVes if product else rate }}">
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Stock inicial</label>
-            <input class="form-control" name="stock" inputmode="numeric" value="{{ product.stock if product else 0 }}">
-          </div>
           <div class="col-12">
             <label class="form-label fw-semibold">Estado</label>
             <select class="form-select" name="status">
               {% set selected_status = product.status if product else 'active' %}
-              <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Activo</option>
-              <option value="pending" {% if selected_status == 'pending' %}selected{% endif %}>Pendiente</option>
-              <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactivo</option>
+              {% for value, label in product_status_options %}
+              <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
             </select>
           </div>
           <div class="col-12">
-            <div class="product-checks">
+            <div class="product-checks vertical">
+              <label class="form-check">
+                <input type="hidden" name="visibleInApp" value="off">
+                <input class="form-check-input" type="checkbox" name="visibleInApp" value="on" {% if product is none or product.visibleInApp %}checked{% endif %}>
+                <span class="form-check-label">Visible en app movil</span>
+              </label>
+              <label class="form-check">
+                <input class="form-check-input" type="checkbox" name="featured" {% if product and product.featured %}checked{% endif %}>
+                <span class="form-check-label">Producto destacado</span>
+              </label>
+              <label class="form-check">
+                <input class="form-check-input" type="checkbox" name="onSale" {% if product and product.onSale %}checked{% endif %}>
+                <span class="form-check-label">Producto en oferta</span>
+              </label>
               <label class="form-check">
                 <input class="form-check-input" type="checkbox" name="requiresQuote" {% if product and product.requiresQuote %}checked{% endif %}>
                 <span class="form-check-label">Requiere cotizacion</span>
               </label>
               <label class="form-check">
                 <input class="form-check-input" type="checkbox" name="requiresTechnicalValidation" {% if product and product.requiresTechnicalValidation %}checked{% endif %}>
-                <span class="form-check-label">Validacion tecnica</span>
+                <span class="form-check-label">Requiere validacion tecnica</span>
               </label>
             </div>
+            <small class="text-secondary d-block mt-2">Estados inactivo, oculto o descontinuado no se publican aunque el check este activo.</small>
           </div>
         </div>
       </article>
     </div>
   </section>
 
-  <section class="row g-3 mt-1">
+  <section class="row g-3">
+    <div class="col-12 col-xl-6">
+      <article class="panel product-form-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Precios y margen</h2>
+            <span>USD es la moneda operativa; VES se calcula como referencia.</span>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Precio publico USD</label>
+            <input class="form-control" name="publicPriceUsd" inputmode="decimal" required value="{{ product.publicPriceUsd if product else '' }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Precio B2B USD</label>
+            <input class="form-control" name="b2bPriceUsd" inputmode="decimal" value="{{ product.b2bPriceUsd if product else '' }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Precio anterior USD</label>
+            <input class="form-control" name="originalPriceUsd" inputmode="decimal" value="{{ product.originalPriceUsd if product else '' }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Descuento %</label>
+            <input class="form-control" name="discountPercent" inputmode="decimal" value="{{ product.discountPercent if product else 0 }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Costo ref. USD</label>
+            <input class="form-control" name="costReferenceUsd" inputmode="decimal" value="{{ product.costReferenceUsd if product else '' }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Margen estimado %</label>
+            <input class="form-control" name="marginPercent" inputmode="decimal" value="{{ product.marginPercent if product else '' }}">
+          </div>
+          <div class="col-12 col-lg-4">
+            <label class="form-label fw-semibold">Tasa USD/VES</label>
+            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ product.exchangeRateUsdVes if product else rate }}">
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <div class="col-12 col-xl-6">
+      <article class="panel product-form-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Inventario inicial</h2>
+            <span>Stock fisico, alerta minima y objetivo para reposicion.</span>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Stock fisico</label>
+            <input class="form-control" name="stock" inputmode="numeric" value="{{ product.stock if product else 0 }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Stock minimo</label>
+            <input class="form-control" name="minimumStock" inputmode="numeric" value="{{ product.minimumStock if product else 0 }}">
+          </div>
+          <div class="col-6 col-lg-4">
+            <label class="form-label fw-semibold">Stock maximo</label>
+            <input class="form-control" name="maximumStock" inputmode="numeric" value="{{ product.maximumStock if product else 0 }}">
+          </div>
+          {% if product %}
+          <div class="col-12">
+            <div class="product-stock-note">
+              <span>Disponible estimado</span>
+              <strong>{{ product.availableStock if product.availableStock is defined else product.stock }} uds</strong>
+              <small>El stock reservado se calcula por ordenes abiertas.</small>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="row g-3">
     <div class="col-12 col-xl-6">
       <article class="panel product-form-panel">
         <div class="panel-header">
           <div>
             <h2>Imagenes y documentos</h2>
-            <span>Media usada por la app movil y detalle de producto.</span>
+            <span>La galeria se muestra como carrusel deslizable en la app movil.</span>
           </div>
         </div>
         <div class="row g-3">
@@ -137,13 +233,12 @@
           </div>
           <div class="col-12">
             <label class="form-label fw-semibold">Galeria de imagenes</label>
-            <textarea class="form-control" name="imageUrls" rows="3" placeholder="Una URL por linea">{{ (product.imageUrls | join('\n')) if product else '' }}</textarea>
+            <textarea class="form-control" name="imageUrls" rows="4" placeholder="Una URL por linea">{{ (product.imageUrls | join('\n')) if product else '' }}</textarea>
             <input class="form-control mt-2" name="galleryFiles" type="file" accept="image/*" multiple>
-            <small class="text-secondary">Cada URL se muestra como imagen deslizable en el carrusel del detalle movil.</small>
           </div>
           <div class="col-12">
-            <label class="form-label fw-semibold">PDFs tecnicos</label>
-            <textarea class="form-control" name="pdfUrls" rows="2" placeholder="Ficha tecnica PDF por URL">{{ (product.pdfUrls | join('\n')) if product else '' }}</textarea>
+            <label class="form-label fw-semibold">PDFs, manuales y fichas tecnicas</label>
+            <textarea class="form-control" name="pdfUrls" rows="3" placeholder="Una URL PDF por linea">{{ (product.pdfUrls | join('\n')) if product else '' }}</textarea>
             <input class="form-control mt-2" name="pdfFile" type="file" accept="application/pdf">
           </div>
         </div>
@@ -154,8 +249,8 @@
       <article class="panel product-form-panel">
         <div class="panel-header">
           <div>
-            <h2>Opciones tecnicas</h2>
-            <span>Variantes y especificaciones para venta asistida.</span>
+            <h2>Ficha tecnica y relaciones</h2>
+            <span>Opciones, especificaciones y SKUs complementarios.</span>
           </div>
         </div>
         <div class="row g-3">
@@ -165,8 +260,12 @@
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">Especificaciones</label>
-            <textarea class="form-control" name="specifications" rows="6" placeholder="Motor: 45cc&#10;Combustible: Gasolina&#10;Garantia: 6 meses">{% if product %}{% for key, value in product.specifications.items() %}{{ key }}: {{ value }}
+            <textarea class="form-control" name="specifications" rows="6" placeholder="Motor: 45cc&#10;Combustible: Gasolina&#10;Garantia: 6 meses">{% if product and product.specifications %}{% for key, value in product.specifications.items() %}{{ key }}: {{ value }}
 {% endfor %}{% endif %}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Productos relacionados por SKU</label>
+            <textarea class="form-control" name="relatedSkus" rows="3" placeholder="WUL-REP-CAD18&#10;WUL-ACE-2T">{{ (product.relatedSkus | join('\n')) if product else '' }}</textarea>
           </div>
         </div>
       </article>

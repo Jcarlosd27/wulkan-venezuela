@@ -59,6 +59,8 @@ STATUS_BADGES = {
     "critical": "text-bg-danger",
     "visible": "text-bg-success",
     "hidden": "text-bg-secondary",
+    "replenishment": "text-bg-warning",
+    "discontinued": "text-bg-dark",
 }
 
 

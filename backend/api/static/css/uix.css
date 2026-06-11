@@ -1089,7 +1089,8 @@ body {
   margin-top: 14px;
 }
 
-.seller-filter-panel {
+.seller-filter-panel,
+.product-filter-panel {
   border: 1px solid rgba(13, 110, 253, 0.08);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
@@ -1097,7 +1098,8 @@ body {
   box-shadow: 0 18px 45px rgba(17, 24, 39, 0.05);
 }
 
-.seller-filter-panel .form-label {
+.seller-filter-panel .form-label,
+.product-filter-panel .form-label {
   color: var(--wulkan-muted);
   font-size: 11px;
   font-weight: 850;
@@ -1797,6 +1799,52 @@ body {
   padding: 10px 12px;
 }
 
+.product-checks.vertical {
+  display: grid;
+  gap: 10px;
+}
+
+.product-panel,
+.product-chart {
+  overflow: hidden;
+}
+
+.product-table {
+  min-width: 1180px;
+}
+
+.product-stock-note,
+.product-detail-card {
+  border: 1px solid var(--wulkan-line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+}
+
+.product-stock-note span,
+.product-stock-note small,
+.product-detail-card span,
+.product-detail-card small {
+  display: block;
+  color: var(--wulkan-muted);
+  font-weight: 700;
+}
+
+.product-stock-note strong,
+.product-detail-card strong {
+  display: block;
+  margin: 3px 0;
+  color: var(--dash-text);
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.product-detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .product-form-actions {
   position: sticky;
   bottom: 0;
@@ -2076,7 +2124,8 @@ body {
   .dashboard-filter-grid,
   .admin-user-notice,
   .client-detail-grid,
-  .seller-detail-grid {
+  .seller-detail-grid,
+  .product-detail-grid {
     grid-template-columns: 1fr;
   }
 

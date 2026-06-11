@@ -104,6 +104,21 @@ CLIENT_STATUS_OPTIONS = [
     ("blocked_manual", "Bloqueado manual"),
     ("suspended", "Suspendido"),
 ]
+PRODUCT_STATUS_OPTIONS = [
+    ("active", "Activo"),
+    ("inactive", "Inactivo"),
+    ("out", "Agotado"),
+    ("replenishment", "En reposicion"),
+    ("hidden", "Oculto en app"),
+    ("discontinued", "Descontinuado"),
+]
+PRODUCT_TYPE_OPTIONS = [
+    ("machine", "Maquina"),
+    ("spare_part", "Repuesto"),
+    ("accessory", "Accesorio"),
+    ("service", "Servicio"),
+    ("consumable", "Consumible"),
+]
 CLIENT_TYPE_OPTIONS = [
     ("ferretero", "Ferretero"),
     ("distribuidor", "Distribuidor"),
@@ -343,7 +358,7 @@ ADMIN_MENU_GROUPS = [
         "label": "Catalogo",
         "icon": "bi-box-seam",
         "items": [
-            {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "product_delete"]},
+            {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "products_export", "product_duplicate", "product_delete"]},
             {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "category_delete"]},
             {"module": "media_library", "endpoint": "media_library", "label": "Biblioteca tecnica", "icon": "bi-folder2-open", "active": ["media_library", "media_library_import", "media_asset_delete"]},
             {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import"]},
@@ -448,13 +463,24 @@ IMPORT_TEMPLATE_GROUPS = [
                 "description": "Catalogo con SKU, precios, stock, galeria movil, PDFs y variantes.",
                 "columns": [
                     {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Codigo unico del producto."},
+                    {"name": "codigo_interno", "required": False, "example": "MOT-45-2026", "help": "Codigo interno administrativo o ERP."},
                     {"name": "nombre", "required": True, "example": "Motosierra Wulkan 45cc", "help": "Nombre visible comercial."},
                     {"name": "categoria", "required": True, "example": "Maquinaria y jardin", "help": "Familia del catalogo."},
+                    {"name": "subcategoria", "required": False, "example": "Motosierras", "help": "Linea interna dentro de la categoria."},
+                    {"name": "marca", "required": False, "example": "Wulkan", "help": "Marca comercial."},
+                    {"name": "modelo", "required": False, "example": "45CC", "help": "Modelo o referencia visible."},
+                    {"name": "unidad_venta", "required": False, "example": "unidad", "help": "Unidad, kit, caja, metro, litro, etc."},
+                    {"name": "descripcion_corta", "required": False, "example": "Equipo de corte para jardin y finca.", "help": "Resumen corto para listados."},
+                    {"name": "descripcion_larga", "required": False, "example": "Incluye espada, cadena y garantia Wulkan.", "help": "Detalle ampliado para ficha de producto."},
                     {"name": "precio_publico_usd", "required": True, "example": "185", "help": "Precio PVP en dolares."},
                     {"name": "precio_b2b_usd", "required": False, "example": "162", "help": "Precio ferretero."},
+                    {"name": "costo_referencial_usd", "required": False, "example": "120", "help": "Costo interno referencial. No se publica en app."},
+                    {"name": "margen_porcentaje", "required": False, "example": "25", "help": "Margen estimado administrativo."},
                     {"name": "stock", "required": False, "example": "12", "help": "Stock fisico inicial."},
+                    {"name": "stock_minimo", "required": False, "example": "3", "help": "Punto de alerta de reposicion."},
+                    {"name": "stock_maximo", "required": False, "example": "30", "help": "Stock objetivo o maximo."},
                     {"name": "descripcion", "required": False, "example": "Equipo para uso tecnico y jardin.", "help": "Descripcion app movil."},
-                    {"name": "tipo_producto", "required": False, "example": "machine", "help": "machine, spare_part, accessory."},
+                    {"name": "tipo_producto", "required": False, "example": "machine", "help": "machine, spare_part, accessory, service o consumable."},
                     {"name": "precio_anterior_usd", "required": False, "example": "210", "help": "Precio antes del descuento."},
                     {"name": "descuento_porcentaje", "required": False, "example": "12", "help": "Descuento visible."},
                     {"name": "tasa_usd_ves", "required": False, "example": "38.5", "help": "Referencia VES."},
@@ -463,9 +489,13 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "pdf_tecnicos", "required": False, "example": "https://cdn.wulkan/ficha.pdf", "help": "Fichas tecnicas."},
                     {"name": "variantes", "required": False, "example": "18 pulgadas|20 pulgadas", "help": "Opciones visibles."},
                     {"name": "especificaciones", "required": False, "example": "Motor:45cc|Garantia:6 meses", "help": "Formato clave:valor."},
+                    {"name": "skus_relacionados", "required": False, "example": "WUL-REP-CAD18|WUL-ACE-2T", "help": "Productos relacionados por SKU."},
                     {"name": "requiere_cotizacion", "required": False, "example": "no", "help": "si/no."},
                     {"name": "requiere_validacion_tecnica", "required": False, "example": "si", "help": "si/no."},
-                    {"name": "estado", "required": False, "example": "active", "help": "active, inactive o deleted."},
+                    {"name": "visible_app", "required": False, "example": "si", "help": "si/no para publicar en app movil."},
+                    {"name": "destacado", "required": False, "example": "si", "help": "si/no para destacar en app."},
+                    {"name": "oferta", "required": False, "example": "si", "help": "si/no para marcar como oferta."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active, inactive, out, replenishment, hidden o discontinued."},
                 ],
             },
             {
@@ -694,6 +724,10 @@ def client_type_label(value: str) -> str:
 
 def seller_status_label(value: str) -> str:
     return dict(SELLER_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
+def product_status_label(value: str) -> str:
+    return dict(PRODUCT_STATUS_OPTIONS).get(value, value or "Sin estado")
 
 
 def order_status_label(value: str) -> str:
@@ -1305,6 +1339,7 @@ def security_context():
         "collection_status_label": collection_status_label,
         "client_type_label": client_type_label,
         "seller_status_label": seller_status_label,
+        "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
     }
 
@@ -1840,15 +1875,51 @@ def mobile_seller_order_payload(order: dict, store: dict) -> dict:
 
 
 def enrich_product(product: dict) -> dict:
-    rate = float(product.get("exchangeRateUsdVes") or current_rate())
-    price = float(product.get("publicPriceUsd") or 0)
-    original_price = float(product.get("originalPriceUsd") or price)
-    discount = float(product.get("discountPercent") or 0)
+    rate = safe_float(product.get("exchangeRateUsdVes"), current_rate())
+    price = safe_float(product.get("publicPriceUsd"), 0)
+    original_price = safe_float(product.get("originalPriceUsd"), price)
+    discount = safe_float(product.get("discountPercent"), 0)
     enriched = dict(product)
+    image_urls = list(enriched.get("imageUrls") or [])
+    pdf_urls = list(enriched.get("pdfUrls") or [])
+    primary_image = enriched.get("imageUrl") or (image_urls[0] if image_urls else "")
+    if primary_image and primary_image not in image_urls:
+        image_urls.insert(0, primary_image)
+    description = (
+        enriched.get("description")
+        or enriched.get("shortDescription")
+        or enriched.get("longDescription")
+        or ""
+    )
+    cost = safe_float(enriched.get("costReferenceUsd"), 0)
     enriched["publicPriceVes"] = round(price * rate, 2)
     enriched["originalPriceUsd"] = original_price
-    enriched["hasDiscount"] = discount > 0 or original_price > price
+    enriched["discountPercent"] = max(0.0, min(discount, 100.0))
+    enriched["hasDiscount"] = enriched["discountPercent"] > 0 or original_price > price
     enriched["exchangeRateUsdVes"] = rate
+    enriched["description"] = description
+    enriched["shortDescription"] = enriched.get("shortDescription") or description[:140]
+    enriched["longDescription"] = enriched.get("longDescription") or description
+    enriched["brand"] = enriched.get("brand") or "Wulkan"
+    enriched["unitOfSale"] = enriched.get("unitOfSale") or "unidad"
+    enriched["imageUrl"] = primary_image
+    enriched["imageUrls"] = image_urls
+    enriched["pdfUrls"] = pdf_urls
+    enriched["galleryCount"] = len(image_urls)
+    enriched["pdfCount"] = len(pdf_urls)
+    enriched["mediaCount"] = len(image_urls) + len(pdf_urls)
+    enriched["statusLabel"] = product_status_label(enriched.get("status", "active"))
+    enriched["visibleInApp"] = bool(enriched.get("visibleInApp", enriched.get("status") == "active"))
+    if enriched.get("status") in {"inactive", "hidden", "discontinued"}:
+        enriched["visibleInApp"] = False
+    enriched["featured"] = bool(enriched.get("featured", False))
+    enriched["onSale"] = bool(enriched.get("onSale", enriched["hasDiscount"]))
+    enriched["requiresQuote"] = bool(enriched.get("requiresQuote", False))
+    enriched["requiresTechnicalValidation"] = bool(enriched.get("requiresTechnicalValidation", False))
+    if cost > 0 and price > 0 and not safe_float(enriched.get("marginPercent"), 0):
+        enriched["marginPercent"] = round(((price - cost) / price) * 100, 1)
+    else:
+        enriched["marginPercent"] = safe_float(enriched.get("marginPercent"), 0)
     return enriched
 
 
@@ -2290,6 +2361,18 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
         if public_price <= 0:
             bulk_error(result, row_number, f"SKU {sku} requiere precio_publico_usd mayor a 0.")
             continue
+        if original_price < 0 or b2b_price < 0:
+            bulk_error(result, row_number, f"SKU {sku}: precio anterior y precio B2B no pueden ser negativos.")
+            continue
+        discount = max(0.0, min(discount, 100.0))
+        status = row_value(row, "status", "estado", default=current.get("status", "active")) or "active"
+        if status not in {key for key, _label in PRODUCT_STATUS_OPTIONS}:
+            bulk_error(result, row_number, f"SKU {sku}: estado de producto no valido.")
+            continue
+        product_type = row_value(row, "productType", "tipo", "tipo_producto", default=current.get("productType", "machine")) or "machine"
+        if product_type not in {key for key, _label in PRODUCT_TYPE_OPTIONS}:
+            bulk_error(result, row_number, f"SKU {sku}: tipo de producto no valido.")
+            continue
         category = ensure_import_category(
             store,
             row_value(row, "categoryId", "categoria_id", "id_categoria"),
@@ -2321,40 +2404,89 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
         warn_invalid_urls(result, row_number, f"SKU {sku} galeria", gallery_images)
         warn_invalid_urls(result, row_number, f"SKU {sku} PDF tecnico", pdf_urls)
 
+        stock_quantity = parse_import_int(row_value(row, "stock", "stock_inicial", "cantidad"), int(current.get("stock") or 0))
+        minimum_stock = parse_import_int(
+            row_value(row, "minimumStock", "stock_minimo", "stock_min"),
+            int(current.get("minimumStock") or 0),
+        )
+        maximum_stock = parse_import_int(
+            row_value(row, "maximumStock", "stock_maximo", "stock_max"),
+            int(current.get("maximumStock") or 0),
+        )
+        cost_reference = parse_import_float(
+            row_value(row, "costReferenceUsd", "costo_referencial_usd", "costo_usd"),
+            float(current.get("costReferenceUsd") or 0),
+        )
+        margin_percent = parse_import_float(
+            row_value(row, "marginPercent", "margen", "margen_porcentaje"),
+            float(current.get("marginPercent") or 0),
+        )
+        if min(stock_quantity, minimum_stock, maximum_stock) < 0:
+            bulk_error(result, row_number, f"SKU {sku}: stock, stock_minimo y stock_maximo no pueden ser negativos.")
+            continue
+        if maximum_stock and minimum_stock and maximum_stock < minimum_stock:
+            bulk_error(result, row_number, f"SKU {sku}: stock_maximo no puede ser menor que stock_minimo.")
+            continue
+        if cost_reference < 0 or margin_percent < 0:
+            bulk_error(result, row_number, f"SKU {sku}: costo o margen no pueden ser negativos.")
+            continue
+
         payload = {
             "sku": sku,
+            "internalCode": row_value(row, "internalCode", "codigo_interno", default=current.get("internalCode", "")),
             "title": title,
+            "brand": row_value(row, "brand", "marca", default=current.get("brand", "Wulkan")) or "Wulkan",
+            "model": row_value(row, "model", "modelo", default=current.get("model", "")),
+            "unitOfSale": row_value(row, "unitOfSale", "unidad_venta", "unidad", default=current.get("unitOfSale", "unidad")) or "unidad",
+            "shortDescription": row_value(row, "shortDescription", "descripcion_corta", default=current.get("shortDescription", "")),
+            "longDescription": row_value(row, "longDescription", "descripcion_larga", default=current.get("longDescription", "")),
             "description": row_value(row, "description", "descripcion", default=current.get("description", "")),
-            "productType": row_value(row, "productType", "tipo", "tipo_producto", default=current.get("productType", "machine")) or "machine",
+            "productType": product_type,
             "categoryId": category["id"],
             "categoryName": category["name"],
+            "subCategory": row_value(row, "subCategory", "subcategoria", "sub_categoria", default=current.get("subCategory", "")),
             "publicPriceUsd": public_price,
             "originalPriceUsd": original_price or public_price,
             "discountPercent": discount,
             "b2bPriceUsd": b2b_price,
+            "costReferenceUsd": cost_reference,
+            "marginPercent": margin_percent,
             "exchangeRateUsdVes": parse_import_float(
                 row_value(row, "exchangeRateUsdVes", "tasa_usd_ves", "tasa"),
                 float(current.get("exchangeRateUsdVes") or current_rate()),
             ),
-            "stock": parse_import_int(row_value(row, "stock", "stock_inicial", "cantidad"), int(current.get("stock") or 0)),
+            "stock": stock_quantity,
+            "minimumStock": minimum_stock,
+            "maximumStock": maximum_stock,
             "reserved": int(current.get("reserved") or 0),
-            "status": row_value(row, "status", "estado", default=current.get("status", "active")) or "active",
+            "status": status,
             "imageUrl": primary_image,
             "imageUrls": gallery_images,
             "pdfUrls": pdf_urls,
             "variants": parse_import_list(row_value(row, "variants", "variantes", "tallas", "opciones")) or list(current.get("variants") or []),
             "specifications": parse_import_specs(row_value(row, "specifications", "especificaciones")) or dict(current.get("specifications") or {}),
+            "relatedSkus": parse_import_list(row_value(row, "relatedSkus", "skus_relacionados", "relacionados")) or list(current.get("relatedSkus") or []),
             "requiresQuote": parse_import_bool(row_value(row, "requiresQuote", "requiere_cotizacion"), bool(current.get("requiresQuote", False))),
             "requiresTechnicalValidation": parse_import_bool(
                 row_value(row, "requiresTechnicalValidation", "requiere_validacion_tecnica"),
                 bool(current.get("requiresTechnicalValidation", False)),
             ),
+            "visibleInApp": parse_import_bool(
+                row_value(row, "visibleInApp", "visible_app", "visible"),
+                bool(current.get("visibleInApp", status == "active")),
+            ),
+            "featured": parse_import_bool(row_value(row, "featured", "destacado"), bool(current.get("featured", False))),
+            "onSale": parse_import_bool(row_value(row, "onSale", "oferta"), bool(current.get("onSale", discount > 0))),
             "rotationLast30Days": parse_import_int(
                 row_value(row, "rotationLast30Days", "rotacion_30_dias", "rotacion"),
                 int(current.get("rotationLast30Days") or 0),
             ),
             "updatedAt": utc_now(),
         }
+        if payload["status"] in {"inactive", "hidden", "discontinued"}:
+            payload["visibleInApp"] = False
+        if not payload["description"]:
+            payload["description"] = payload["shortDescription"] or payload["longDescription"]
         if existing:
             payload["id"] = existing["id"]
             payload["createdAt"] = existing.get("createdAt", utc_now())
@@ -3373,15 +3505,20 @@ def enrich_inventory_product(product: dict, orders: list[dict]) -> dict:
     physical_stock = int(enriched.get("stock") or 0)
     committed = int(reserved_by_product.get(enriched["id"], 0))
     available = max(0, physical_stock - committed)
+    minimum_stock = max(0, safe_int(enriched.get("minimumStock"), 0))
     enriched["physicalStock"] = physical_stock
     enriched["reserved"] = committed
     enriched["availableStock"] = available
     enriched["committedStock"] = committed
     enriched["stockStatus"] = "out"
-    if available > 5:
-        enriched["stockStatus"] = "available"
-    elif available > 0:
+    if available <= 0 or enriched.get("status") == "out":
+        enriched["stockStatus"] = "out"
+    elif minimum_stock and available <= minimum_stock:
         enriched["stockStatus"] = "low"
+    elif available > 0:
+        enriched["stockStatus"] = "available"
+    if enriched.get("status") == "replenishment":
+        enriched["stockStatus"] = "replenishment"
     return enriched
 
 
@@ -3520,7 +3657,8 @@ def save_upload(file_storage, folder: str = "library") -> str:
 
 def product_payload(store: dict, existing: dict | None = None) -> dict:
     category_id = request.form.get("categoryId", "machinery-garden")
-    category = find_by_id(store["categories"], category_id) or store["categories"][0]
+    categories = store.get("categories") or [{"id": "uncategorized", "name": "Sin categoria"}]
+    category = find_by_id(categories, category_id) or categories[0]
     sku = request.form.get("sku", "").strip().upper()
     title = request.form.get("title", "").strip()
     primary_image = request.form.get("imageUrl", "").strip()
@@ -3543,31 +3681,54 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
         pdf_urls.insert(0, uploaded_pdf)
 
     now = utc_now()
+    visible_values = request.form.getlist("visibleInApp")
     payload = {
         "sku": sku,
+        "internalCode": request.form.get("internalCode", "").strip().upper(),
         "title": title,
+        "brand": request.form.get("brand", "Wulkan").strip() or "Wulkan",
+        "model": request.form.get("model", "").strip(),
+        "unitOfSale": request.form.get("unitOfSale", "unidad").strip() or "unidad",
+        "shortDescription": request.form.get("shortDescription", "").strip(),
+        "longDescription": request.form.get("longDescription", "").strip(),
         "description": request.form.get("description", "").strip(),
         "productType": request.form.get("productType", "machine"),
         "categoryId": category["id"],
         "categoryName": category["name"],
-        "publicPriceUsd": float(request.form.get("publicPriceUsd") or 0),
-        "originalPriceUsd": float(request.form.get("originalPriceUsd") or request.form.get("publicPriceUsd") or 0),
-        "discountPercent": float(request.form.get("discountPercent") or 0),
-        "b2bPriceUsd": float(request.form.get("b2bPriceUsd") or 0),
-        "exchangeRateUsdVes": float(request.form.get("exchangeRateUsdVes") or current_rate()),
-        "stock": int(request.form.get("stock") or 0),
-        "reserved": int(request.form.get("reserved") or (existing or {}).get("reserved") or 0),
+        "subCategory": request.form.get("subCategory", "").strip(),
+        "publicPriceUsd": safe_float(request.form.get("publicPriceUsd"), 0),
+        "originalPriceUsd": safe_float(
+            request.form.get("originalPriceUsd") or request.form.get("publicPriceUsd"),
+            0,
+        ),
+        "discountPercent": max(0.0, min(safe_float(request.form.get("discountPercent"), 0), 100.0)),
+        "b2bPriceUsd": safe_float(request.form.get("b2bPriceUsd"), 0),
+        "costReferenceUsd": safe_float(request.form.get("costReferenceUsd"), 0),
+        "marginPercent": safe_float(request.form.get("marginPercent"), 0),
+        "exchangeRateUsdVes": safe_float(request.form.get("exchangeRateUsdVes"), current_rate()),
+        "stock": safe_int(request.form.get("stock"), 0),
+        "minimumStock": safe_int(request.form.get("minimumStock"), 0),
+        "maximumStock": safe_int(request.form.get("maximumStock"), 0),
+        "reserved": safe_int(request.form.get("reserved") or (existing or {}).get("reserved"), 0),
         "status": request.form.get("status", "active"),
         "imageUrl": primary_image,
         "imageUrls": image_urls,
         "pdfUrls": pdf_urls,
         "variants": split_lines(request.form.get("variants", "")),
         "specifications": parse_specs(request.form.get("specifications", "")),
+        "relatedSkus": split_lines(request.form.get("relatedSkus", "")),
         "requiresQuote": request.form.get("requiresQuote") == "on",
         "requiresTechnicalValidation": request.form.get("requiresTechnicalValidation") == "on",
-        "rotationLast30Days": int(request.form.get("rotationLast30Days") or (existing or {}).get("rotationLast30Days") or 0),
+        "visibleInApp": "on" in visible_values if visible_values else bool((existing or {}).get("visibleInApp", True)),
+        "featured": request.form.get("featured") == "on",
+        "onSale": request.form.get("onSale") == "on",
+        "rotationLast30Days": safe_int(request.form.get("rotationLast30Days") or (existing or {}).get("rotationLast30Days"), 0),
         "updatedAt": now,
     }
+    if not payload["description"]:
+        payload["description"] = payload["shortDescription"] or payload["longDescription"]
+    if payload["status"] in {"inactive", "hidden", "discontinued"}:
+        payload["visibleInApp"] = False
     if existing is None:
         payload["id"] = next_id("prod", sku or title)
         payload["createdAt"] = now
@@ -3580,31 +3741,63 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
 def product_form_snapshot() -> dict:
     return {
         "sku": request.form.get("sku", "").strip().upper(),
+        "internalCode": request.form.get("internalCode", "").strip().upper(),
         "title": request.form.get("title", "").strip(),
+        "brand": request.form.get("brand", "Wulkan").strip(),
+        "model": request.form.get("model", "").strip(),
+        "unitOfSale": request.form.get("unitOfSale", "unidad").strip(),
+        "shortDescription": request.form.get("shortDescription", "").strip(),
+        "longDescription": request.form.get("longDescription", "").strip(),
         "description": request.form.get("description", "").strip(),
         "productType": request.form.get("productType", "machine"),
         "categoryId": request.form.get("categoryId", "machinery-garden"),
+        "subCategory": request.form.get("subCategory", "").strip(),
         "status": request.form.get("status", "active"),
         "publicPriceUsd": request.form.get("publicPriceUsd", ""),
         "originalPriceUsd": request.form.get("originalPriceUsd", ""),
         "discountPercent": request.form.get("discountPercent", 0),
         "b2bPriceUsd": request.form.get("b2bPriceUsd", ""),
+        "costReferenceUsd": request.form.get("costReferenceUsd", ""),
+        "marginPercent": request.form.get("marginPercent", ""),
         "exchangeRateUsdVes": request.form.get("exchangeRateUsdVes", current_rate()),
         "stock": request.form.get("stock", 0),
+        "minimumStock": request.form.get("minimumStock", 0),
+        "maximumStock": request.form.get("maximumStock", 0),
         "imageUrl": request.form.get("imageUrl", "").strip(),
         "imageUrls": split_lines(request.form.get("imageUrls", "")),
         "pdfUrls": split_lines(request.form.get("pdfUrls", "")),
         "variants": split_lines(request.form.get("variants", "")),
         "specifications": parse_specs(request.form.get("specifications", "")),
+        "relatedSkus": split_lines(request.form.get("relatedSkus", "")),
         "requiresQuote": request.form.get("requiresQuote") == "on",
         "requiresTechnicalValidation": request.form.get("requiresTechnicalValidation") == "on",
+        "visibleInApp": "on" in request.form.getlist("visibleInApp"),
+        "featured": request.form.get("featured") == "on",
+        "onSale": request.form.get("onSale") == "on",
     }
 
 
 def product_form_error(store: dict, existing: dict | None = None) -> str:
     sku = request.form.get("sku", "").strip().upper()
+    status = request.form.get("status", "active")
+    product_type = request.form.get("productType", "machine")
+    public_price = safe_float(request.form.get("publicPriceUsd"), 0)
+    b2b_price = safe_float(request.form.get("b2bPriceUsd"), 0)
+    original_price = safe_float(request.form.get("originalPriceUsd") or request.form.get("publicPriceUsd"), 0)
+    discount = safe_float(request.form.get("discountPercent"), 0)
+    stock = safe_int(request.form.get("stock"), 0)
+    minimum_stock = safe_int(request.form.get("minimumStock"), 0)
+    maximum_stock = safe_int(request.form.get("maximumStock"), 0)
+    cost = safe_float(request.form.get("costReferenceUsd"), 0)
+    margin = safe_float(request.form.get("marginPercent"), 0)
+    if not store.get("categories"):
+        return "Debes crear al menos una categoria antes de crear productos."
+    if not find_by_id(store.get("categories", []), request.form.get("categoryId", "")):
+        return "Selecciona una categoria valida para el producto."
     if not sku:
         return "El SKU es obligatorio para crear o editar productos."
+    if not request.form.get("title", "").strip():
+        return "El nombre comercial del producto es obligatorio."
 
     duplicated = any(
         product.get("sku", "").upper() == sku
@@ -3613,6 +3806,28 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
     )
     if duplicated:
         return f"El SKU {sku} ya existe en el catalogo."
+    if status not in {key for key, _label in PRODUCT_STATUS_OPTIONS}:
+        return "El estado del producto no es valido."
+    if product_type not in {key for key, _label in PRODUCT_TYPE_OPTIONS}:
+        return "El tipo de producto no es valido."
+    if public_price <= 0:
+        return "El precio publico USD debe ser mayor a 0."
+    if original_price < 0:
+        return "El precio anterior USD no puede ser negativo."
+    if b2b_price < 0:
+        return "El precio B2B no puede ser negativo."
+    if cost < 0:
+        return "El costo referencial no puede ser negativo."
+    if margin < 0:
+        return "El margen estimado no puede ser negativo."
+    if discount < 0 or discount > 100:
+        return "El descuento debe estar entre 0 y 100%."
+    if stock < 0:
+        return "El stock no puede ser negativo."
+    if minimum_stock < 0 or maximum_stock < 0:
+        return "El stock minimo o maximo no puede ser negativo."
+    if maximum_stock and minimum_stock and maximum_stock < minimum_stock:
+        return "El stock maximo no puede ser menor que el stock minimo."
 
     return ""
 
@@ -4153,6 +4368,94 @@ def assisted_order_page_context(store: dict, error: str = "") -> dict:
         "sale_type_options": SALE_TYPE_OPTIONS,
         "payment_terms": PAYMENT_TERM_OPTIONS,
         "error": error,
+    }
+
+
+def products_page_context(store: dict, error: str = "", include_bulk: bool = True) -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "category": request.args.get("category", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "stock": request.args.get("stock", "").strip(),
+        "visibility": request.args.get("visibility", "").strip(),
+    }
+    all_products = [
+        enrich_inventory_product(product, store.get("orders", []))
+        for product in store.get("products", [])
+    ]
+    products = all_products
+    if filters["q"]:
+        products = [
+            product
+            for product in products
+            if filters["q"] in " ".join(
+                [
+                    product.get("sku", ""),
+                    product.get("internalCode", ""),
+                    product.get("title", ""),
+                    product.get("brand", ""),
+                    product.get("model", ""),
+                    product.get("categoryName", ""),
+                    product.get("subCategory", ""),
+                    product.get("description", ""),
+                ]
+            ).lower()
+        ]
+    if filters["category"]:
+        products = [product for product in products if product.get("categoryId") == filters["category"]]
+    if filters["status"]:
+        products = [product for product in products if product.get("status") == filters["status"]]
+    if filters["stock"]:
+        products = [product for product in products if product.get("stockStatus") == filters["stock"]]
+    if filters["visibility"] == "visible":
+        products = [product for product in products if product.get("visibleInApp")]
+    elif filters["visibility"] == "hidden":
+        products = [product for product in products if not product.get("visibleInApp")]
+    elif filters["visibility"] == "featured":
+        products = [product for product in products if product.get("featured")]
+    elif filters["visibility"] == "offer":
+        products = [product for product in products if product.get("onSale") or product.get("hasDiscount")]
+    elif filters["visibility"] == "missing_media":
+        products = [product for product in products if not product.get("imageUrl") and not product.get("imageUrls")]
+
+    metrics = {
+        "products": len(all_products),
+        "active": sum(1 for product in all_products if product.get("status") == "active"),
+        "visible": sum(1 for product in all_products if product.get("visibleInApp")),
+        "featured": sum(1 for product in all_products if product.get("featured")),
+        "offers": sum(1 for product in all_products if product.get("onSale") or product.get("hasDiscount")),
+        "low_stock": sum(1 for product in all_products if product.get("stockStatus") in {"low", "out", "replenishment"}),
+        "missing_media": sum(1 for product in all_products if not product.get("imageUrl") and not product.get("imageUrls")),
+        "catalog_value": round(sum(float(product.get("publicPriceUsd") or 0) * int(product.get("availableStock") or 0) for product in all_products), 2),
+    }
+    return {
+        "products": sorted(products, key=lambda item: (item.get("categoryName", ""), item.get("title", ""))),
+        "all_products": all_products,
+        "categories": sorted(store.get("categories", []), key=lambda item: item.get("name", "")),
+        "filters": filters,
+        "metrics": metrics,
+        "product_status_options": PRODUCT_STATUS_OPTIONS,
+        "product_type_options": PRODUCT_TYPE_OPTIONS,
+        "stock_status_options": [
+            ("available", "Disponible"),
+            ("low", "Bajo"),
+            ("out", "Agotado"),
+            ("replenishment", "Reposicion"),
+        ],
+        "product_charts": {
+            "stock": graphify_from_pairs(
+                [(product.get("sku", ""), float(product.get("availableStock") or 0)) for product in products],
+                6,
+            ),
+            "media": graphify_from_pairs(
+                [(product.get("sku", ""), float(product.get("mediaCount") or 0)) for product in products],
+                6,
+            ),
+        },
+        "can_create_products": can_module_action("products", "create"),
+        "can_edit_products": can_module_action("products", "edit"),
+        "error": error,
+        "bulk_result": consume_bulk_result("products") if include_bulk and not error else None,
     }
 
 
@@ -4734,15 +5037,73 @@ def client_delete(client_id: str):
 @require_roles(*roles_for_action("products", "view"))
 def products():
     store = load_store()
-    query = request.args.get("q", "").strip().lower()
-    products = [enrich_inventory_product(product, store["orders"]) for product in store["products"]]
-    if query:
-        products = [
-            product
-            for product in products
-            if query in product.get("title", "").lower() or query in product.get("sku", "").lower()
-        ]
-    return render_template("products.html", products=products, query=query, bulk_result=consume_bulk_result("products"))
+    return render_template("products.html", **products_page_context(store))
+
+
+@app.get("/products/export")
+@require_roles(*roles_for_action("products", "export"))
+def products_export():
+    store = load_store()
+    context = products_page_context(store, include_bulk=False)
+    output = io.StringIO()
+    fieldnames = [
+        "sku",
+        "codigo_interno",
+        "nombre",
+        "categoria",
+        "subcategoria",
+        "marca",
+        "modelo",
+        "tipo_producto",
+        "unidad_venta",
+        "precio_publico_usd",
+        "precio_b2b_usd",
+        "precio_anterior_usd",
+        "descuento_porcentaje",
+        "stock_fisico",
+        "stock_disponible",
+        "stock_minimo",
+        "estado",
+        "visible_app",
+        "destacado",
+        "oferta",
+        "imagenes",
+        "pdfs",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for product in context["products"]:
+        writer.writerow(
+            {
+                "sku": product.get("sku", ""),
+                "codigo_interno": product.get("internalCode", ""),
+                "nombre": product.get("title", ""),
+                "categoria": product.get("categoryName", ""),
+                "subcategoria": product.get("subCategory", ""),
+                "marca": product.get("brand", ""),
+                "modelo": product.get("model", ""),
+                "tipo_producto": product.get("productType", ""),
+                "unidad_venta": product.get("unitOfSale", ""),
+                "precio_publico_usd": product.get("publicPriceUsd", 0),
+                "precio_b2b_usd": product.get("b2bPriceUsd", 0),
+                "precio_anterior_usd": product.get("originalPriceUsd", 0),
+                "descuento_porcentaje": product.get("discountPercent", 0),
+                "stock_fisico": product.get("physicalStock", 0),
+                "stock_disponible": product.get("availableStock", 0),
+                "stock_minimo": product.get("minimumStock", 0),
+                "estado": product.get("status", ""),
+                "visible_app": "si" if product.get("visibleInApp") else "no",
+                "destacado": "si" if product.get("featured") else "no",
+                "oferta": "si" if product.get("onSale") or product.get("hasDiscount") else "no",
+                "imagenes": "|".join(product.get("imageUrls") or []),
+                "pdfs": "|".join(product.get("pdfUrls") or []),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=productos_wulkan.csv"},
+    )
 
 
 @app.post("/products/import")
@@ -4761,6 +5122,8 @@ def product_new():
             return render_template(
                 "product_form.html",
                 categories=store["categories"],
+                product_status_options=PRODUCT_STATUS_OPTIONS,
+                product_type_options=PRODUCT_TYPE_OPTIONS,
                 rate=current_rate(),
                 product=product_form_snapshot(),
                 mode="Crear",
@@ -4769,13 +5132,23 @@ def product_new():
 
         product = product_payload(store)
         store["products"].append(product)
-        record_audit_event(store, "create", "product", product["id"], f"Producto creado: {product['sku']}.")
+        record_change_event(
+            store,
+            "create",
+            "product",
+            product["id"],
+            f"Producto creado: {product['sku']}.",
+            None,
+            product,
+        )
         save_store(store)
         return redirect(url_for("products"))
 
     return render_template(
         "product_form.html",
         categories=store["categories"],
+        product_status_options=PRODUCT_STATUS_OPTIONS,
+        product_type_options=PRODUCT_TYPE_OPTIONS,
         rate=current_rate(),
         product=None,
         mode="Crear",
@@ -4800,6 +5173,8 @@ def product_edit(product_id: str):
             return render_template(
                 "product_form.html",
                 categories=store["categories"],
+                product_status_options=PRODUCT_STATUS_OPTIONS,
+                product_type_options=PRODUCT_TYPE_OPTIONS,
                 rate=current_rate(),
                 product=snapshot,
                 mode="Editar",
@@ -4824,11 +5199,60 @@ def product_edit(product_id: str):
     return render_template(
         "product_form.html",
         categories=store["categories"],
+        product_status_options=PRODUCT_STATUS_OPTIONS,
+        product_type_options=PRODUCT_TYPE_OPTIONS,
         rate=current_rate(),
         product=enrich_product(product),
         mode="Editar",
         error="",
     )
+
+
+@app.post("/products/<product_id>/duplicate")
+@require_roles(*roles_for_action("products", "create"))
+def product_duplicate(product_id: str):
+    store = load_store()
+    product = find_by_id(store.get("products", []), product_id)
+    if not product:
+        return redirect(url_for("products"))
+    existing_skus = {item.get("sku", "").upper() for item in store.get("products", [])}
+    base_sku = f"{product.get('sku', 'WUL-PROD').upper()}-COPY"
+    new_sku = base_sku
+    suffix = 2
+    while new_sku in existing_skus:
+        new_sku = f"{base_sku}-{suffix}"
+        suffix += 1
+    now = utc_now()
+    duplicate = copy.deepcopy(product)
+    duplicate.update(
+        {
+            "id": next_id("prod", new_sku),
+            "sku": new_sku,
+            "internalCode": "",
+            "title": f"{product.get('title', 'Producto')} copia",
+            "status": "hidden",
+            "visibleInApp": False,
+            "featured": False,
+            "onSale": bool(product.get("onSale", False)),
+            "stock": 0,
+            "reserved": 0,
+            "rotationLast30Days": 0,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )
+    store.setdefault("products", []).append(duplicate)
+    record_change_event(
+        store,
+        "duplicate",
+        "product",
+        duplicate["id"],
+        f"Producto duplicado desde {product.get('sku', product_id)} hacia {new_sku}.",
+        product,
+        duplicate,
+    )
+    save_store(store)
+    return redirect(url_for("product_edit", product_id=duplicate["id"]))
 
 
 @app.post("/products/<product_id>/delete")
@@ -6260,12 +6684,20 @@ def api_products():
         {
             "id": product["id"],
             "sku": product["sku"],
+            "internalCode": product.get("internalCode", ""),
             "name": product["title"],
             "title": product["title"],
             "description": product.get("description", ""),
+            "shortDescription": product.get("shortDescription", ""),
+            "longDescription": product.get("longDescription", ""),
+            "brand": product.get("brand", "Wulkan"),
+            "model": product.get("model", ""),
+            "unitOfSale": product.get("unitOfSale", "unidad"),
             "productType": product.get("productType", "machine"),
+            "categoryId": product.get("categoryId", ""),
             "verticalName": product.get("categoryName", ""),
             "categoryName": product.get("categoryName", ""),
+            "subCategory": product.get("subCategory", ""),
             "publicPriceUsd": float(product.get("publicPriceUsd") or 0),
             "originalPriceUsd": float(product.get("originalPriceUsd") or product.get("publicPriceUsd") or 0),
             "discountPercent": float(product.get("discountPercent") or 0),
@@ -6283,9 +6715,13 @@ def api_products():
             "pdfUrls": product.get("pdfUrls", []),
             "variants": product.get("variants", []),
             "specifications": product.get("specifications", {}),
+            "relatedSkus": product.get("relatedSkus", []),
+            "featured": bool(product.get("featured")),
+            "onSale": bool(product.get("onSale") or product.get("hasDiscount")),
+            "visibleInApp": bool(product.get("visibleInApp")),
         }
         for product in [enrich_inventory_product(item, store.get("orders", [])) for item in store["products"]]
-        if product.get("status") == "active"
+        if product.get("status") == "active" and product.get("visibleInApp")
     ]
     return jsonify({"items": products})
 

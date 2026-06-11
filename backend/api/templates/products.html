@@ -1,53 +1,191 @@
 {% extends "base.html" %}
 {% set heading = "Productos" %}
-{% set description = "Catalogo ecommerce para venta directa, B2B y sincronizacion con Android." %}
+{% set description = "Catalogo ecommerce sincronizado con Android: precios, stock, media, PDFs y publicacion." %}
+{% set stock_label_map = {"available": "Disponible", "low": "Bajo", "out": "Agotado", "replenishment": "Reposicion"} %}
+
+{% macro product_graph(title, chart) -%}
+<article class="panel product-chart">
+  <div class="panel-header">
+    <h2>{{ title }}</h2>
+    <span>Graphify</span>
+  </div>
+  {% if chart.values %}
+  <div
+    class="graphify-bars"
+    data-labels='{{ chart["labels"] | tojson }}'
+    data-values='{{ chart["values"] | tojson }}'
+  ></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-bar-chart"></i></div>
+    <strong>Sin datos</strong>
+    <span>Los indicadores aparecen cuando existan productos reales.</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
 
 {% block top_action %}
 <div class="d-flex flex-wrap gap-2">
+  {% if can_module_action('products', 'export') %}
+  <a class="btn btn-light" href="{{ url_for('products_export', **request.args.to_dict()) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+  {% endif %}
+  {% if can_module_action('products', 'import') %}
   <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#productsImportModal">
     <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
   </button>
+  {% endif %}
+  {% if can_create_products %}
   <a class="btn btn-primary" href="{{ url_for('product_new') }}"><i class="bi bi-plus-lg"></i> Crear producto</a>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block content %}
 {% include "partials/bulk_import_result.html" %}
 
-<section class="panel">
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<section class="row g-3 mb-3">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-box-seam"></i></div>
+      <span>Productos</span>
+      <strong>{{ metrics.products }}</strong>
+      <em>Total</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-phone"></i></div>
+      <span>En app</span>
+      <strong>{{ metrics.visible }}</strong>
+      <em>{{ metrics.active }} activos</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-star"></i></div>
+      <span>Destacados</span>
+      <strong>{{ metrics.featured }}</strong>
+      <em>Home</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-tags"></i></div>
+      <span>Ofertas</span>
+      <strong>{{ metrics.offers }}</strong>
+      <em>Descuento</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <span>Stock alerta</span>
+      <strong>{{ metrics.low_stock }}</strong>
+      <em>Minimo</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+      <span>Valor disponible</span>
+      <strong>{{ money_usd(metrics.catalog_value) }}</strong>
+      <em>Retail</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel product-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label">Buscar producto</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="SKU, nombre, modelo, categoria o descripcion">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Categoria</label>
+      <select class="form-select" name="category">
+        <option value="">Todas</option>
+        {% for category in categories %}
+        <option value="{{ category.id }}" {% if filters.category == category.id %}selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in product_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Stock</label>
+      <select class="form-select" name="stock">
+        <option value="">Todos</option>
+        {% for value, label in stock_status_options %}
+        <option value="{{ value }}" {% if filters.stock == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Publicacion</label>
+      <select class="form-select" name="visibility">
+        <option value="">Todas</option>
+        <option value="visible" {% if filters.visibility == 'visible' %}selected{% endif %}>Visible en app</option>
+        <option value="hidden" {% if filters.visibility == 'hidden' %}selected{% endif %}>Oculto</option>
+        <option value="featured" {% if filters.visibility == 'featured' %}selected{% endif %}>Destacado</option>
+        <option value="offer" {% if filters.visibility == 'offer' %}selected{% endif %}>Oferta</option>
+        <option value="missing_media" {% if filters.visibility == 'missing_media' %}selected{% endif %}>Sin imagen</option>
+      </select>
+    </div>
+    <div class="col-12 d-flex justify-content-end gap-2">
+      <a class="btn btn-light" href="{{ url_for('products') }}"><i class="bi bi-x-lg"></i> Limpiar</a>
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-7">
+    {{ product_graph("Stock disponible por SKU", product_charts.stock) }}
+  </div>
+  <div class="col-12 col-xl-5">
+    {{ product_graph("Media por producto", product_charts.media) }}
+  </div>
+</section>
+
+<section class="panel product-panel">
   <div class="panel-header">
     <div>
       <h2>Catalogo Wulkan</h2>
-      <span>Productos publicados para Android y venta final</span>
+      <span>Productos que alimentan app movil, ordenes, stock y cotizacion comercial.</span>
     </div>
-    <div class="d-flex align-items-center gap-2">
-      {% if query %}
-      <a class="badge rounded-pill text-bg-light text-decoration-none" href="{{ url_for('products') }}">
-        <i class="bi bi-x-lg"></i> {{ query }}
-      </a>
-      {% endif %}
-      <span class="badge text-bg-primary">{{ products | length }} registros</span>
-    </div>
+    <span>{{ products | length }} registros</span>
   </div>
-  <form class="module-search" method="get">
-    <i class="bi bi-search"></i>
-    <input name="q" value="{{ query }}" placeholder="Buscar producto o SKU">
-    <button class="btn btn-sm btn-outline-primary" type="submit">Filtrar</button>
-    {% if query %}
-    <a class="btn btn-sm btn-light" href="{{ url_for('products') }}"><i class="bi bi-x-lg"></i></a>
-    {% endif %}
-  </form>
   <div class="table-responsive">
-    <table class="table align-middle">
+    <table class="table align-middle product-table">
       <thead>
         <tr>
           <th>Producto</th>
           <th>Categoria</th>
           <th>Precio</th>
-          <th>Descuento</th>
-          <th>Bolivares</th>
           <th>Stock</th>
-          <th>Estado</th>
+          <th>Media</th>
+          <th>Publicacion</th>
+          <th>Comercial</th>
           <th class="text-end">Acciones</th>
         </tr>
       </thead>
@@ -59,41 +197,70 @@
               <span class="sku-badge">{{ product.sku }}</span>
               <div>
                 <strong>{{ product.title }}</strong>
-                <small>{{ product.description }}</small>
+                <small>{{ product.internalCode or product.brand }}{% if product.model %} - {{ product.model }}{% endif %}</small>
+                <small>{{ product.shortDescription or product.description or 'Sin descripcion comercial' }}</small>
               </div>
             </div>
           </td>
-          <td>{{ product.categoryName }}</td>
+          <td>
+            <strong class="d-block">{{ product.categoryName or 'Sin categoria' }}</strong>
+            <small class="text-secondary">{{ product.subCategory or product.productType }}</small>
+          </td>
           <td>
             <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
-            <small class="d-block text-secondary">
-              {% if product.hasDiscount %}<span class="text-decoration-line-through">{{ money_usd(product.originalPriceUsd) }}</span> / {% endif %}
-              B2B {{ money_usd(product.b2bPriceUsd) }}
-            </small>
+            <small class="d-block text-secondary">B2B {{ money_usd(product.b2bPriceUsd) }}</small>
+            <small class="d-block text-secondary">{{ usd_to_ves(product.publicPriceUsd, product.exchangeRateUsdVes) }}</small>
           </td>
           <td>
-            {% if product.discountPercent > 0 %}
-            <span class="badge text-bg-danger">{{ product.discountPercent }}%</span>
+            <span class="badge {{ product.stockStatus | badge_class }}">{{ stock_label_map.get(product.stockStatus, product.stockStatus) }}</span>
+            <strong class="d-block mt-1">{{ product.availableStock }} disp.</strong>
+            <small class="d-block text-secondary">{{ product.physicalStock }} fisico / {{ product.committedStock }} reservado</small>
+          </td>
+          <td>
+            <strong>{{ product.galleryCount }} img</strong>
+            <small class="d-block text-secondary">{{ product.pdfCount }} PDF</small>
+            {% if not product.imageUrl %}
+            <span class="badge text-bg-warning mt-1">Sin principal</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {{ product.status | badge_class }}">{{ product.statusLabel }}</span>
+            {% if product.visibleInApp %}
+            <span class="badge text-bg-success d-block mt-1">Visible app</span>
             {% else %}
-            <span class="text-secondary">Sin oferta</span>
+            <span class="badge text-bg-secondary d-block mt-1">Oculto app</span>
             {% endif %}
           </td>
-          <td>{{ usd_to_ves(product.publicPriceUsd, product.exchangeRateUsdVes) }}</td>
           <td>
-            <span class="badge {% if product.availableStock <= 0 %}text-bg-danger{% elif product.availableStock <= 5 %}text-bg-warning{% else %}text-bg-success{% endif %}">
-              {{ product.availableStock }} disp.
-            </span>
-            {% if product.committedStock %}
-            <small class="d-block text-secondary">{{ product.committedStock }} comprometidas</small>
+            {% if product.hasDiscount %}
+            <span class="badge text-bg-danger">{{ product.discountPercent }}% off</span>
+            {% else %}
+            <span class="badge text-bg-light">Sin oferta</span>
+            {% endif %}
+            {% if product.featured %}
+            <span class="badge text-bg-primary d-block mt-1">Destacado</span>
+            {% endif %}
+            {% if product.requiresTechnicalValidation %}
+            <span class="badge text-bg-warning d-block mt-1">Validacion tecnica</span>
             {% endif %}
           </td>
-          <td><span class="badge {{ product.status | badge_class }}">{{ product.status }}</span></td>
           <td class="text-end">
             <div class="d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#productDetail{{ loop.index }}">
+                <i class="bi bi-eye"></i>
+              </button>
+              {% if can_edit_products %}
               <a class="btn btn-sm btn-outline-dark" href="{{ url_for('product_edit', product_id=product.id) }}">
                 <i class="bi bi-pencil"></i>
               </a>
-              {% if can_delete_data() %}
+              {% endif %}
+              {% if can_module_action('products', 'create') %}
+              <form method="post" action="{{ url_for('product_duplicate', product_id=product.id) }}">
+                {{ csrf_field() }}
+                <button class="btn btn-sm btn-outline-primary" type="submit" title="Duplicar como borrador oculto"><i class="bi bi-copy"></i></button>
+              </form>
+              {% endif %}
+              {% if can_module_action('products', 'delete') %}
               <form method="post" action="{{ url_for('product_delete', product_id=product.id) }}">
                 {{ csrf_field() }}
                 <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
@@ -106,9 +273,9 @@
         <tr>
           <td colspan="8">
             <div class="empty-state compact">
-              <div class="empty-icon"><i class="bi bi-search"></i></div>
-              <strong>No hay productos para esta busqueda</strong>
-              <span>Prueba con otro nombre comercial o SKU dentro del filtro del catalogo.</span>
+              <div class="empty-icon"><i class="bi bi-box-seam"></i></div>
+              <strong>Sin productos registrados</strong>
+              <span>Crea productos manualmente o importa la plantilla oficial para poblar el catalogo real.</span>
             </div>
           </td>
         </tr>
@@ -118,10 +285,72 @@
   </div>
 </section>
 
+{% for product in products %}
+<div class="modal fade" id="productDetail{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">{{ product.title }}</h2>
+          <p class="mb-0 text-secondary">{{ product.sku }}{% if product.internalCode %} - {{ product.internalCode }}{% endif %}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="product-detail-grid">
+          <div class="product-detail-card">
+            <span>Publicacion</span>
+            <strong>{{ product.statusLabel }}</strong>
+            <small>{{ 'Visible en app movil' if product.visibleInApp else 'No publicado en app movil' }}</small>
+          </div>
+          <div class="product-detail-card">
+            <span>Precios</span>
+            <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
+            <small>B2B {{ money_usd(product.b2bPriceUsd) }} / {{ usd_to_ves(product.publicPriceUsd, product.exchangeRateUsdVes) }}</small>
+          </div>
+          <div class="product-detail-card">
+            <span>Inventario</span>
+            <strong>{{ product.availableStock }} disponibles</strong>
+            <small>{{ product.physicalStock }} fisico, {{ product.committedStock }} reservado, minimo {{ product.minimumStock }}</small>
+          </div>
+          <div class="product-detail-card">
+            <span>Media</span>
+            <strong>{{ product.galleryCount }} imagenes</strong>
+            <small>{{ product.pdfCount }} PDFs tecnicos</small>
+          </div>
+        </div>
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-lg-6">
+            <h3 class="client-detail-title">Descripcion</h3>
+            <p class="text-secondary mb-0">{{ product.longDescription or product.description or 'Sin descripcion cargada.' }}</p>
+          </div>
+          <div class="col-12 col-lg-6">
+            <h3 class="client-detail-title">Especificaciones</h3>
+            <dl class="detail-list">
+              {% for key, value in product.specifications.items() %}
+              <div><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
+              {% else %}
+              <div><dt>Ficha</dt><dd>Sin especificaciones</dd></div>
+              {% endfor %}
+            </dl>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        {% if can_edit_products %}
+        <a class="btn btn-primary" href="{{ url_for('product_edit', product_id=product.id) }}"><i class="bi bi-pencil"></i> Editar producto</a>
+        {% endif %}
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
 {% set bulk_modal_id = "productsImportModal" %}
 {% set bulk_action = url_for("products_import") %}
 {% set bulk_title = "Importar productos" %}
-{% set bulk_help = "Crea o actualiza productos por SKU, incluyendo precios, stock inicial, categorias e imagenes para carrusel movil." %}
-{% set bulk_columns = ["sku", "nombre", "categoria", "precio_publico_usd", "precio_b2b_usd", "stock", "imagenes", "pdfs", "variantes", "especificaciones"] %}
+{% set bulk_help = "Crea o actualiza productos por SKU con precios, stock, categorias, galeria, PDFs y publicacion movil." %}
+{% set bulk_columns = ["sku", "codigo_interno", "nombre", "categoria", "subcategoria", "marca", "modelo", "precio_publico_usd", "precio_b2b_usd", "stock", "stock_minimo", "imagenes", "pdf_tecnicos", "visible_app", "estado"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
