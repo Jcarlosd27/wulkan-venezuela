@@ -13,7 +13,7 @@
 - [x] Fase 1.7 - Categorias: CRUD profesional con slug, imagen, icono, orden, jerarquia, visibilidad app, import/export, borrado seguro y API movil filtrada por categorias activas.
 - [x] Fase 1.8 - Inventario / Stock: fisico, reservado, disponible real, minimo/maximo, reposicion, ubicacion, ultimo movimiento, importacion con preview, export CSV, filtros y trazabilidad before/after.
 - [x] Fase 1.9 - Ordenes: filtros operativos, export CSV, detalle con productos/abonos/historial, estados con motivo obligatorio para rechazo/anulacion, trazabilidad credito-stock-comision y campos de despacho.
-- [ ] Fase 1.10 - Credito B2B.
+- [x] Fase 1.10 - Credito B2B: submodulos de lineas, vencimientos e historial; filtros compactos; Graphify de estado/riesgo; export CSV; score, riesgo, deuda vigente/vencida, ultimo pago, promedio de pago, observacion de gerencia y decisiones completas con auditoria.
 - [ ] Fase 1.11 - Cobranza.
 - [ ] Fase 1.12 - Despacho / Logistica.
 - [ ] Fase 1.13 - Cotizaciones.
@@ -646,6 +646,21 @@ El crédito debe ser un módulo de riesgo comercial.
 * Ver deuda.
 * Ver pagos.
 * Ver órdenes abiertas.
+
+---
+
+### Check implementado
+
+* [x] Lineas de credito separadas de vencimientos e historial.
+* [x] Filtros por cliente/RIF/email, vendedor, estado crediticio, cobranza y riesgo.
+* [x] KPIs de cupo aprobado, comprometido, disponible, deuda vigente, deuda vencida, solicitudes y score promedio.
+* [x] Graphify compacto por estado crediticio y nivel de riesgo.
+* [x] Export CSV de lineas, vencimientos e historial de abonos externos.
+* [x] Decisiones de credito: evaluacion, aprobacion, rechazo, suspension, bloqueo por mora, bloqueo por exceso, reactivacion y ajuste de cupo/plazo.
+* [x] Observacion de gerencia obligatoria para rechazo, suspension y bloqueo.
+* [x] Trazabilidad before/after en auditoria para cada decision.
+* [x] Ficha de cliente e importacion Excel/CSV soportan score, riesgo, estado, cupo, deuda manual y observacion.
+* [x] API movil expone estado, score, riesgo, disponible, deuda vigente/vencida y ultimo pago para ferretero/vendedor.
 
 ---
 

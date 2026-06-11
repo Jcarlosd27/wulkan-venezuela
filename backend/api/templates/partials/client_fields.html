@@ -193,11 +193,14 @@
         <label class="form-label fw-semibold">Estado credito</label>
         {% set selected_credit_status = client.creditRequestStatus if client is defined else 'none' %}
         <select class="form-select" name="creditRequestStatus">
-          <option value="none" {% if selected_credit_status == 'none' %}selected{% endif %}>Sin solicitud</option>
-          <option value="pending" {% if selected_credit_status == 'pending' %}selected{% endif %}>Solicitado</option>
-          <option value="approved" {% if selected_credit_status == 'approved' %}selected{% endif %}>Aprobado</option>
-          <option value="rejected" {% if selected_credit_status == 'rejected' %}selected{% endif %}>Rechazado</option>
+          {% for value, label in credit_status_options %}
+          <option value="{{ value }}" {% if selected_credit_status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Credito solicitado USD</label>
+        <input class="form-control" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Limite credito USD</label>
@@ -252,6 +255,10 @@
         </select>
       </div>
       <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Score interno</label>
+        <input class="form-control" name="creditScore" inputmode="numeric" value="{{ client.creditScore if client is defined else 0 }}">
+      </div>
+      <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Disponible calculado</label>
         <input class="form-control" readonly value="{{ money_usd(client.creditAvailableUsd) if client is defined else money_usd(0) }}">
       </div>
@@ -262,6 +269,10 @@
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Aprobado por</label>
         <input class="form-control" readonly value="{{ client.creditApprovedBy if client is defined else '' }}">
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Observacion de gerencia</label>
+        <textarea class="form-control" name="creditManagerNote" rows="2" placeholder="Motivo comercial, restriccion de cupo o condicion especial">{{ client.creditManagerNote if client is defined else '' }}</textarea>
       </div>
       <div class="col-12">
         <label class="form-label fw-semibold">Notas internas</label>

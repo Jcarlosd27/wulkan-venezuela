@@ -2,6 +2,14 @@
 {% set heading = "Vencimientos B2B" %}
 {% set description = "Ordenes a credito, linea aprobada y saldos pendientes por cobrar." %}
 
+{% block page_actions %}
+{% if can_export_credit %}
+<a class="btn btn-light" href="{{ url_for('credit_due_export', due=filters.due) }}">
+  <i class="bi bi-download"></i> Exportar CSV
+</a>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <section class="row g-3 mb-3">
   <div class="col-12 col-md-4">
@@ -32,6 +40,23 @@
 
 {% include "partials/credit_subnav.html" %}
 
+<form class="seller-filter-panel mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label">Estado de vencimiento</label>
+      <select class="form-select" name="due">
+        <option value="">Todos</option>
+        {% for value, label in due_status_options %}
+        <option value="{{ value }}" {% if filters.due == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </div>
+</form>
+
 <section class="panel category-panel">
   <div class="panel-header">
     <div>
@@ -57,7 +82,7 @@
         {% for order in due_orders %}
         <tr>
           <td>
-            <span class="badge {{ order.dueStatus | badge_class }}">{{ order.dueStatus }}</span>
+            <span class="badge {{ order.dueStatus | badge_class }}">{{ due_status_label(order.dueStatus) }}</span>
             <small class="d-block text-secondary">{{ order.dueDate or 'Sin fecha' }}</small>
           </td>
           <td><strong>{{ order.orderId }}</strong></td>

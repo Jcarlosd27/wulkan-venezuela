@@ -376,7 +376,7 @@
 {% set bulk_action = url_for("clients_import") %}
 {% set bulk_title = "Importar clientes ferreteros" %}
 {% set bulk_help = "Crea o actualiza clientes B2B, asignacion de vendedor, direcciones, contactos, condiciones comerciales y solicitudes de credito." %}
-{% set bulk_columns = ["cliente", "email", "rif", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "cupo_usd", "plazos"] %}
+{% set bulk_columns = ["cliente", "email", "rif", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "estado_credito", "credito_solicitado_usd", "cupo_usd", "dias_credito", "score_credito", "observacion_gerencia"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 

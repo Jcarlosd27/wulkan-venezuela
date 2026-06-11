@@ -197,6 +197,26 @@ CREDIT_RISK_OPTIONS = [
     ("high", "Alto"),
     ("critical", "Critico"),
 ]
+CREDIT_REQUEST_STATUS_OPTIONS = [
+    ("none", "Sin credito"),
+    ("pending", "Credito solicitado"),
+    ("review", "En evaluacion"),
+    ("approved", "Aprobado"),
+    ("rejected", "Rechazado"),
+    ("suspended", "Suspendido"),
+    ("blocked_debt", "Bloqueado por mora"),
+    ("blocked_limit", "Bloqueado por exceso de cupo"),
+]
+CREDIT_DECISION_OPTIONS = [
+    ("review", "Pasar a evaluacion"),
+    ("approved", "Aprobar credito"),
+    ("rejected", "Rechazar solicitud"),
+    ("suspended", "Suspender credito"),
+    ("blocked_debt", "Bloquear por mora"),
+    ("blocked_limit", "Bloquear por exceso de cupo"),
+    ("reactivate", "Reactivar linea"),
+    ("adjust", "Ajustar cupo/condicion"),
+]
 SELLER_STATUS_OPTIONS = [
     ("active", "Activo"),
     ("inactive", "Inactivo"),
@@ -490,9 +510,15 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "estado", "required": False, "example": "active", "help": "active, prospect, review, inactive, suspended o bloqueos."},
                     {"name": "estado_cobranza", "required": False, "example": "without_debt", "help": "without_debt, current, due_soon, overdue, promise o blocked."},
                     {"name": "riesgo_credito", "required": False, "example": "low", "help": "low, medium, high o critical."},
+                    {"name": "score_credito", "required": False, "example": "82", "help": "Score interno de 0 a 100. Si viene vacio se calcula."},
+                    {"name": "observacion_gerencia", "required": False, "example": "Cupo inicial sujeto a revision mensual.", "help": "Nota privada para decisiones de credito."},
+                    {"name": "estado_credito", "required": False, "example": "pending", "help": "none, pending, review, approved, rejected, suspended, blocked_debt o blocked_limit."},
+                    {"name": "credito_solicitado_usd", "required": False, "example": "1500", "help": "Monto solicitado por el cliente o vendedor."},
+                    {"name": "deuda_manual_usd", "required": False, "example": "0", "help": "Deuda externa anterior a la plataforma."},
                     {"name": "tipo_venta_default", "required": False, "example": "credit_line", "help": "cash, term_credit o credit_line."},
                     {"name": "cupo_usd", "required": False, "example": "1000", "help": "Linea aprobada si el rol puede aprobar."},
                     {"name": "credito_aprobado", "required": False, "example": "si", "help": "si/no. Solo gerente o super admin aprueba."},
+                    {"name": "dias_credito", "required": False, "example": "15", "help": "Plazo aprobado por defecto."},
                     {"name": "plazos", "required": False, "example": "0,15,30", "help": "Dias permitidos separados por coma."},
                     {"name": "clave", "required": False, "example": "Temporal2026", "help": "Si viene vacia se genera clave temporal."},
                 ],
@@ -802,9 +828,28 @@ def dispatch_status_label(value: str) -> str:
     return DISPATCH_STATUS_LABELS.get(value, value or "Sin despacho")
 
 
+def due_status_label(value: str) -> str:
+    return {
+        "paid": "Pagado",
+        "current": "Al dia",
+        "due_soon": "Por vencer",
+        "overdue": "Vencido",
+        "without_due_date": "Sin fecha",
+    }.get(value, value or "Sin vencimiento")
+
+
 def credit_status_label(value: str) -> str:
     labels = {
+        **dict(CREDIT_REQUEST_STATUS_OPTIONS),
         "approved": "Aprobado",
+        "available": "Disponible",
+        "in_use": "En uso",
+        "exhausted": "Cupo agotado",
+        "pending": "Solicitado",
+        "review": "En evaluacion",
+        "suspended": "Suspendido",
+        "blocked_debt": "Bloqueado por mora",
+        "blocked_limit": "Bloqueado por cupo",
         "manual_review": "Revision manual",
         "without_credit": "Sin linea",
         "client_not_active": "Cliente inactivo",
@@ -812,6 +857,10 @@ def credit_status_label(value: str) -> str:
         "released": "Liberado",
     }
     return labels.get(value, value or "Sin credito")
+
+
+def credit_risk_label(value: str) -> str:
+    return dict(CREDIT_RISK_OPTIONS).get(value, value or "Sin riesgo")
 
 
 def payment_status_label(value: str) -> str:
@@ -1405,12 +1454,15 @@ def security_context():
         "sale_type_label": sale_type_label,
         "client_status_label": client_status_label,
         "collection_status_label": collection_status_label,
+        "credit_status_label": credit_status_label,
+        "credit_risk_label": credit_risk_label,
         "client_type_label": client_type_label,
         "seller_status_label": seller_status_label,
         "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
         "sales_channel_label": sales_channel_label,
         "dispatch_status_label": dispatch_status_label,
+        "due_status_label": due_status_label,
     }
 
 
@@ -1790,14 +1842,24 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
             "creditOrdersUsd": enriched["creditOrdersUsd"],
             "creditExposureUsd": enriched["creditExposureUsd"],
             "creditAvailableUsd": enriched["creditAvailableUsd"],
+            "currentDebtUsd": enriched.get("currentDebtUsd", 0.0),
+            "creditStatus": enriched.get("creditStatus", "without_credit"),
+            "creditStatusLabel": enriched.get("creditStatusLabel", ""),
+            "creditRequestStatus": enriched.get("creditRequestStatus", "none"),
+            "creditRequestStatusLabel": enriched.get("creditRequestStatusLabel", ""),
+            "creditScore": enriched.get("creditScore", 0),
             "paymentTermsDays": enriched["paymentTermsDays"],
             "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
             "defaultSaleType": enriched.get("defaultSaleType", "cash"),
             "collectionStatus": enriched.get("collectionStatus", "without_debt"),
             "collectionStatusLabel": enriched.get("collectionStatusLabel", ""),
             "creditRiskLevel": enriched.get("creditRiskLevel", "low"),
+            "creditRiskLabel": enriched.get("creditRiskLabel", ""),
             "openBalanceUsd": enriched.get("openBalanceUsd", 0.0),
             "overdueBalanceUsd": enriched.get("overdueBalanceUsd", 0.0),
+            "averagePaymentDays": enriched.get("averagePaymentDays", 0),
+            "lastPaymentAt": enriched.get("lastPaymentAt", ""),
+            "lastPaymentUsd": enriched.get("lastPaymentUsd", 0.0),
             "lastPurchaseAt": enriched.get("lastPurchaseAt", ""),
             "assignedSeller": {
                 "id": enriched.get("assignedSellerId", ""),
@@ -1901,13 +1963,23 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
         "statusLabel": enriched.get("statusLabel", ""),
         "creditEnabled": bool(enriched.get("creditEnabled")),
         "creditStatus": enriched.get("creditStatus", "without_credit"),
+        "creditStatusLabel": enriched.get("creditStatusLabel", ""),
         "creditLimitUsd": enriched.get("creditLimitUsd", 0.0),
         "creditAvailableUsd": enriched.get("creditAvailableUsd", 0.0),
         "creditExposureUsd": enriched.get("creditExposureUsd", 0.0),
         "creditRequestStatus": enriched.get("creditRequestStatus", "none"),
+        "creditRequestStatusLabel": enriched.get("creditRequestStatusLabel", ""),
+        "creditRiskLevel": enriched.get("creditRiskLevel", "low"),
+        "creditRiskLabel": enriched.get("creditRiskLabel", ""),
+        "creditScore": enriched.get("creditScore", 0),
         "collectionStatus": enriched.get("collectionStatus", "without_debt"),
+        "collectionStatusLabel": enriched.get("collectionStatusLabel", ""),
+        "currentDebtUsd": enriched.get("currentDebtUsd", 0.0),
         "openBalanceUsd": enriched.get("openBalanceUsd", 0.0),
         "overdueBalanceUsd": enriched.get("overdueBalanceUsd", 0.0),
+        "averagePaymentDays": enriched.get("averagePaymentDays", 0),
+        "lastPaymentAt": enriched.get("lastPaymentAt", ""),
+        "lastPaymentUsd": enriched.get("lastPaymentUsd", 0.0),
         "lastPurchaseAt": enriched.get("lastPurchaseAt", ""),
         "assignedSeller": {
             "id": enriched.get("assignedSellerId", ""),
@@ -2856,6 +2928,9 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         credit_requested = parse_import_float(row_value(row, "creditRequestedUsd", "credito_solicitado_usd", "solicitud_credito_usd"), float((client or {}).get("creditRequestedUsd") or 0))
         credit_limit = parse_import_float(row_value(row, "creditLimitUsd", "credito_limite_usd", "cupo_usd", "linea_credito_usd"), float((client or {}).get("creditLimitUsd") or 0))
         credit_status = row_value(row, "creditRequestStatus", "estado_credito", default=(client or {}).get("creditRequestStatus", "none")) or "none"
+        if credit_status not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: estado_credito no valido.")
+            continue
         credit_enabled = parse_import_bool(row_value(row, "creditEnabled", "credito_aprobado", "linea_activa"), bool((client or {}).get("creditEnabled", False)))
         if credit_limit > 0 and can_approve and credit_enabled:
             credit_status = "approved"
@@ -2897,11 +2972,15 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "allowedPaymentTermsDays": sorted(set(terms)),
             "collectionStatus": row_value(row, "collectionStatus", "estado_cobranza", default=(client or {}).get("collectionStatus", "without_debt")) or "without_debt",
             "creditRiskLevel": row_value(row, "creditRiskLevel", "riesgo_credito", default=(client or {}).get("creditRiskLevel", "low")) or "low",
+            "creditScore": parse_import_int(row_value(row, "creditScore", "score_credito"), int((client or {}).get("creditScore") or 0)),
+            "creditManagerNote": row_value(row, "creditManagerNote", "observacion_gerencia", "nota_credito", default=(client or {}).get("creditManagerNote", "")),
+            "creditReviewedBy": (client or {}).get("creditReviewedBy", ""),
+            "creditReviewedAt": (client or {}).get("creditReviewedAt", ""),
             "creditRequestStatus": credit_status,
             "creditRequestedUsd": credit_requested,
             "creditEnabled": credit_enabled and credit_status == "approved",
             "creditLimitUsd": credit_limit if credit_enabled and credit_status == "approved" else float((client or {}).get("creditLimitUsd") or 0),
-            "creditUsedUsd": parse_import_float(row_value(row, "creditUsedUsd", "credito_usado_usd"), float((client or {}).get("creditUsedUsd") or 0)),
+            "creditUsedUsd": parse_import_float(row_value(row, "creditUsedUsd", "credito_usado_usd", "deuda_manual_usd"), float((client or {}).get("creditUsedUsd") or 0)),
             "paymentTermsDays": payment_term if credit_status == "approved" else int((client or {}).get("paymentTermsDays") or 0),
             "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
             "updatedAt": utc_now(),
@@ -2919,9 +2998,13 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         if credit_status == "approved" and can_approve:
             payload["creditApprovedBy"] = session.get("admin_name", "Admin")
             payload["creditApprovedAt"] = utc_now()
+            payload["creditReviewedBy"] = session.get("admin_name", "Admin")
+            payload["creditReviewedAt"] = payload["creditApprovedAt"]
         elif client:
             payload["creditApprovedBy"] = client.get("creditApprovedBy", "")
             payload["creditApprovedAt"] = client.get("creditApprovedAt", "")
+            payload["creditReviewedBy"] = client.get("creditReviewedBy", "")
+            payload["creditReviewedAt"] = client.get("creditReviewedAt", "")
         if client:
             payload["id"] = client["id"]
             payload["createdAt"] = client.get("createdAt", utc_now())
@@ -3558,9 +3641,15 @@ def enrich_client(
     enriched["priceList"] = enriched.get("priceList") or "b2b"
     enriched["authorizedDiscountPercent"] = float(enriched.get("authorizedDiscountPercent") or 0)
     enriched["creditRiskLevel"] = enriched.get("creditRiskLevel") or "low"
+    enriched["creditManagerNote"] = enriched.get("creditManagerNote", "")
+    enriched["creditReviewedBy"] = enriched.get("creditReviewedBy", "")
+    enriched["creditReviewedAt"] = enriched.get("creditReviewedAt", "")
     enriched["creditLimitUsd"] = float(enriched.get("creditLimitUsd") or 0)
     enriched["creditUsedUsd"] = float(enriched.get("creditUsedUsd") or 0)
     enriched["creditRequestedUsd"] = float(enriched.get("creditRequestedUsd") or 0)
+    enriched["creditScore"] = int(float(enriched.get("creditScore") or 0))
+    if enriched.get("creditRequestStatus") not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
+        enriched["creditRequestStatus"] = "none"
     enriched["allowedPaymentTermsDays"] = [
         int(term)
         for term in enriched.get("allowedPaymentTermsDays", [0])
@@ -3589,6 +3678,31 @@ def enrich_client(
         sum(float(order.get("balanceUsd") or 0) for order in open_orders if order.get("dueStatus") == "overdue"),
         2,
     )
+    enriched["currentDebtUsd"] = max(0.0, round(enriched["openBalanceUsd"] - enriched["overdueBalanceUsd"], 2))
+    enriched["openOrdersCount"] = len(open_orders)
+    enriched["overdueOrdersCount"] = sum(1 for order in open_orders if order.get("dueStatus") == "overdue")
+    client_payments = sorted(
+        [
+            movement for movement in movements or []
+            if movement.get("movementType") == "payment"
+            and movement.get("clientId") == enriched.get("id", "")
+        ],
+        key=lambda item: item.get("createdAt", ""),
+        reverse=True,
+    )
+    latest_payment = client_payments[0] if client_payments else {}
+    enriched["lastPaymentAt"] = latest_payment.get("createdAt", "")
+    enriched["lastPaymentUsd"] = float(latest_payment.get("amountUsd") or 0)
+    payment_days: list[int] = []
+    for order in client_orders:
+        payments_for_order = order.get("payments") or []
+        if not payments_for_order:
+            continue
+        latest_order_payment = max(payments_for_order, key=lambda item: item.get("createdAt", ""))
+        paid_at = parse_utc_datetime(latest_order_payment.get("createdAt"))
+        created_at = parse_utc_datetime(order.get("createdAt"))
+        payment_days.append(max(0, (paid_at.date() - created_at.date()).days))
+    enriched["averagePaymentDays"] = round(sum(payment_days) / len(payment_days), 1) if payment_days else 0
     delivered_or_paid_orders = [
         order for order in client_orders
         if order.get("status") in {"delivered", "paid", "partial_paid", "approved_with_credit", "preparing"}
@@ -3607,20 +3721,34 @@ def enrich_client(
         enriched["collectionStatus"] = explicit_collection if explicit_collection in {"promise", "current"} else "current"
     else:
         enriched["collectionStatus"] = explicit_collection if explicit_collection == "promise" else "without_debt"
+    request_status = enriched.get("creditRequestStatus") or "none"
     enriched["creditStatus"] = "without_credit"
-    if enriched.get("creditEnabled"):
-        if enriched["creditAvailableUsd"] <= 0:
+    if request_status in {"suspended", "blocked_debt", "blocked_limit", "rejected", "review"}:
+        enriched["creditStatus"] = request_status
+    elif request_status == "pending":
+        enriched["creditStatus"] = "credit_requested"
+    elif enriched.get("creditEnabled"):
+        if enriched["creditExposureUsd"] > enriched["creditLimitUsd"] > 0:
+            enriched["creditStatus"] = "blocked_limit"
+        elif enriched["overdueBalanceUsd"] > 0 and enriched.get("collectionStatus") == "blocked":
+            enriched["creditStatus"] = "blocked_debt"
+        elif enriched["creditAvailableUsd"] <= 0:
             enriched["creditStatus"] = "exhausted"
         elif enriched["creditExposureUsd"] > 0:
             enriched["creditStatus"] = "in_use"
         else:
             enriched["creditStatus"] = "available"
-    elif enriched.get("creditRequestStatus") == "pending":
-        enriched["creditStatus"] = "credit_requested"
-    elif enriched.get("creditRequestStatus") == "rejected":
-        enriched["creditStatus"] = "rejected"
+    if not enriched["creditScore"]:
+        risk_penalty = {"low": 0, "medium": 12, "high": 25, "critical": 40}.get(enriched["creditRiskLevel"], 10)
+        exposure_penalty = 10 if enriched["creditStatus"] in {"exhausted", "blocked_limit"} else 0
+        overdue_penalty = 25 if enriched["overdueBalanceUsd"] > 0 else 0
+        status_penalty = 15 if enriched["creditStatus"] in {"suspended", "blocked_debt", "rejected"} else 0
+        enriched["creditScore"] = max(0, min(100, 85 - risk_penalty - exposure_penalty - overdue_penalty - status_penalty))
     enriched["statusLabel"] = client_status_label(enriched.get("status", ""))
     enriched["collectionStatusLabel"] = collection_status_label(enriched.get("collectionStatus", ""))
+    enriched["creditStatusLabel"] = credit_status_label(enriched.get("creditStatus", ""))
+    enriched["creditRequestStatusLabel"] = credit_status_label(enriched.get("creditRequestStatus", ""))
+    enriched["creditRiskLabel"] = credit_risk_label(enriched.get("creditRiskLevel", ""))
     enriched["clientTypeLabel"] = client_type_label(enriched.get("clientType", ""))
     return enriched
 
@@ -4539,6 +4667,8 @@ def client_payload(existing: dict | None = None) -> dict:
 
     approval_allowed = role_allowed(CREDIT_APPROVAL_ROLES)
     requested_credit_status = request.form.get("creditRequestStatus", "none")
+    if requested_credit_status not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
+        requested_credit_status = "none"
     existing_credit_status = (existing or {}).get("creditRequestStatus", "none")
     credit_enabled = (existing or {}).get("creditEnabled", False)
     credit_limit = float((existing or {}).get("creditLimitUsd") or 0)
@@ -4589,6 +4719,10 @@ def client_payload(existing: dict | None = None) -> dict:
         "allowedPaymentTermsDays": selected_payment_terms(),
         "collectionStatus": request.form.get("collectionStatus", "without_debt"),
         "creditRiskLevel": request.form.get("creditRiskLevel", "low"),
+        "creditScore": int(float(request.form.get("creditScore") or (existing or {}).get("creditScore") or 0)),
+        "creditManagerNote": request.form.get("creditManagerNote", (existing or {}).get("creditManagerNote", "")).strip(),
+        "creditReviewedBy": (existing or {}).get("creditReviewedBy", ""),
+        "creditReviewedAt": (existing or {}).get("creditReviewedAt", ""),
         "creditRequestStatus": requested_credit_status,
         "creditRequestedUsd": credit_requested,
         "creditEnabled": credit_enabled,
@@ -4692,6 +4826,7 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         "client_category_options": CLIENT_CATEGORY_OPTIONS,
         "price_list_options": PRICE_LIST_OPTIONS,
         "collection_status_options": COLLECTION_STATUS_OPTIONS,
+        "credit_status_options": CREDIT_REQUEST_STATUS_OPTIONS,
         "credit_risk_options": CREDIT_RISK_OPTIONS,
         "can_approve_credit": can_module_action("credit", "approve"),
         "can_edit_clients": can_module_action("clients", "edit"),
@@ -6556,13 +6691,50 @@ def service_technician_delete(technician_id: str):
 def credit_dashboard_context(store: dict) -> dict:
     movements = store.get("credit_movements", [])
     visible_clients = visible_clients_for_current_user(store)
-    visible_client_ids = {client.get("id", "") for client in visible_clients}
     visible_orders = visible_orders_for_current_user(store)
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "risk": request.args.get("risk", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "collection": request.args.get("collection", "").strip(),
+        "due": request.args.get("due", "").strip(),
+    }
     clients_list = [
         enrich_client(client, store.get("orders", []), movements)
         for client in visible_clients
     ]
-    client_lookup = {client["id"]: client for client in visible_clients}
+    if filters["q"]:
+        query = filters["q"].lower()
+        clients_list = [
+            client for client in clients_list
+            if query in " ".join(
+                [
+                    client.get("businessName", ""),
+                    client.get("legalName", ""),
+                    client.get("commercialName", ""),
+                    client.get("taxId", ""),
+                    client.get("email", ""),
+                    client.get("assignedSellerName", ""),
+                    client.get("city", ""),
+                    client.get("deliveryZone", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        clients_list = [
+            client for client in clients_list
+            if client.get("creditStatus") == filters["status"]
+            or client.get("creditRequestStatus") == filters["status"]
+        ]
+    if filters["risk"]:
+        clients_list = [client for client in clients_list if client.get("creditRiskLevel") == filters["risk"]]
+    if filters["seller"]:
+        clients_list = [client for client in clients_list if client.get("assignedSellerId") == filters["seller"]]
+    if filters["collection"]:
+        clients_list = [client for client in clients_list if client.get("collectionStatus") == filters["collection"]]
+    visible_client_ids = {client.get("id", "") for client in clients_list}
+    client_lookup = {client["id"]: client for client in clients_list}
     payments = []
     for movement in movements:
         if movement.get("movementType") != "payment":
@@ -6579,19 +6751,58 @@ def credit_dashboard_context(store: dict) -> dict:
         if order.get("balanceUsd", 0) > 0
         and order.get("saleType") in {"term_credit", "credit_line"}
         and order.get("status") != "cancelled"
+        and order.get("customerId", "") in visible_client_ids
     ]
+    if filters["due"]:
+        due_orders = [order for order in due_orders if order.get("dueStatus") == filters["due"]]
+    status_graph = {
+        "title": "Estado crediticio",
+        "items": [
+            {"label": label, "value": sum(1 for client in clients_list if client.get("creditStatus") == status or client.get("creditRequestStatus") == status)}
+            for status, label in CREDIT_REQUEST_STATUS_OPTIONS
+            if sum(1 for client in clients_list if client.get("creditStatus") == status or client.get("creditRequestStatus") == status)
+        ],
+    }
+    risk_graph = {
+        "title": "Riesgo comercial",
+        "items": [
+            {"label": label, "value": sum(1 for client in clients_list if client.get("creditRiskLevel") == risk)}
+            for risk, label in CREDIT_RISK_OPTIONS
+            if sum(1 for client in clients_list if client.get("creditRiskLevel") == risk)
+        ],
+    }
+    status_graph["max"] = max([item["value"] for item in status_graph["items"]] or [1])
+    risk_graph["max"] = max([item["value"] for item in risk_graph["items"]] or [1])
     metrics = {
         "limit": sum(float(client.get("creditLimitUsd") or 0) for client in clients_list if client.get("creditEnabled")),
         "exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
         "available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
+        "current_debt": sum(float(client.get("currentDebtUsd") or 0) for client in clients_list),
         "payments": sum(float(payment.get("amountUsd") or 0) for payment in payments),
         "overdue": sum(float(order.get("balanceUsd") or 0) for order in due_orders if order.get("dueStatus") == "overdue"),
+        "requested": sum(float(client.get("creditRequestedUsd") or 0) for client in clients_list if client.get("creditRequestStatus") in {"pending", "review"}),
+        "open_orders": len(due_orders),
+        "average_score": round(sum(int(client.get("creditScore") or 0) for client in clients_list) / len(clients_list), 1) if clients_list else 0,
     }
     return {
         "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
         "payments": sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
         "due_orders": sorted(due_orders, key=lambda item: item.get("dueDate", "")),
         "metrics": metrics,
+        "filters": filters,
+        "status_graph": status_graph,
+        "risk_graph": risk_graph,
+        "sellers": sales_users(store),
+        "credit_status_options": CREDIT_REQUEST_STATUS_OPTIONS,
+        "credit_decision_options": CREDIT_DECISION_OPTIONS,
+        "credit_risk_options": CREDIT_RISK_OPTIONS,
+        "collection_status_options": COLLECTION_STATUS_OPTIONS,
+        "due_status_options": [
+            ("overdue", "Vencido"),
+            ("due_soon", "Por vencer"),
+            ("current", "Al dia"),
+            ("without_due_date", "Sin fecha"),
+        ],
     }
 
 
@@ -6604,8 +6815,18 @@ def credit():
         "credit.html",
         clients=context["clients"],
         metrics=context["metrics"],
+        filters=context["filters"],
+        status_graph=context["status_graph"],
+        risk_graph=context["risk_graph"],
+        sellers=context["sellers"],
+        credit_status_options=context["credit_status_options"],
+        credit_decision_options=context["credit_decision_options"],
+        credit_risk_options=context["credit_risk_options"],
+        collection_status_options=context["collection_status_options"],
         payment_terms=PAYMENT_TERM_OPTIONS,
         can_approve_credit=role_allowed(CREDIT_APPROVAL_ROLES),
+        can_export_credit=can_module_action("credit", "export"),
+        error=session.pop("credit_error", ""),
     )
 
 
@@ -6618,6 +6839,9 @@ def credit_due():
         "credit_due.html",
         due_orders=context["due_orders"],
         metrics=context["metrics"],
+        filters=context["filters"],
+        due_status_options=context["due_status_options"],
+        can_export_credit=can_module_action("credit", "export"),
     )
 
 
@@ -6630,6 +6854,134 @@ def credit_history():
         "credit_history.html",
         payments=context["payments"],
         metrics=context["metrics"],
+        filters=context["filters"],
+        can_export_credit=can_module_action("credit", "export"),
+    )
+
+
+@app.get("/credit/export")
+@require_roles(*roles_for_action("credit", "export"))
+def credit_export():
+    store = load_store()
+    context = credit_dashboard_context(store)
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "cliente",
+            "rif",
+            "email",
+            "vendedor",
+            "estado_credito",
+            "riesgo",
+            "score",
+            "solicitado_usd",
+            "limite_usd",
+            "deuda_vigente_usd",
+            "deuda_vencida_usd",
+            "ordenes_abiertas_usd",
+            "disponible_usd",
+            "dias_credito",
+            "promedio_pago_dias",
+            "ultimo_pago_usd",
+            "ultimo_pago_fecha",
+            "observacion_gerencia",
+        ],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for client in context["clients"]:
+        writer.writerow(
+            {
+                "cliente": client.get("businessName", ""),
+                "rif": client.get("taxId", ""),
+                "email": client.get("email", ""),
+                "vendedor": client.get("assignedSellerName", ""),
+                "estado_credito": client.get("creditStatusLabel", ""),
+                "riesgo": client.get("creditRiskLabel", ""),
+                "score": client.get("creditScore", 0),
+                "solicitado_usd": client.get("creditRequestedUsd", 0),
+                "limite_usd": client.get("creditLimitUsd", 0),
+                "deuda_vigente_usd": client.get("currentDebtUsd", 0),
+                "deuda_vencida_usd": client.get("overdueBalanceUsd", 0),
+                "ordenes_abiertas_usd": client.get("creditOrdersUsd", 0),
+                "disponible_usd": client.get("creditAvailableUsd", 0),
+                "dias_credito": client.get("paymentTermsDays", 0),
+                "promedio_pago_dias": client.get("averagePaymentDays", 0),
+                "ultimo_pago_usd": client.get("lastPaymentUsd", 0),
+                "ultimo_pago_fecha": client.get("lastPaymentAt", ""),
+                "observacion_gerencia": client.get("creditManagerNote", ""),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=credito_b2b_wulkan.csv"},
+    )
+
+
+@app.get("/credit/vencimientos/export")
+@require_roles(*roles_for_action("credit", "export"))
+def credit_due_export():
+    store = load_store()
+    context = credit_dashboard_context(store)
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=["vence", "orden", "cliente", "vendedor", "condicion", "saldo_usd", "dias", "estado"],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for order in context["due_orders"]:
+        writer.writerow(
+            {
+                "vence": order.get("dueDate", ""),
+                "orden": order.get("orderId", ""),
+                "cliente": order.get("customerName", ""),
+                "vendedor": order.get("sellerName", ""),
+                "condicion": order.get("saleTypeLabel", ""),
+                "saldo_usd": order.get("balanceUsd", 0),
+                "dias": order.get("dueDays", 0),
+                "estado": order.get("dueStatus", ""),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=vencimientos_credito_wulkan.csv"},
+    )
+
+
+@app.get("/credit/historial/export")
+@require_roles(*roles_for_action("credit", "export"))
+def credit_history_export():
+    store = load_store()
+    context = credit_dashboard_context(store)
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=["fecha", "orden", "cliente", "metodo", "referencia", "monto_usd", "monto_ves", "usuario", "nota"],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for payment in context["payments"]:
+        writer.writerow(
+            {
+                "fecha": payment.get("createdAt", ""),
+                "orden": payment.get("orderId", ""),
+                "cliente": payment.get("clientName", ""),
+                "metodo": payment.get("method", ""),
+                "referencia": payment.get("reference", ""),
+                "monto_usd": payment.get("amountUsd", 0),
+                "monto_ves": payment.get("amountVes", 0),
+                "usuario": payment.get("createdBy", ""),
+                "nota": payment.get("note", ""),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=historial_credito_wulkan.csv"},
     )
 
 
@@ -6642,29 +6994,85 @@ def credit_decision(client_id: str):
         return redirect(url_for("credit"))
 
     before = copy.deepcopy(client)
-    decision = request.form.get("decision", "approved")
+    decision = request.form.get("decision", "review")
+    if decision not in {value for value, _label in CREDIT_DECISION_OPTIONS}:
+        decision = "review"
+    note = request.form.get("creditManagerNote", "").strip()
+    if decision in {"rejected", "suspended", "blocked_debt", "blocked_limit"} and not note:
+        session["credit_error"] = "Las decisiones de rechazo, suspension o bloqueo requieren observacion de gerencia."
+        return redirect(url_for("credit"))
+
     now = utc_now()
-    if decision == "approved":
-        credit_limit = float(request.form.get("creditLimitUsd") or client.get("creditRequestedUsd") or 0)
-        payment_terms = int(request.form.get("paymentTermsDays") or client.get("paymentTermsDays") or 0)
+    credit_limit = safe_float(request.form.get("creditLimitUsd"), safe_float(client.get("creditLimitUsd"), 0))
+    if credit_limit <= 0 and decision in {"approved", "reactivate"}:
+        credit_limit = safe_float(client.get("creditRequestedUsd"), 0)
+    payment_terms = safe_int(request.form.get("paymentTermsDays"), safe_int(client.get("paymentTermsDays"), 0))
+    if payment_terms not in PAYMENT_TERM_OPTIONS:
+        payment_terms = 0
+    requested = safe_float(request.form.get("creditRequestedUsd"), safe_float(client.get("creditRequestedUsd"), 0))
+    score = max(0, min(100, safe_int(request.form.get("creditScore"), safe_int(client.get("creditScore"), 0))))
+    risk = request.form.get("creditRiskLevel", client.get("creditRiskLevel", "low"))
+    if risk not in dict(CREDIT_RISK_OPTIONS):
+        risk = "low"
+
+    client["creditRequestedUsd"] = requested
+    client["creditRiskLevel"] = risk
+    client["creditScore"] = score
+    client["creditManagerNote"] = note or client.get("creditManagerNote", "")
+    client["creditReviewedBy"] = session.get("admin_name", "Admin")
+    client["creditReviewedAt"] = now
+
+    if decision in {"approved", "reactivate", "adjust"}:
         client["creditEnabled"] = credit_limit > 0
-        client["creditLimitUsd"] = credit_limit
+        client["creditLimitUsd"] = max(0.0, credit_limit)
         client["paymentTermsDays"] = payment_terms
-        client["creditRequestStatus"] = "approved"
-        client["creditApprovedBy"] = session.get("admin_name", "Admin")
-        client["creditApprovedAt"] = now
+        client["creditRequestStatus"] = "approved" if credit_limit > 0 else "review"
+        if credit_limit > 0:
+            client["creditApprovedBy"] = session.get("admin_name", "Admin")
+            client["creditApprovedAt"] = now
         allowed_terms = set(int(term) for term in client.get("allowedPaymentTermsDays", [0]) if str(term).isdigit())
         allowed_terms.add(payment_terms)
         client["allowedPaymentTermsDays"] = sorted(allowed_terms)
-        detail = f"Credito aprobado por {money_usd(credit_limit)} a {payment_terms} dias."
-    else:
+        if client.get("status") in {"blocked_debt", "blocked_credit", "suspended", "review"}:
+            client["status"] = "active"
+        if client.get("collectionStatus") == "blocked":
+            client["collectionStatus"] = "current"
+        detail = f"Credito {credit_status_label(client['creditRequestStatus']).lower()} por {money_usd(client['creditLimitUsd'])} a {payment_terms} dias."
+    elif decision == "review":
+        client["creditEnabled"] = False
+        client["creditRequestStatus"] = "review"
+        client["creditLimitUsd"] = max(0.0, credit_limit)
+        client["paymentTermsDays"] = payment_terms
+        detail = "Credito marcado en evaluacion comercial."
+    elif decision == "rejected":
         client["creditEnabled"] = False
         client["creditLimitUsd"] = 0.0
         client["paymentTermsDays"] = 0
         client["creditRequestStatus"] = "rejected"
-        client["creditApprovedBy"] = session.get("admin_name", "Admin")
-        client["creditApprovedAt"] = now
         detail = "Solicitud de credito rechazada."
+    elif decision == "suspended":
+        client["creditEnabled"] = False
+        client["creditRequestStatus"] = "suspended"
+        client["creditLimitUsd"] = max(0.0, credit_limit)
+        client["paymentTermsDays"] = payment_terms
+        detail = "Credito suspendido por gerencia comercial."
+    elif decision == "blocked_debt":
+        client["creditEnabled"] = False
+        client["creditRequestStatus"] = "blocked_debt"
+        client["collectionStatus"] = "blocked"
+        client["status"] = "blocked_debt"
+        client["creditLimitUsd"] = max(0.0, credit_limit)
+        detail = "Credito bloqueado por mora."
+    else:
+        client["creditEnabled"] = False
+        client["creditRequestStatus"] = "blocked_limit"
+        client["status"] = "blocked_credit"
+        client["creditLimitUsd"] = max(0.0, credit_limit)
+        client["paymentTermsDays"] = payment_terms
+        detail = "Credito bloqueado por exceso de cupo."
+
+    if decision not in {"approved", "reactivate", "adjust"}:
+        client["creditEnabled"] = False
 
     client["updatedAt"] = now
     record_change_event(
@@ -6672,7 +7080,7 @@ def credit_decision(client_id: str):
         "credit_decision",
         "client",
         client_id,
-        detail,
+        f"{detail} {note}".strip(),
         before,
         client,
     )

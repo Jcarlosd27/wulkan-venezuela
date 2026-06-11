@@ -1,15 +1,79 @@
 {% extends "base.html" %}
 {% set heading = "Credito B2B" %}
-{% set description = "Controla limites, exposicion, saldo disponible y abonos externos de clientes ferreteros." %}
+{% set description = "Controla limites, exposicion, saldo disponible y decisiones de riesgo para clientes ferreteros." %}
+
+{% block page_actions %}
+{% if can_export_credit %}
+<a class="btn btn-light" href="{{ url_for('credit_export', q=filters.q, status=filters.status, risk=filters.risk, seller=filters.seller, collection=filters.collection) }}">
+  <i class="bi bi-download"></i> Exportar CSV
+</a>
+{% endif %}
+{% endblock %}
 
 {% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 shadow-sm" role="alert">
+  <i class="bi bi-exclamation-triangle"></i> {{ error }}
+</div>
+{% endif %}
+
+{% include "partials/credit_subnav.html" %}
+
+<form class="seller-filter-panel mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-lg-3">
+      <label class="form-label">Buscar</label>
+      <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Cliente, RIF, email o vendedor">
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Estado credito</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in credit_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Riesgo</label>
+      <select class="form-select" name="risk">
+        <option value="">Todos</option>
+        {% for value, label in credit_risk_options %}
+        <option value="{{ value }}" {% if filters.risk == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in sellers %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Cobranza</label>
+      <select class="form-select" name="collection">
+        <option value="">Todos</option>
+        {% for value, label in collection_status_options %}
+        <option value="{{ value }}" {% if filters.collection == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-lg-1 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i></button>
+    </div>
+  </div>
+</form>
+
 <section class="row g-3 mb-3">
   <div class="col-12 col-md-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-credit-card-2-front"></i></div>
       <span>Linea otorgada</span>
       <strong>{{ money_usd(metrics.limit) }}</strong>
-      <em>Total</em>
+      <em>Total aprobado</em>
     </article>
   </div>
   <div class="col-12 col-md-3">
@@ -17,7 +81,7 @@
       <div class="metric-icon"><i class="bi bi-activity"></i></div>
       <span>Comprometido</span>
       <strong>{{ money_usd(metrics.exposure) }}</strong>
-      <em>Ordenes</em>
+      <em>Ordenes abiertas</em>
     </article>
   </div>
   <div class="col-12 col-md-3">
@@ -25,7 +89,7 @@
       <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
       <span>Disponible</span>
       <strong>{{ money_usd(metrics.available) }}</strong>
-      <em>Credito</em>
+      <em>Credito utilizable</em>
     </article>
   </div>
   <div class="col-12 col-md-3">
@@ -33,18 +97,76 @@
       <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
       <span>Vencido</span>
       <strong>{{ money_usd(metrics.overdue) }}</strong>
-      <em>Cobranza</em>
+      <em>Riesgo cobranza</em>
     </article>
   </div>
 </section>
 
-{% include "partials/credit_subnav.html" %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-8">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Graphify credito</h2>
+          <span>Distribucion por estado y riesgo comercial.</span>
+        </div>
+        <span>Score prom. {{ metrics.average_score }}</span>
+      </div>
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <h3 class="small text-secondary fw-bold mb-2">{{ status_graph.title }}</h3>
+          <div class="graphify-bars">
+            {% for item in status_graph["items"] %}
+            <div class="graphify-row">
+              <span class="graphify-label">{{ item.label }}</span>
+              <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
+              <strong>{{ item.value }}</strong>
+            </div>
+            {% else %}
+            <span class="text-secondary small">Sin datos filtrados.</span>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <h3 class="small text-secondary fw-bold mb-2">{{ risk_graph.title }}</h3>
+          <div class="graphify-bars">
+            {% for item in risk_graph["items"] %}
+            <div class="graphify-row">
+              <span class="graphify-label">{{ item.label }}</span>
+              <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / risk_graph.max * 100) if risk_graph.max else 0 }}%"></span></span>
+              <strong>{{ item.value }}</strong>
+            </div>
+            {% else %}
+            <span class="text-secondary small">Sin datos filtrados.</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Riesgo abierto</h2>
+          <span>Deuda vigente y solicitudes en revision.</span>
+        </div>
+      </div>
+      <dl class="detail-list">
+        <div><dt>Deuda vigente</dt><dd>{{ money_usd(metrics.current_debt) }}</dd></div>
+        <div><dt>Solicitado</dt><dd>{{ money_usd(metrics.requested) }}</dd></div>
+        <div><dt>Ordenes abiertas</dt><dd>{{ metrics.open_orders }}</dd></div>
+        <div><dt>Pagos registrados</dt><dd>{{ money_usd(metrics.payments) }}</dd></div>
+      </dl>
+    </article>
+  </div>
+</section>
 
 <section class="panel category-panel mb-3">
   <div class="panel-header">
     <div>
       <h2>Lineas de credito por cliente</h2>
-      <span>Credito otorgado, consumo por ordenes abiertas y disponibilidad real.</span>
+      <span>Cupo otorgado, consumo real, deuda, pagos y observacion de gerencia.</span>
     </div>
     <span>{{ clients | length }} clientes</span>
   </div>
@@ -54,13 +176,12 @@
         <tr>
           <th>Cliente</th>
           <th>Vendedor</th>
-          <th>Estado credito</th>
-          <th>Solicitado</th>
-          <th>Limite</th>
-          <th>Deuda manual</th>
-          <th>Ordenes abiertas</th>
+          <th>Estado</th>
+          <th>Riesgo</th>
+          <th>Deuda</th>
+          <th>Linea</th>
           <th>Disponible</th>
-          <th>Dias</th>
+          <th>Pago</th>
           {% if can_approve_credit %}<th class="text-end">Decision</th>{% endif %}
         </tr>
       </thead>
@@ -72,30 +193,43 @@
               <div class="category-thumb"><i class="bi bi-shop"></i></div>
               <div>
                 <strong>{{ client.businessName }}</strong>
-                <small>{{ client.email }} - {{ client.city or 'Sin ciudad' }}</small>
+                <small>{{ client.taxId or 'Sin RIF' }} - {{ client.email }}</small>
               </div>
             </div>
           </td>
           <td>
             <strong class="d-block">{{ client.assignedSellerName or 'Sin vendedor' }}</strong>
-            <small class="text-secondary">{{ client.deliveryZone or client.state or '' }}</small>
+            <small class="text-secondary">{{ client.deliveryZone or client.city or 'Sin zona' }}</small>
           </td>
           <td>
-            <span class="badge {{ client.creditStatus | badge_class }}">{{ client.creditStatus }}</span>
-            <small class="d-block text-secondary">{{ client.status }}</small>
+            <span class="badge {{ client.creditStatus | badge_class }}">{{ client.creditStatusLabel }}</span>
+            <small class="d-block text-secondary">{{ client.creditRequestStatusLabel }}</small>
           </td>
-          <td>{{ money_usd(client.creditRequestedUsd) }}</td>
-          <td>{{ money_usd(client.creditLimitUsd) }}</td>
-          <td>{{ money_usd(client.creditUsedUsd) }}</td>
           <td>
-            <strong>{{ money_usd(client.creditOrdersUsd) }}</strong>
+            <strong>{{ client.creditScore }}</strong>
+            <small class="d-block">
+              <span class="badge {{ client.creditRiskLevel | badge_class }}">{{ client.creditRiskLabel }}</span>
+            </small>
+          </td>
+          <td>
+            <strong>{{ money_usd(client.currentDebtUsd) }}</strong>
+            <small class="d-block text-secondary">Vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(client.creditLimitUsd) }}</strong>
+            <small class="d-block text-secondary">Solicitado {{ money_usd(client.creditRequestedUsd) }}</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(client.creditAvailableUsd) }}</strong>
             <div class="credit-track mt-1">
               {% set percent = (client.creditExposureUsd / client.creditLimitUsd * 100) if client.creditLimitUsd else 0 %}
               <span style="width: {{ [percent, 100] | min }}%"></span>
             </div>
           </td>
-          <td><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></td>
-          <td>{{ client.paymentTermsDays }}</td>
+          <td>
+            <strong>{{ client.averagePaymentDays }} dias</strong>
+            <small class="d-block text-secondary">{{ money_usd(client.lastPaymentUsd) }} ultimo pago</small>
+          </td>
           {% if can_approve_credit %}
           <td class="text-end">
             <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#creditModal{{ loop.index }}">
@@ -105,7 +239,15 @@
           {% endif %}
         </tr>
         {% else %}
-        <tr><td colspan="{{ 10 if can_approve_credit else 9 }}" class="text-secondary">Sin clientes ferreteros registrados.</td></tr>
+        <tr>
+          <td colspan="{{ 9 if can_approve_credit else 8 }}">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-credit-card-2-front"></i></div>
+              <strong>Sin clientes con credito</strong>
+              <span>Registra clientes ferreteros o importa la plantilla oficial para evaluar cupos.</span>
+            </div>
+          </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
@@ -115,7 +257,7 @@
 {% if can_approve_credit %}
 {% for client in clients %}
 <div class="modal fade" id="creditModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
     <form class="modal-content" method="post" action="{{ url_for('credit_decision', client_id=client.id) }}">
       {{ csrf_field() }}
       <div class="modal-header">
@@ -130,11 +272,32 @@
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">Decision</label>
             <select class="form-select" name="decision">
-              <option value="approved">Aprobar credito</option>
-              <option value="rejected">Rechazar solicitud</option>
+              {% for value, label in credit_decision_options %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
             </select>
           </div>
-          <div class="col-12 col-md-6">
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Riesgo</label>
+            <select class="form-select" name="creditRiskLevel">
+              {% for value, label in credit_risk_options %}
+              <option value="{{ value }}" {% if client.creditRiskLevel == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Score</label>
+            <input class="form-control" name="creditScore" inputmode="numeric" value="{{ client.creditScore }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Solicitado USD</label>
+            <input class="form-control" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Cupo aprobado USD</label>
+            <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd or client.creditRequestedUsd }}">
+          </div>
+          <div class="col-12 col-md-4">
             <label class="form-label fw-semibold">Dias</label>
             <select class="form-select" name="paymentTermsDays">
               {% for term in payment_terms %}
@@ -143,8 +306,17 @@
             </select>
           </div>
           <div class="col-12">
-            <label class="form-label fw-semibold">Limite aprobado USD</label>
-            <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd or client.creditRequestedUsd }}">
+            <label class="form-label fw-semibold">Observacion de gerencia</label>
+            <textarea class="form-control" name="creditManagerNote" rows="3" placeholder="Motivo de aprobacion, bloqueo, rechazo o ajuste.">{{ client.creditManagerNote }}</textarea>
+            <div class="form-text">Obligatorio para rechazar, suspender o bloquear credito.</div>
+          </div>
+          <div class="col-12">
+            <div class="row g-2">
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Disponible</span><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Comprometido</span><strong>{{ money_usd(client.creditExposureUsd) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Vencido</span><strong>{{ money_usd(client.overdueBalanceUsd) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Ultimo pago</span><strong>{{ money_usd(client.lastPaymentUsd) }}</strong></div>
+            </div>
           </div>
         </div>
       </div>
