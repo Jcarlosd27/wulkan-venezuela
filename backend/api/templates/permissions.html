@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% set heading = "Roles y permisos" %}
+{% set description = "Matriz granular de acceso por modulo, rol y accion operativa." %}
+
+{% block top_action %}
+<a class="btn btn-light" href="{{ url_for('admin_users') }}">
+  <i class="bi bi-people"></i> Usuarios admin
+</a>
+{% endblock %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-person-lock"></i></div>
+      <span>Roles web</span>
+      <strong>{{ metrics.roles }}</strong>
+      <em>Internos</em>
+    </article>
+  </div>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-grid"></i></div>
+      <span>Modulos</span>
+      <strong>{{ metrics.modules }}</strong>
+      <em>Protegidos</em>
+    </article>
+  </div>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-pencil-square"></i></div>
+      <span>Roles con escritura</span>
+      <strong>{{ metrics.write_roles }}</strong>
+      <em>Controlados</em>
+    </article>
+  </div>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-shield-lock"></i></div>
+      <span>Solo super admin</span>
+      <strong>{{ metrics.admin_only }}</strong>
+      <em>Criticos</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel permission-legend-panel mb-3">
+  <div class="panel-header">
+    <div>
+      <h2>Acciones disponibles</h2>
+      <span>Las rutas y el menu usan esta matriz como fuente principal de visibilidad.</span>
+    </div>
+    <span>{{ actions | length }} acciones</span>
+  </div>
+  <div class="permission-action-grid">
+    {% for key, label, icon in actions %}
+    <span class="permission-action-chip">
+      <i class="bi {{ icon }}"></i>
+      {{ label }}
+    </span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel permission-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Matriz operativa</h2>
+      <span>Permisos por modulo para roles internos. Vendedores y clientes trabajan desde la app movil.</span>
+    </div>
+    <span>{{ rows | length }} modulos</span>
+  </div>
+  <div class="table-responsive permission-table-wrap">
+    <table class="table align-middle category-table permission-table">
+      <thead>
+        <tr>
+          <th>Modulo</th>
+          {% for role in roles %}
+          <th>{{ role_labels.get(role, role) }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>
+            <div class="permission-module-cell">
+              <div class="permission-module-icon"><i class="bi {{ row.icon }}"></i></div>
+              <div>
+                <strong>{{ row.label }}</strong>
+                <small>{{ row.description }}</small>
+              </div>
+            </div>
+          </td>
+          {% for role in roles %}
+          {% set role_actions = row.roles.get(role, []) %}
+          <td>
+            {% if role_actions %}
+            <div class="permission-chip-list">
+              {% for action in role_actions %}
+              <span class="permission-mini-chip" title="{{ action_index[action]['label'] }}">
+                <i class="bi {{ action_index[action]['icon'] }}"></i>
+                {{ action_index[action]['label'] }}
+              </span>
+              {% endfor %}
+            </div>
+            {% else %}
+            <span class="text-secondary small">Sin acceso</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

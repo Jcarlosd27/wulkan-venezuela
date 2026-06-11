@@ -6,7 +6,7 @@
 
 - [x] Fase 1.1 - Dashboard Ejecutivo: KPIs reales por ventas, ordenes, clientes, credito, cobranza, stock y comisiones; filtros por fecha, vendedor, cliente, categoria, producto, estado de orden, estado de credito, estado de cobranza y tipo de venta; graficos Graphify compactos.
 - [x] Fase 1.2 - Gestion de Usuarios Admin: crear/editar usuarios internos, telefono, rol, estado, observacion interna, clave temporal con cambio obligatorio, intentos fallidos persistentes, bloqueo/activacion, reset de clave, cierre remoto de sesiones, ultimo acceso, IP y auditoria de login/logout.
-- [ ] Fase 1.3 - Roles y Permisos granulares.
+- [x] Fase 1.3 - Roles y Permisos granulares: matriz centralizada por rol, modulo y accion; menu y rutas principales conectadas a permisos de ver/crear/editar/importar/aprobar/eliminar; vista profesional para Super Admin con KPIs de cobertura y validacion por roles internos.
 - [ ] Fase 1.4 - Clientes B2B / Ferreteros.
 - [ ] Fase 1.5 - Vendedores.
 - [ ] Fase 1.6 - Productos / Catalogo.

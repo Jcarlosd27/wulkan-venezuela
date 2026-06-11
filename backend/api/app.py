@@ -110,6 +110,7 @@ LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
 IMPORT_DRAFT_TTL_SECONDS = 60 * 60
 WEB_ADMIN_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"}
+WEB_ADMIN_ROLE_ORDER = ["super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"]
 WRITE_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator"}
 SALES_ROLES = {"super_admin", "commercial_manager", "operator"}
 INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
@@ -119,21 +120,165 @@ COMMISSION_MANAGEMENT_ROLES = {"super_admin", "general_manager", "commercial_man
 MOBILE_SALES_ROLES = {"super_admin", "commercial_manager", "sales"}
 ADMIN_ONLY_ROLES = {"super_admin"}
 DELETE_ROLES = {"super_admin"}
+PERMISSION_ACTIONS = [
+    ("view", "Ver", "bi-eye"),
+    ("create", "Crear", "bi-plus-circle"),
+    ("edit", "Editar", "bi-pencil-square"),
+    ("annul", "Anular", "bi-x-octagon"),
+    ("approve", "Aprobar", "bi-check2-circle"),
+    ("reject", "Rechazar", "bi-slash-circle"),
+    ("export", "Exportar", "bi-download"),
+    ("import", "Importar", "bi-upload"),
+    ("delete", "Eliminar logico", "bi-trash"),
+    ("audit", "Ver auditoria", "bi-shield-check"),
+]
+PERMISSION_MODULES = [
+    ("dashboard", "Dashboard", "bi-grid-1x2", "KPIs ejecutivos y graficos Graphify."),
+    ("sellers", "Vendedores", "bi-person-badge", "Fuerza comercial, cartera y metas."),
+    ("clients", "Clientes", "bi-shop", "Ferreteros, datos comerciales y credito."),
+    ("credit", "Credito B2B", "bi-credit-card-2-front", "Lineas, cupos, vencimientos y riesgo."),
+    ("orders", "Ordenes", "bi-receipt", "Pedidos, saldo, estado comercial y despacho."),
+    ("commissions", "Comisiones", "bi-percent", "Liquidacion comercial por vendedor."),
+    ("products", "Productos", "bi-box-seam", "Catalogo, precios, imagenes y PDFs."),
+    ("categories", "Categorias", "bi-tags", "Familias visibles en app movil."),
+    ("media_library", "Biblioteca tecnica", "bi-folder2-open", "Imagenes, fichas y recursos asociados."),
+    ("stock", "Stock", "bi-boxes", "Inventario fisico, reservado y movimientos."),
+    ("announcements", "Anuncios app", "bi-megaphone", "Banners y carrusel comercial movil."),
+    ("service_technicians", "Servicios tecnicos", "bi-tools", "Directorio publico de soporte."),
+    ("quotes", "Cotizaciones", "bi-file-earmark-text", "Preventas, versiones y conversion a orden."),
+    ("collections", "Cobranza", "bi-cash-coin", "Cuentas por cobrar, abonos y mora."),
+    ("dispatch", "Despacho", "bi-truck", "Preparacion, ruta y evidencia de entrega."),
+    ("reports", "Reportes", "bi-file-bar-graph", "Exportables comerciales, inventario y finanzas."),
+    ("admin_users", "Usuarios admin", "bi-people", "Accesos internos al panel."),
+    ("permissions", "Roles y permisos", "bi-shield-lock", "Matriz granular por rol y accion."),
+    ("settings", "Configuracion", "bi-gear", "Parametros generales del negocio."),
+    ("audit", "Auditoria", "bi-shield-check", "Trazabilidad de cambios sensibles."),
+    ("import_templates", "Plantillas", "bi-file-earmark-spreadsheet", "Formatos Excel/CSV oficiales."),
+    ("documents", "Documentos", "bi-folder2", "Contratos, estados de cuenta y evidencias."),
+]
+ACTION_VIEW = {"view"}
+ACTION_READ = {"view", "export"}
+ACTION_AUDIT = {"view", "export", "audit"}
+ACTION_WORK = {"view", "create", "edit", "export", "import", "audit"}
+ACTION_APPROVE = {"view", "create", "edit", "approve", "reject", "export", "audit"}
+ACTION_FULL_NO_DELETE = {"view", "create", "edit", "annul", "approve", "reject", "export", "import", "audit"}
+ALL_ACTION_KEYS = {key for key, _label, _icon in PERMISSION_ACTIONS}
+ACTION_ORDER = [key for key, _label, _icon in PERMISSION_ACTIONS]
+ALL_MODULE_KEYS = [key for key, _label, _icon, _description in PERMISSION_MODULES]
+ROLE_MODULE_PERMISSIONS = {
+    "super_admin": {module: set(ALL_ACTION_KEYS) for module in ALL_MODULE_KEYS},
+    "general_manager": {
+        module: set(ACTION_AUDIT) for module in ALL_MODULE_KEYS if module not in {"admin_users", "permissions", "settings"}
+    },
+    "commercial_manager": {
+        "dashboard": set(ACTION_AUDIT),
+        "sellers": set(ACTION_WORK),
+        "clients": set(ACTION_WORK | {"approve", "reject"}),
+        "credit": set(ACTION_APPROVE),
+        "orders": set(ACTION_FULL_NO_DELETE),
+        "commissions": set(ACTION_APPROVE),
+        "products": set(ACTION_READ),
+        "categories": set(ACTION_READ),
+        "media_library": set(ACTION_READ),
+        "stock": set(ACTION_READ),
+        "announcements": set(ACTION_WORK),
+        "service_technicians": set(ACTION_WORK),
+        "quotes": set(ACTION_FULL_NO_DELETE),
+        "collections": set(ACTION_READ | {"edit"}),
+        "dispatch": set(ACTION_READ),
+        "reports": set(ACTION_AUDIT),
+        "import_templates": set(ACTION_READ),
+        "audit": set(ACTION_AUDIT),
+        "documents": set(ACTION_READ),
+    },
+    "operator": {
+        "dashboard": set(ACTION_READ),
+        "sellers": set(ACTION_WORK),
+        "clients": set(ACTION_WORK),
+        "credit": {"view", "export", "audit"},
+        "orders": {"view", "create", "edit", "annul", "export", "audit"},
+        "commissions": set(ACTION_READ),
+        "products": set(ACTION_WORK),
+        "categories": set(ACTION_WORK),
+        "media_library": set(ACTION_WORK),
+        "stock": {"view", "create", "edit", "export", "import", "audit"},
+        "announcements": set(ACTION_WORK),
+        "service_technicians": set(ACTION_WORK),
+        "quotes": {"view", "create", "edit", "export", "audit"},
+        "collections": set(ACTION_READ),
+        "dispatch": set(ACTION_READ | {"edit"}),
+        "reports": set(ACTION_READ),
+        "import_templates": set(ACTION_READ),
+        "documents": set(ACTION_WORK),
+    },
+    "inventory": {
+        "dashboard": set(ACTION_READ),
+        "products": set(ACTION_WORK),
+        "categories": set(ACTION_WORK),
+        "media_library": set(ACTION_WORK),
+        "stock": {"view", "create", "edit", "annul", "export", "import", "audit"},
+        "orders": set(ACTION_READ),
+        "dispatch": set(ACTION_READ),
+        "import_templates": set(ACTION_READ),
+        "documents": set(ACTION_WORK),
+    },
+    "collections": {
+        "dashboard": set(ACTION_READ),
+        "clients": set(ACTION_READ),
+        "credit": set(ACTION_READ | {"edit"}),
+        "orders": set(ACTION_READ | {"edit"}),
+        "collections": {"view", "create", "edit", "export", "audit"},
+        "reports": set(ACTION_READ),
+        "import_templates": set(ACTION_READ),
+        "documents": set(ACTION_READ),
+    },
+    "dispatch": {
+        "dashboard": set(ACTION_READ),
+        "orders": set(ACTION_READ | {"edit"}),
+        "stock": set(ACTION_READ),
+        "dispatch": {"view", "create", "edit", "annul", "export", "audit"},
+        "service_technicians": set(ACTION_READ),
+        "reports": set(ACTION_READ),
+        "documents": set(ACTION_READ),
+    },
+    "auditor": {
+        module: set(ACTION_AUDIT) for module in ALL_MODULE_KEYS if module not in {"admin_users", "permissions", "settings"}
+    },
+    "readonly": {
+        module: set(ACTION_VIEW) for module in [
+            "dashboard",
+            "sellers",
+            "clients",
+            "credit",
+            "orders",
+            "commissions",
+            "products",
+            "categories",
+            "media_library",
+            "stock",
+            "announcements",
+            "service_technicians",
+            "quotes",
+            "collections",
+            "dispatch",
+            "reports",
+            "import_templates",
+            "documents",
+        ]
+    },
+}
+ROLE_MODULE_PERMISSIONS["general_manager"].update({
+    "credit": set(ACTION_APPROVE),
+    "orders": set(ACTION_FULL_NO_DELETE),
+    "commissions": set(ACTION_APPROVE),
+})
 MODULE_ACCESS = {
-    "admin_users": ADMIN_ONLY_ROLES,
-    "audit": ADMIN_ONLY_ROLES,
-    "import_templates": WEB_ADMIN_ROLES,
-    "sellers": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "clients": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "credit": {"super_admin", "commercial_manager"},
-    "orders": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "commissions": {"super_admin", "commercial_manager"},
-    "products": {"super_admin", "commercial_manager", "operator", "inventory", "readonly"},
-    "media_library": {"super_admin", "operator", "inventory", "readonly"},
-    "categories": {"super_admin", "operator", "inventory", "readonly"},
-    "stock": {"super_admin", "operator", "inventory", "readonly"},
-    "announcements": {"super_admin", "commercial_manager", "operator", "readonly"},
-    "service_technicians": {"super_admin", "commercial_manager", "operator", "readonly"},
+    module: {
+        role
+        for role, permissions in ROLE_MODULE_PERMISSIONS.items()
+        if "view" in permissions.get(module, set())
+    }
+    for module in ALL_MODULE_KEYS
 }
 ADMIN_MENU_GROUPS = [
     {
@@ -171,6 +316,7 @@ ADMIN_MENU_GROUPS = [
         "items": [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit"]},
+            {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
             {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete", "admin_user_status", "admin_user_reset_password", "admin_user_revoke_sessions"]},
         ],
     },
@@ -845,12 +991,67 @@ def password_errors(password: str) -> list[str]:
     return errors
 
 
+def role_permission_actions(role: str, module: str) -> set[str]:
+    return set(ROLE_MODULE_PERMISSIONS.get(role, {}).get(module, set()))
+
+
+def role_can(role: str, module: str, action: str = "view") -> bool:
+    return action in role_permission_actions(role, module)
+
+
+def roles_for_action(module: str, action: str = "view") -> tuple[str, ...]:
+    return tuple(role for role in WEB_ADMIN_ROLE_ORDER if role_can(role, module, action))
+
+
+def can_module_action(module: str, action: str = "view") -> bool:
+    return role_can(current_admin_role(), module, action)
+
+
 def can_access_module(module: str) -> bool:
-    return role_allowed(MODULE_ACCESS.get(module, WEB_ADMIN_ROLES))
+    return can_module_action(module, "view")
 
 
 def can_delete_data() -> bool:
-    return role_allowed(DELETE_ROLES)
+    return any(role_can(current_admin_role(), module, "delete") for module in ALL_MODULE_KEYS)
+
+
+def permission_matrix_rows() -> list[dict]:
+    rows: list[dict] = []
+    for module, label, icon, description in PERMISSION_MODULES:
+        roles = {}
+        for role in WEB_ADMIN_ROLE_ORDER:
+            roles[role] = sorted(
+                role_permission_actions(role, module),
+                key=lambda action: ACTION_ORDER.index(action) if action in ACTION_ORDER else 999,
+            )
+        rows.append({
+            "module": module,
+            "label": label,
+            "icon": icon,
+            "description": description,
+            "roles": roles,
+        })
+    return rows
+
+
+def permission_metrics(rows: list[dict]) -> dict:
+    protected_modules = [row for row in rows if any(row["roles"].get(role) for role in WEB_ADMIN_ROLE_ORDER)]
+    write_roles = {
+        role
+        for row in rows
+        for role in WEB_ADMIN_ROLE_ORDER
+        if any(action in {"create", "edit", "annul", "approve", "reject", "import", "delete"} for action in row["roles"].get(role, []))
+    }
+    admin_only_modules = [
+        row for row in rows
+        if row["roles"].get("super_admin") and not any(row["roles"].get(role) for role in WEB_ADMIN_ROLE_ORDER if role != "super_admin")
+    ]
+    return {
+        "roles": len(WEB_ADMIN_ROLE_ORDER),
+        "modules": len(protected_modules),
+        "write_roles": len(write_roles),
+        "admin_only": len(admin_only_modules),
+    }
 
 
 def visible_import_template_groups() -> list[dict]:
@@ -1003,9 +1204,11 @@ def security_context():
         "csrf_token": csrf_token,
         "csrf_field": csrf_field,
         "can_access_module": can_access_module,
+        "can_module_action": can_module_action,
         "can_delete_data": can_delete_data,
         "current_admin_role": current_admin_role,
         "admin_menu_groups": admin_menu_groups,
+        "permission_actions": PERMISSION_ACTIONS,
         "role_labels": ROLE_LABELS,
         "sale_type_label": sale_type_label,
         "commission_status_label": commission_status_label,
@@ -3635,7 +3838,7 @@ def dashboard():
 
 
 @app.get("/plantillas")
-@require_roles(*WEB_ADMIN_ROLES)
+@require_roles(*roles_for_action("import_templates", "view"))
 def import_templates():
     template_groups = visible_import_template_groups()
     return render_template(
@@ -3646,7 +3849,7 @@ def import_templates():
 
 
 @app.get("/plantillas/<template_key>.<file_format>")
-@require_roles(*WEB_ADMIN_ROLES)
+@require_roles(*roles_for_action("import_templates", "view"))
 def download_import_template(template_key: str, file_format: str):
     spec = IMPORT_TEMPLATE_INDEX.get(template_key)
     if not spec:
@@ -3660,6 +3863,21 @@ def download_import_template(template_key: str, file_format: str):
     if normalized_format == "xlsx":
         return build_xlsx_template(spec)
     raise BadRequest("Formato no soportado. Descarga xlsx o csv.")
+
+
+@app.get("/permissions")
+@require_roles("super_admin")
+def permissions():
+    rows = permission_matrix_rows()
+    action_index = {key: {"key": key, "label": label, "icon": icon} for key, label, icon in PERMISSION_ACTIONS}
+    return render_template(
+        "permissions.html",
+        roles=WEB_ADMIN_ROLE_ORDER,
+        rows=rows,
+        actions=PERMISSION_ACTIONS,
+        action_index=action_index,
+        metrics=permission_metrics(rows),
+    )
 
 
 @app.route("/admin-users", methods=["GET", "POST"])
@@ -3817,11 +4035,11 @@ def admin_user_revoke_sessions(user_id: str):
 
 
 @app.route("/sellers", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+@require_roles(*roles_for_action("sellers", "view"))
 def sellers():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(WRITE_ROLES):
+        if not can_module_action("sellers", "create"):
             return forbidden_response()
         error = seller_form_error(store)
         if error:
@@ -3839,13 +4057,13 @@ def sellers():
 
 
 @app.post("/sellers/import")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("sellers", "import"))
 def sellers_import():
     return handle_bulk_import("sellers", "seller", import_sellers_rows, "sellers")
 
 
 @app.post("/sellers/<seller_id>/edit")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("sellers", "edit"))
 def seller_edit(seller_id: str):
     store = load_store()
     seller = find_by_id(store["admin_users"], seller_id)
@@ -3880,7 +4098,7 @@ def seller_edit(seller_id: str):
 
 
 @app.post("/sellers/<seller_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("sellers", "delete"))
 def seller_delete(seller_id: str):
     store = load_store()
     seller = find_by_id(store.get("admin_users", []), seller_id)
@@ -3910,11 +4128,11 @@ def seller_delete(seller_id: str):
 
 
 @app.route("/clients", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+@require_roles(*roles_for_action("clients", "view"))
 def clients():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(SALES_ROLES):
+        if not can_module_action("clients", "create"):
             return forbidden_response()
         email = request.form.get("email", "").strip().lower()
         error = client_form_error(store)
@@ -3930,13 +4148,13 @@ def clients():
 
 
 @app.post("/clients/import")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("clients", "import"))
 def clients_import():
     return handle_bulk_import("clients", "client", import_clients_rows, "clients")
 
 
 @app.post("/clients/<client_id>/edit")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("clients", "edit"))
 def client_edit(client_id: str):
     store = load_store()
     client = find_by_id(store["clients"], client_id)
@@ -3963,7 +4181,7 @@ def client_edit(client_id: str):
 
 
 @app.post("/clients/<client_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("clients", "delete"))
 def client_delete(client_id: str):
     store = load_store()
     client = find_by_id(store.get("clients", []), client_id)
@@ -3992,7 +4210,7 @@ def client_delete(client_id: str):
 
 
 @app.get("/products")
-@require_roles("super_admin", "commercial_manager", "operator", "inventory", "readonly")
+@require_roles(*roles_for_action("products", "view"))
 def products():
     store = load_store()
     query = request.args.get("q", "").strip().lower()
@@ -4007,13 +4225,13 @@ def products():
 
 
 @app.post("/products/import")
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("products", "import"))
 def products_import():
     return handle_bulk_import("products", "product", import_products_rows, "products")
 
 
 @app.route("/products/new", methods=["GET", "POST"])
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("products", "create"))
 def product_new():
     store = load_store()
     if request.method == "POST":
@@ -4045,7 +4263,7 @@ def product_new():
 
 
 @app.route("/products/<product_id>/edit", methods=["GET", "POST"])
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("products", "edit"))
 def product_edit(product_id: str):
     store = load_store()
     product = find_by_id(store["products"], product_id)
@@ -4093,7 +4311,7 @@ def product_edit(product_id: str):
 
 
 @app.post("/products/<product_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("products", "delete"))
 def product_delete(product_id: str):
     store = load_store()
     product = find_by_id(store["products"], product_id)
@@ -4125,11 +4343,11 @@ def product_delete(product_id: str):
 
 
 @app.route("/stock", methods=["GET", "POST"])
-@require_roles("super_admin", "operator", "inventory", "readonly")
+@require_roles(*roles_for_action("stock", "view"))
 def stock():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(INVENTORY_ROLES):
+        if not can_module_action("stock", "edit"):
             return forbidden_response()
         stock_before = {
             product["id"]: {
@@ -4226,17 +4444,17 @@ def stock():
 
 
 @app.post("/stock/import")
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("stock", "import"))
 def stock_import():
     return handle_bulk_import("stock", "stock", import_stock_rows, "stock")
 
 
 @app.route("/categories", methods=["GET", "POST"])
-@require_roles("super_admin", "operator", "inventory", "readonly")
+@require_roles(*roles_for_action("categories", "view"))
 def categories():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(INVENTORY_ROLES):
+        if not can_module_action("categories", "create"):
             return forbidden_response()
         name = request.form.get("name", "").strip()
         image_url = request.form.get("imageUrl", "").strip() or save_upload(request.files.get("imageFile"), "categories")
@@ -4257,13 +4475,13 @@ def categories():
 
 
 @app.post("/categories/import")
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("categories", "import"))
 def categories_import():
     return handle_bulk_import("categories", "category", import_categories_rows, "categories")
 
 
 @app.route("/categories/<category_id>/edit", methods=["POST"])
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("categories", "edit"))
 def category_edit(category_id: str):
     store = load_store()
     category = find_by_id(store["categories"], category_id)
@@ -4297,7 +4515,7 @@ def category_edit(category_id: str):
 
 
 @app.post("/categories/<category_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("categories", "delete"))
 def category_delete(category_id: str):
     store = load_store()
     if not any(product.get("categoryId") == category_id for product in store["products"]):
@@ -4317,11 +4535,11 @@ def category_delete(category_id: str):
 
 
 @app.route("/media-library", methods=["GET", "POST"])
-@require_roles("super_admin", "operator", "inventory", "readonly")
+@require_roles(*roles_for_action("media_library", "view"))
 def media_library():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(INVENTORY_ROLES):
+        if not can_module_action("media_library", "create"):
             return forbidden_response()
         product_id = request.form.get("productId", "")
         asset_url = request.form.get("assetUrl", "").strip() or save_upload(request.files.get("assetFile"), "library")
@@ -4368,13 +4586,13 @@ def media_library():
 
 
 @app.post("/media-library/import")
-@require_roles("super_admin", "operator", "inventory")
+@require_roles(*roles_for_action("media_library", "import"))
 def media_library_import():
     return handle_bulk_import("media_library", "media_asset", import_media_assets_rows, "media_library")
 
 
 @app.post("/media-library/<asset_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("media_library", "delete"))
 def media_asset_delete(asset_id: str):
     store = load_store()
     asset = find_by_id(store.get("media_assets", []), asset_id)
@@ -4405,11 +4623,11 @@ def media_asset_delete(asset_id: str):
 
 
 @app.route("/service-technicians", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+@require_roles(*roles_for_action("service_technicians", "view"))
 def service_technicians():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(WRITE_ROLES):
+        if not can_module_action("service_technicians", "create"):
             return forbidden_response()
         name = request.form.get("name", "").strip()
         if not name:
@@ -4433,13 +4651,13 @@ def service_technicians():
 
 
 @app.post("/service-technicians/import")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("service_technicians", "import"))
 def service_technicians_import():
     return handle_bulk_import("service_technicians", "service_technician", import_service_technicians_rows, "service_technicians")
 
 
 @app.post("/service-technicians/<technician_id>/edit")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("service_technicians", "edit"))
 def service_technician_edit(technician_id: str):
     store = load_store()
     technician = find_by_id(store.get("service_technicians", []), technician_id)
@@ -4464,7 +4682,7 @@ def service_technician_edit(technician_id: str):
 
 
 @app.post("/service-technicians/<technician_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("service_technicians", "delete"))
 def service_technician_delete(technician_id: str):
     store = load_store()
     technician = find_by_id(store.get("service_technicians", []), technician_id)
@@ -4529,7 +4747,7 @@ def credit_dashboard_context(store: dict) -> dict:
 
 
 @app.get("/credit")
-@require_roles("super_admin", "commercial_manager")
+@require_roles(*roles_for_action("credit", "view"))
 def credit():
     store = load_store()
     context = credit_dashboard_context(store)
@@ -4543,7 +4761,7 @@ def credit():
 
 
 @app.get("/credit/vencimientos")
-@require_roles("super_admin", "commercial_manager")
+@require_roles(*roles_for_action("credit", "view"))
 def credit_due():
     store = load_store()
     context = credit_dashboard_context(store)
@@ -4555,7 +4773,7 @@ def credit_due():
 
 
 @app.get("/credit/historial")
-@require_roles("super_admin", "commercial_manager")
+@require_roles(*roles_for_action("credit", "view"))
 def credit_history():
     store = load_store()
     context = credit_dashboard_context(store)
@@ -4567,7 +4785,7 @@ def credit_history():
 
 
 @app.post("/credit/<client_id>/decision")
-@require_roles("super_admin", "commercial_manager")
+@require_roles(*roles_for_action("credit", "approve"))
 def credit_decision(client_id: str):
     store = load_store()
     client = find_by_id(store.get("clients", []), client_id)
@@ -4642,7 +4860,7 @@ def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:
 
 
 @app.get("/audit")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("audit", "view"))
 def audit():
     store = load_store()
     all_events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)
@@ -4688,7 +4906,7 @@ def audit():
 
 
 @app.get("/orders")
-@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+@require_roles(*roles_for_action("orders", "view"))
 def orders():
     store = load_store()
     movements = store.get("credit_movements", [])
@@ -4720,7 +4938,7 @@ def orders():
 
 
 @app.route("/orders/new", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("orders", "create"))
 def order_new():
     store = load_store()
     if request.method == "POST":
@@ -4751,7 +4969,7 @@ def order_new():
 
 
 @app.post("/orders/<order_id>/status")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*ORDER_MANAGEMENT_ROLES)
 def order_status_update(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
@@ -4822,7 +5040,7 @@ def order_status_update(order_id: str):
 
 
 @app.post("/orders/<order_id>/payments")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles("super_admin", "general_manager", "commercial_manager", "operator", "collections")
 def order_payment_create(order_id: str):
     store = load_store()
     order = find_order(store["orders"], order_id)
@@ -4885,14 +5103,14 @@ def order_payment_create(order_id: str):
 
 
 @app.get("/commissions")
-@require_roles("super_admin", "commercial_manager")
+@require_roles(*roles_for_action("commissions", "view"))
 def commissions():
     store = load_store()
     return render_template("commissions.html", **commissions_page_context(store))
 
 
 @app.post("/commissions/<order_id>/status")
-@require_roles("super_admin", "commercial_manager")
+@require_roles(*roles_for_action("commissions", "approve"))
 def commission_status_update(order_id: str):
     store = load_store()
     order = find_order(store.get("orders", []), order_id)
@@ -4925,11 +5143,11 @@ def commission_status_update(order_id: str):
 
 
 @app.route("/announcements", methods=["GET", "POST"])
-@require_roles("super_admin", "commercial_manager", "operator", "readonly")
+@require_roles(*roles_for_action("announcements", "view"))
 def announcements():
     store = load_store()
     if request.method == "POST":
-        if not role_allowed(SALES_ROLES):
+        if not can_module_action("announcements", "create"):
             return forbidden_response()
         title = request.form.get("title", "").strip()
         image_url = request.form.get("imageUrl", "").strip() or save_upload(request.files.get("imageFile"), "announcements")
@@ -4960,13 +5178,13 @@ def announcements():
 
 
 @app.post("/announcements/import")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("announcements", "import"))
 def announcements_import():
     return handle_bulk_import("announcements", "announcement", import_announcements_rows, "announcements")
 
 
 @app.post("/announcements/<announcement_id>/edit")
-@require_roles("super_admin", "commercial_manager", "operator")
+@require_roles(*roles_for_action("announcements", "edit"))
 def announcement_edit(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)
@@ -5005,7 +5223,7 @@ def announcement_edit(announcement_id: str):
 
 
 @app.post("/announcements/<announcement_id>/delete")
-@require_roles("super_admin")
+@require_roles(*roles_for_action("announcements", "delete"))
 def announcement_delete(announcement_id: str):
     store = load_store()
     announcement = find_by_id(store["announcements"], announcement_id)
