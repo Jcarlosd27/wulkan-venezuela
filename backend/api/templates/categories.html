@@ -1,45 +1,236 @@
 {% extends "base.html" %}
 {% set heading = "Categorias" %}
-{% set description = "Administra familias del catalogo, imagenes y visibilidad para la app movil." %}
+{% set description = "Familias del catalogo con imagen, jerarquia, orden y publicacion para app movil." %}
+
+{% macro category_graph(title, chart, icon) -%}
+<article class="panel product-chart">
+  <div class="panel-header">
+    <div>
+      <h2>{{ title }}</h2>
+      <span>Resumen compacto Graphify</span>
+    </div>
+    <span><i class="bi {{ icon }}"></i></span>
+  </div>
+  {% if chart.values %}
+  <div
+    class="graphify-bars"
+    data-labels='{{ chart["labels"] | tojson }}'
+    data-values='{{ chart["values"] | tojson }}'
+  ></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi {{ icon }}"></i></div>
+    <strong>Sin datos</strong>
+    <span>Los indicadores aparecen cuando existan categorias reales.</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
+
+{% macro category_form(category=None, action_url=None) -%}
+<form class="modal-content" method="post" enctype="multipart/form-data" action="{{ action_url or url_for('categories') }}">
+  {{ csrf_field() }}
+  <div class="modal-header">
+    <div>
+      <h2 class="modal-title h5">{{ "Editar categoria" if category else "Nueva categoria" }}</h2>
+      <p class="mb-0 text-secondary">Controla como se ordena y publica esta familia en Android.</p>
+    </div>
+    <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+  </div>
+  <div class="modal-body">
+    <div class="row g-3">
+      <div class="col-12 col-lg-7">
+        <label class="form-label fw-semibold">Nombre</label>
+        <input class="form-control" name="name" value="{{ category.name if category else '' }}" placeholder="Maquinaria y jardin" required>
+      </div>
+      <div class="col-12 col-lg-5">
+        <label class="form-label fw-semibold">Slug</label>
+        <input class="form-control" name="slug" value="{{ category.slug if category else '' }}" placeholder="maquinaria-jardin">
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Descripcion</label>
+        <textarea class="form-control" name="description" rows="3" placeholder="Texto corto visible para el catalogo movil.">{{ category.description if category else '' }}</textarea>
+      </div>
+      <div class="col-12 col-lg-7">
+        <label class="form-label fw-semibold">Imagen de categoria</label>
+        <input class="form-control" name="imageUrl" value="{{ category.imageUrl if category else '' }}" placeholder="https://...">
+        <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
+      </div>
+      <div class="col-6 col-lg-3">
+        <label class="form-label fw-semibold">Icono</label>
+        <input class="form-control" name="icon" value="{{ category.icon if category else 'bi-tags' }}" placeholder="bi-tools">
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="form-label fw-semibold">Orden</label>
+        <input class="form-control" name="sortOrder" type="number" min="0" value="{{ category.sortOrder if category else 0 }}">
+      </div>
+      <div class="col-12 col-lg-5">
+        <label class="form-label fw-semibold">Categoria padre</label>
+        <select class="form-select" name="parentId">
+          <option value="">Categoria raiz</option>
+          {% for option in all_categories %}
+          {% if not category or option.id != category.id %}
+          <option value="{{ option.id }}" {% if category and category.parentId == option.id %}selected{% endif %}>{{ option.name }}</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-lg-4">
+        <label class="form-label fw-semibold">Estado</label>
+        <select class="form-select" name="status">
+          {% for value, label in category_status_options %}
+          <option value="{{ value }}" {% if (category and category.status == value) or (not category and value == 'active') %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-lg-3 d-flex align-items-end">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" role="switch" name="visibleInApp" id="visible{{ category.id if category else 'New' }}" {% if not category or category.visibleInApp %}checked{% endif %}>
+          <label class="form-check-label fw-semibold" for="visible{{ category.id if category else 'New' }}">Visible en app</label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+    <button class="btn btn-primary" type="submit">
+      <i class="bi bi-check2-circle"></i> {{ "Guardar cambios" if category else "Crear categoria" }}
+    </button>
+  </div>
+</form>
+{%- endmacro %}
 
 {% block top_action %}
 <div class="d-flex flex-wrap gap-2">
+  {% if can_module_action('categories', 'export') %}
+  <a class="btn btn-light" href="{{ url_for('categories_export', **request.args.to_dict()) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+  {% endif %}
+  {% if can_module_action('categories', 'import') %}
   <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#categoriesImportModal">
     <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
   </button>
+  {% endif %}
+  {% if can_create_categories %}
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
     <i class="bi bi-plus-lg"></i> Nueva categoria
   </button>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block content %}
 {% include "partials/bulk_import_result.html" %}
 
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
 <section class="row g-3 mb-3">
-  <div class="col-12 col-md-4">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-tags"></i></div>
-      <span>Total categorias</span>
-      <strong>{{ categories | length }}</strong>
+      <span>Categorias</span>
+      <strong>{{ metrics.total }}</strong>
+      <em>Total</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Activas</span>
+      <strong>{{ metrics.active }}</strong>
       <em>Catalogo</em>
     </article>
   </div>
-  <div class="col-12 col-md-4">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
-      <span>Activas</span>
-      <strong>{{ categories | selectattr('status', 'equalto', 'active') | list | length }}</strong>
-      <em>App</em>
+      <div class="metric-icon"><i class="bi bi-phone"></i></div>
+      <span>En app</span>
+      <strong>{{ metrics.visible }}</strong>
+      <em>Movil</em>
     </article>
   </div>
-  <div class="col-12 col-md-4">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-image"></i></div>
       <span>Con imagen</span>
-      <strong>{{ categories | selectattr('imageUrl') | list | length }}</strong>
+      <strong>{{ metrics.with_image }}</strong>
       <em>Media</em>
     </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-diagram-3"></i></div>
+      <span>Raiz</span>
+      <strong>{{ metrics.root }}</strong>
+      <em>Primer nivel</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-node-plus"></i></div>
+      <span>Subcategorias</span>
+      <strong>{{ metrics.children }}</strong>
+      <em>Hijas</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel product-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label">Buscar categoria</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Nombre, slug, descripcion o padre">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in category_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Publicacion</label>
+      <select class="form-select" name="visibility">
+        <option value="">Todas</option>
+        <option value="visible" {% if filters.visibility == 'visible' %}selected{% endif %}>Visible app</option>
+        <option value="hidden" {% if filters.visibility == 'hidden' %}selected{% endif %}>Oculta app</option>
+        <option value="missing_image" {% if filters.visibility == 'missing_image' %}selected{% endif %}>Sin imagen</option>
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Jerarquia</label>
+      <select class="form-select" name="parent">
+        <option value="">Todas</option>
+        <option value="root" {% if filters.parent == 'root' %}selected{% endif %}>Solo raiz</option>
+        {% for option in all_categories %}
+        <option value="{{ option.id }}" {% if filters.parent == option.id %}selected{% endif %}>Hijas de {{ option.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2 d-flex justify-content-end gap-2">
+      <a class="btn btn-light w-100" href="{{ url_for('categories') }}"><i class="bi bi-x-lg"></i> Limpiar</a>
+      <button class="btn btn-dark w-100" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-7">
+    {{ category_graph("Productos por categoria", category_charts.products, "bi-bar-chart") }}
+  </div>
+  <div class="col-12 col-xl-5">
+    {{ category_graph("Visibilidad del catalogo", category_charts.visibility, "bi-pie-chart") }}
   </div>
 </section>
 
@@ -47,7 +238,7 @@
   <div class="panel-header">
     <div>
       <h2>Categorias del ecommerce</h2>
-      <span>Imagen, descripcion y estado visible en Android</span>
+      <span>Orden, imagen, jerarquia y estado usado por Android.</span>
     </div>
     <span>{{ categories | length }} registros</span>
   </div>
@@ -56,9 +247,11 @@
       <thead>
         <tr>
           <th>Categoria</th>
-          <th>Descripcion</th>
+          <th>Jerarquia</th>
+          <th>Orden</th>
+          <th>Productos</th>
           <th>Imagen</th>
-          <th>Estado</th>
+          <th>Publicacion</th>
           <th class="text-end">Acciones</th>
         </tr>
       </thead>
@@ -71,28 +264,75 @@
                 {% if category.imageUrl %}
                 <img src="{{ category.imageUrl }}" alt="{{ category.name }}">
                 {% else %}
-                <i class="bi bi-image"></i>
+                <i class="bi {{ category.icon or 'bi-tags' }}"></i>
                 {% endif %}
               </div>
               <div>
                 <strong>{{ category.name }}</strong>
-                <small>{{ category.id }}</small>
+                <small>{{ category.slug }}{% if category.description %} - {{ category.description }}{% endif %}</small>
               </div>
             </div>
           </td>
-          <td class="text-secondary">{{ category.description }}</td>
+          <td>
+            <strong class="d-block">{{ category.parentName or 'Categoria raiz' }}</strong>
+            <small class="text-secondary">{{ category.childrenCount }} subcategorias</small>
+          </td>
+          <td>
+            <span class="badge text-bg-light">{{ category.sortOrder }}</span>
+          </td>
+          <td>
+            <strong>{{ category.productsCount }}</strong>
+            <small class="d-block text-secondary">{{ category.visibleProductsCount }} visibles app</small>
+          </td>
           <td>
             {% if category.imageUrl %}
             <a href="{{ category.imageUrl }}" target="_blank" class="btn btn-sm btn-light"><i class="bi bi-box-arrow-up-right"></i> Ver</a>
             {% else %}
-            <span class="text-secondary">Pendiente</span>
+            <span class="badge text-bg-warning">Sin imagen</span>
             {% endif %}
           </td>
-          <td><span class="badge {{ category.status | badge_class }}">{{ category.status }}</span></td>
+          <td>
+            <span class="badge {{ category.status | badge_class }}">{{ category.statusLabel }}</span>
+            {% if category.visibleInApp %}
+            <span class="badge text-bg-success d-block mt-1">Visible app</span>
+            {% else %}
+            <span class="badge text-bg-secondary d-block mt-1">Oculta app</span>
+            {% endif %}
+          </td>
           <td class="text-end">
-            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editCategory{{ loop.index }}">
-              <i class="bi bi-pencil"></i> Editar
-            </button>
+            <div class="d-flex justify-content-end gap-2">
+              {% if can_edit_categories %}
+              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editCategory{{ loop.index }}">
+                <i class="bi bi-pencil"></i> Editar
+              </button>
+              <form method="post" action="{{ url_for('category_status', category_id=category.id) }}">
+                {{ csrf_field() }}
+                <input type="hidden" name="status" value="{{ 'inactive' if category.status == 'active' else 'active' }}">
+                {% if category.status != 'active' %}
+                <input type="hidden" name="visibleInApp" value="on">
+                {% endif %}
+                <button class="btn btn-sm btn-outline-secondary" type="submit">
+                  <i class="bi {{ 'bi-pause-circle' if category.status == 'active' else 'bi-check-circle' }}"></i>
+                </button>
+              </form>
+              {% endif %}
+              {% if can_module_action('categories', 'delete') %}
+              <form method="post" action="{{ url_for('category_delete', category_id=category.id) }}">
+                {{ csrf_field() }}
+                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-tags"></i></div>
+              <strong>Sin categorias registradas</strong>
+              <span>Crea familias reales o importa la plantilla oficial antes de publicar productos en la app.</span>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -102,82 +342,15 @@
 </section>
 
 <div class="modal fade" id="newCategoryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <form class="modal-content" method="post" enctype="multipart/form-data">
-      {{ csrf_field() }}
-      <div class="modal-header">
-        <h2 class="modal-title h5">Nueva categoria</h2>
-        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Nombre</label>
-          <input class="form-control" name="name" required>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Descripcion</label>
-          <textarea class="form-control" name="description" rows="3"></textarea>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Imagen de categoria</label>
-          <input class="form-control" name="imageUrl" placeholder="https://...">
-          <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
-        </div>
-        <label class="form-label fw-semibold">Estado</label>
-        <select class="form-select" name="status">
-          <option value="active">Activa</option>
-          <option value="inactive">Inactiva</option>
-        </select>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
-        <button class="btn btn-primary" type="submit">Crear categoria</button>
-      </div>
-    </form>
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    {{ category_form() }}
   </div>
 </div>
 
 {% for category in categories %}
 <div class="modal fade" id="editCategory{{ loop.index }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <form method="post" enctype="multipart/form-data" action="{{ url_for('category_edit', category_id=category.id) }}">
-        {{ csrf_field() }}
-        <div class="modal-header">
-          <h2 class="modal-title h5">Editar {{ category.name }}</h2>
-          <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-        </div>
-        <div class="modal-body">
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Nombre</label>
-            <input class="form-control" name="name" value="{{ category.name }}" required>
-          </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Descripcion</label>
-            <textarea class="form-control" name="description" rows="3">{{ category.description }}</textarea>
-          </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Imagen de categoria</label>
-            <input class="form-control" name="imageUrl" value="{{ category.imageUrl }}">
-            <input class="form-control mt-2" name="imageFile" type="file" accept="image/*">
-          </div>
-          <label class="form-label fw-semibold">Estado</label>
-          <select class="form-select" name="status">
-            <option value="active" {% if category.status == 'active' %}selected{% endif %}>Activa</option>
-            <option value="inactive" {% if category.status == 'inactive' %}selected{% endif %}>Inactiva</option>
-          </select>
-        </div>
-        <div class="modal-footer justify-content-between">
-          <button class="btn btn-primary" type="submit">Guardar cambios</button>
-        </div>
-      </form>
-      {% if can_delete_data() %}
-      <form class="px-3 pb-3 text-end" method="post" action="{{ url_for('category_delete', category_id=category.id) }}">
-        {{ csrf_field() }}
-        <button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Eliminar categoria</button>
-      </form>
-      {% endif %}
-    </div>
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    {{ category_form(category, url_for('category_edit', category_id=category.id)) }}
   </div>
 </div>
 {% endfor %}
@@ -185,11 +358,12 @@
 {% set bulk_modal_id = "categoriesImportModal" %}
 {% set bulk_action = url_for("categories_import") %}
 {% set bulk_title = "Importar categorias" %}
-{% set bulk_help = "Crea o actualiza familias del catalogo con descripcion, imagen y estado para Android." %}
-{% set bulk_columns = ["nombre", "descripcion", "imagen_url", "estado"] %}
+{% set bulk_help = "Crea o actualiza familias del catalogo con slug, imagen, icono, orden y visibilidad para Android." %}
+{% set bulk_columns = ["nombre", "slug", "descripcion", "imagen_url", "icono", "orden", "categoria_padre", "visible_app", "estado"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/graphify.js') }}"></script>
 {% endblock %}

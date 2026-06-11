@@ -29,16 +29,22 @@ class MockMobileRepository implements MobileRepository {
       id: "machinery-garden",
       name: "Maquinaria y jardin",
       description: "Equipos, accesorios y repuestos Wulkan",
+      icon: "bi-tools",
+      sortOrder: 10,
     ),
     MobileCategory(
       id: "spare-parts",
       name: "Repuestos",
       description: "Piezas por SKU, modelo o compatibilidad",
+      icon: "bi-gear",
+      sortOrder: 20,
     ),
     MobileCategory(
       id: "technical-services",
       name: "Servicios tecnicos",
       description: "Soporte autorizado por zona y especialidad",
+      icon: "bi-wrench",
+      sortOrder: 30,
     ),
   ];
 
@@ -269,6 +275,11 @@ class ApiMobileRepository implements MobileRepository {
             id: _asString(item["id"]),
             name: _asString(item["name"], fallback: "Categoria Wulkan"),
             description: _asString(item["description"]),
+            slug: _asString(item["slug"]),
+            imageUrl: _asString(item["imageUrl"]),
+            icon: _asString(item["icon"]),
+            sortOrder: _asInt(item["sortOrder"]),
+            parentId: _asString(item["parentId"]),
           ),
         )
         .toList();

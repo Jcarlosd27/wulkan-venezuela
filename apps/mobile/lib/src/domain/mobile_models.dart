@@ -3,11 +3,21 @@ class MobileCategory {
     required this.id,
     required this.name,
     required this.description,
+    this.slug = "",
+    this.imageUrl = "",
+    this.icon = "",
+    this.sortOrder = 0,
+    this.parentId = "",
   });
 
   final String id;
   final String name;
   final String description;
+  final String slug;
+  final String imageUrl;
+  final String icon;
+  final int sortOrder;
+  final String parentId;
 }
 
 class MobileProduct {

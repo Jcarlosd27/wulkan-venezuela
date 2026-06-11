@@ -10,7 +10,7 @@
 - [x] Fase 1.4 - Clientes B2B / Ferreteros: ficha comercial completa con razon social, RIF, contactos, WhatsApp, direccion fiscal/despacho, vendedor asignado, lista de precios, descuento autorizado, estados de cliente, cobranza, riesgo, credito, filtros, acciones de activar/revisar/bloquear, detalle con ordenes recientes, importacion Excel ampliada, datos sincronizados hacia app movil y auditoria before/after.
 - [x] Fase 1.5 - Vendedores: ficha comercial completa con codigo, zona, territorio, supervisor, fecha ingreso, acceso movil, comision, meta mensual, observaciones, filtros por estado/zona/busqueda, ranking, avance de meta, ticket promedio, cartera asignada, ventas, comisiones, creditos pendientes, detalle operativo, importacion Excel ampliada, bloqueo real de acceso movil y resumen sincronizado hacia la app vendedor.
 - [x] Fase 1.6 - Productos / Catalogo: ficha comercial completa, importacion Excel ampliada, filtros compactos, export CSV, duplicado como borrador oculto, validaciones de precio/stock/estado, galeria y PDFs, publicacion movil controlada por estado/visibleInApp, Graphify de stock/media y bloqueo de mock movil en produccion.
-- [ ] Fase 1.7 - Categorias.
+- [x] Fase 1.7 - Categorias: CRUD profesional con slug, imagen, icono, orden, jerarquia, visibilidad app, filtros compactos, export CSV, importacion Excel/CSV con previsualizacion crear/actualizar/error, Graphify de productos/visibilidad, API movil filtrada y auditoria before/after.
 - [ ] Fase 1.8 - Inventario / Stock.
 - [ ] Fase 1.9 - Ordenes.
 - [ ] Fase 1.10 - Credito B2B.
@@ -440,6 +440,19 @@ Las categorías deben ordenar el catálogo visible en la app.
 * Subir imagen.
 * Importar categorías.
 * Exportar categorías.
+
+### Check implementado
+
+* [x] Campos completos: nombre, slug, descripcion, imagen, icono, orden, estado, visible en app y categoria padre.
+* [x] CRUD con validacion de slug unico, jerarquia circular, estado valido y orden no negativo.
+* [x] Eliminacion segura: borrado real si no hay dependencias y eliminacion logica si existen productos o subcategorias.
+* [x] Importacion Excel/CSV ampliada con previsualizacion de filas por crear, actualizar y error.
+* [x] Exportacion CSV respetando filtros del modulo.
+* [x] Filtros compactos por busqueda, estado, publicacion y jerarquia.
+* [x] Graphify para productos por categoria y visibilidad del catalogo.
+* [x] API movil entrega solo categorias activas y visibles en app, ordenadas por sortOrder.
+* [x] App movil consume imagen/icono de categorias cargadas desde el admin.
+* [x] Auditoria before/after en crear, editar, cambiar estado y eliminar.
 
 ---
 

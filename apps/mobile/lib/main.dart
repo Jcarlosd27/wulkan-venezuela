@@ -1857,12 +1857,8 @@ class _CategoryRail extends StatelessWidget {
               return _CategoryPill(
                 title: category.name,
                 subtitle: category.description,
-                icon: switch (index % 4) {
-                  0 => Icons.grass_outlined,
-                  1 => Icons.construction_outlined,
-                  2 => Icons.settings_suggest_outlined,
-                  _ => Icons.agriculture_outlined,
-                },
+                imageUrl: category.imageUrl,
+                icon: _categoryIcon(category.icon, index),
                 onTap: onOpenCatalog,
               );
             },
@@ -1871,6 +1867,28 @@ class _CategoryRail extends StatelessWidget {
       },
     );
   }
+}
+
+IconData _categoryIcon(String iconName, int index) {
+  final normalized = iconName.toLowerCase();
+  if (normalized.contains('tool') || normalized.contains('wrench')) {
+    return Icons.construction_outlined;
+  }
+  if (normalized.contains('gear') || normalized.contains('settings')) {
+    return Icons.settings_suggest_outlined;
+  }
+  if (normalized.contains('image')) {
+    return Icons.image_outlined;
+  }
+  if (normalized.contains('truck')) {
+    return Icons.local_shipping_outlined;
+  }
+  return switch (index % 4) {
+    0 => Icons.grass_outlined,
+    1 => Icons.construction_outlined,
+    2 => Icons.settings_suggest_outlined,
+    _ => Icons.agriculture_outlined,
+  };
 }
 
 class _CustomerCommerceCard extends StatelessWidget {
@@ -2054,12 +2072,14 @@ class _CategoryPill extends StatelessWidget {
   const _CategoryPill({
     required this.title,
     required this.subtitle,
+    required this.imageUrl,
     required this.icon,
     required this.onTap,
   });
 
   final String title;
   final String subtitle;
+  final String imageUrl;
   final IconData icon;
   final VoidCallback onTap;
 
@@ -2080,12 +2100,29 @@ class _CategoryPill extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: _wulkanOrange.withValues(alpha: 0.1),
-                foregroundColor: _wulkanOrange,
-                child: Icon(icon, size: 18),
-              ),
+              if (imageUrl.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.network(
+                    imageUrl,
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => CircleAvatar(
+                      radius: 22,
+                      backgroundColor: _wulkanOrange.withValues(alpha: 0.1),
+                      foregroundColor: _wulkanOrange,
+                      child: Icon(icon, size: 20),
+                    ),
+                  ),
+                )
+              else
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: _wulkanOrange.withValues(alpha: 0.1),
+                  foregroundColor: _wulkanOrange,
+                  child: Icon(icon, size: 20),
+                ),
               const Spacer(),
               Text(
                 title,

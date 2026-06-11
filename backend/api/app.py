@@ -119,6 +119,11 @@ PRODUCT_TYPE_OPTIONS = [
     ("service", "Servicio"),
     ("consumable", "Consumible"),
 ]
+CATEGORY_STATUS_OPTIONS = [
+    ("active", "Activa"),
+    ("inactive", "Inactiva"),
+    ("hidden", "Oculta en app"),
+]
 CLIENT_TYPE_OPTIONS = [
     ("ferretero", "Ferretero"),
     ("distribuidor", "Distribuidor"),
@@ -359,7 +364,7 @@ ADMIN_MENU_GROUPS = [
         "icon": "bi-box-seam",
         "items": [
             {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "products_export", "product_duplicate", "product_delete"]},
-            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "category_delete"]},
+            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "categories_export", "category_status", "category_delete"]},
             {"module": "media_library", "endpoint": "media_library", "label": "Biblioteca tecnica", "icon": "bi-folder2-open", "active": ["media_library", "media_library_import", "media_asset_delete"]},
             {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import"]},
         ],
@@ -503,12 +508,17 @@ IMPORT_TEMPLATE_GROUPS = [
                 "module": "categories",
                 "endpoint": "categories",
                 "title": "Categorias",
-                "description": "Familias del catalogo con imagen para app movil.",
+                "description": "Familias del catalogo con imagen, icono, orden y visibilidad para app movil.",
                 "columns": [
                     {"name": "nombre", "required": True, "example": "Repuestos", "help": "Nombre de categoria."},
+                    {"name": "slug", "required": False, "example": "repuestos", "help": "Identificador publico. Si viene vacio se genera desde el nombre."},
                     {"name": "descripcion", "required": False, "example": "Piezas y consumibles compatibles por SKU.", "help": "Texto visible."},
                     {"name": "imagen_url", "required": False, "example": "https://cdn.wulkan/categorias/repuestos.jpg", "help": "Imagen de categoria."},
-                    {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
+                    {"name": "icono", "required": False, "example": "bi-tools", "help": "Icono Bootstrap opcional para panel/app."},
+                    {"name": "orden", "required": False, "example": "20", "help": "Orden de aparicion en app movil."},
+                    {"name": "categoria_padre", "required": False, "example": "Maquinaria", "help": "Nombre, slug o id de categoria padre."},
+                    {"name": "visible_app", "required": False, "example": "si", "help": "si/no para publicar en app movil."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active, inactive o hidden."},
                 ],
             },
             {
@@ -728,6 +738,10 @@ def seller_status_label(value: str) -> str:
 
 def product_status_label(value: str) -> str:
     return dict(PRODUCT_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
+def category_status_label(value: str) -> str:
+    return dict(CATEGORY_STATUS_OPTIONS).get(value, value or "Sin estado")
 
 
 def order_status_label(value: str) -> str:
@@ -2229,6 +2243,31 @@ def find_category_by_name(store: dict, name: str) -> dict | None:
     )
 
 
+def category_slug(value: str) -> str:
+    return normalize_import_key(value).replace("_", "-")
+
+
+def find_category_by_slug(store: dict, slug: str) -> dict | None:
+    normalized = category_slug(slug)
+    if not normalized:
+        return None
+    return next(
+        (
+            category
+            for category in store.get("categories", [])
+            if category_slug(category.get("slug", "") or category.get("id", "")) == normalized
+            or category_slug(category.get("name", "")) == normalized
+        ),
+        None,
+    )
+
+
+def find_category_reference(store: dict, value: str) -> dict | None:
+    if not value:
+        return None
+    return find_by_id(store.get("categories", []), value) or find_category_by_slug(store, value) or find_category_by_name(store, value)
+
+
 def ensure_import_category(store: dict, category_id: str = "", category_name: str = "") -> dict:
     category = find_by_id(store.get("categories", []), category_id) if category_id else None
     if category:
@@ -2240,9 +2279,14 @@ def ensure_import_category(store: dict, category_id: str = "", category_name: st
         category = {
             "id": next_id("cat", category_name),
             "name": category_name,
+            "slug": category_slug(category_name),
             "description": "Categoria creada automaticamente por carga masiva.",
             "imageUrl": "",
+            "icon": "bi-tags",
+            "sortOrder": len(store.get("categories", [])) + 1,
             "status": "active",
+            "visibleInApp": True,
+            "parentId": "",
             "updatedAt": utc_now(),
         }
         store.setdefault("categories", []).append(category)
@@ -2289,6 +2333,7 @@ def append_unique(target: list, values: list[str]) -> None:
 def import_categories_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_categories: dict[str, int] = {}
+    seen_slugs: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         name = row_value(row, "name", "nombre", "categoria", "category")
         if not name:
@@ -2299,12 +2344,48 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
             bulk_error(result, row_number, f"categoria {name}: {duplicate_message}")
             continue
         category_id = row_value(row, "id", "category_id", "categoria_id")
-        category = find_by_id(store.get("categories", []), category_id) if category_id else find_category_by_name(store, name)
+        slug = category_slug(row_value(row, "slug", "url_slug", default=name))
+        duplicate_slug_message = duplicate_in_upload(seen_slugs, slug, row_number)
+        if duplicate_slug_message:
+            bulk_error(result, row_number, f"categoria {name}: slug {duplicate_slug_message}")
+            continue
+        category = (
+            find_by_id(store.get("categories", []), category_id)
+            if category_id
+            else find_category_by_slug(store, slug) or find_category_by_name(store, name)
+        )
+        if any(item.get("id") != (category or {}).get("id") and category_slug(item.get("slug", "")) == slug for item in store.get("categories", [])):
+            bulk_error(result, row_number, f"categoria {name}: slug ya existe.")
+            continue
+        status = row_value(row, "status", "estado", default=(category or {}).get("status", "active")) or "active"
+        if status not in {key for key, _label in CATEGORY_STATUS_OPTIONS}:
+            bulk_error(result, row_number, f"categoria {name}: estado no valido.")
+            continue
+        sort_order = parse_import_int(
+            row_value(row, "sortOrder", "orden", "orden_visual", default=(category or {}).get("sortOrder", 0)),
+            int((category or {}).get("sortOrder") or 0),
+        )
+        if sort_order < 0:
+            bulk_error(result, row_number, f"categoria {name}: orden no puede ser negativo.")
+            continue
+        parent_reference = row_value(row, "parentId", "categoria_padre", "padre", "parent", default=(category or {}).get("parentId", ""))
+        parent = find_category_reference(store, parent_reference) if parent_reference else None
+        if parent_reference and not parent:
+            bulk_warning(result, row_number, f"{name}: categoria padre no encontrada, quedara como raiz.")
+        visible_default = bool((category or {}).get("visibleInApp", True))
+        visible_in_app = parse_import_bool(row_value(row, "visibleInApp", "visible_app", "publicar_app"), visible_default)
+        if status != "active":
+            visible_in_app = False
         payload = {
             "name": name,
+            "slug": slug,
             "description": row_value(row, "description", "descripcion", default=(category or {}).get("description", "")),
             "imageUrl": row_value(row, "imageUrl", "imagen", "imagen_url", "url_imagen", default=(category or {}).get("imageUrl", "")),
-            "status": row_value(row, "status", "estado", default=(category or {}).get("status", "active")) or "active",
+            "icon": row_value(row, "icon", "icono", default=(category or {}).get("icon", "bi-tags")) or "bi-tags",
+            "sortOrder": sort_order,
+            "status": status,
+            "visibleInApp": visible_in_app,
+            "parentId": parent.get("id", "") if parent and parent.get("id") != (category or {}).get("id") else "",
             "updatedAt": utc_now(),
         }
         if category:
@@ -3657,7 +3738,7 @@ def save_upload(file_storage, folder: str = "library") -> str:
 
 def product_payload(store: dict, existing: dict | None = None) -> dict:
     category_id = request.form.get("categoryId", "machinery-garden")
-    categories = store.get("categories") or [{"id": "uncategorized", "name": "Sin categoria"}]
+    categories = product_category_options(store) or [{"id": "uncategorized", "name": "Sin categoria"}]
     category = find_by_id(categories, category_id) or categories[0]
     sku = request.form.get("sku", "").strip().upper()
     title = request.form.get("title", "").strip()
@@ -3790,9 +3871,10 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
     maximum_stock = safe_int(request.form.get("maximumStock"), 0)
     cost = safe_float(request.form.get("costReferenceUsd"), 0)
     margin = safe_float(request.form.get("marginPercent"), 0)
-    if not store.get("categories"):
+    available_categories = product_category_options(store)
+    if not available_categories:
         return "Debes crear al menos una categoria antes de crear productos."
-    if not find_by_id(store.get("categories", []), request.form.get("categoryId", "")):
+    if not find_by_id(available_categories, request.form.get("categoryId", "")):
         return "Selecciona una categoria valida para el producto."
     if not sku:
         return "El SKU es obligatorio para crear o editar productos."
@@ -3830,6 +3912,215 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
         return "El stock maximo no puede ser menor que el stock minimo."
 
     return ""
+
+
+def enrich_category(category: dict, store: dict) -> dict:
+    enriched = dict(category)
+    products = [
+        product
+        for product in store.get("products", [])
+        if product.get("categoryId") == category.get("id")
+        and product.get("status") != "deleted"
+    ]
+    children = [
+        item
+        for item in store.get("categories", [])
+        if item.get("parentId") == category.get("id")
+        and item.get("status") != "deleted"
+    ]
+    parent = find_by_id(store.get("categories", []), category.get("parentId", ""))
+    enriched["slug"] = category_slug(enriched.get("slug") or enriched.get("name", ""))
+    enriched["icon"] = enriched.get("icon") or "bi-tags"
+    enriched["sortOrder"] = safe_int(enriched.get("sortOrder"), 0)
+    enriched["status"] = enriched.get("status") or "active"
+    enriched["statusLabel"] = category_status_label(enriched["status"])
+    enriched["visibleInApp"] = bool(enriched.get("visibleInApp", enriched["status"] == "active")) and enriched["status"] == "active"
+    enriched["parentId"] = enriched.get("parentId", "")
+    enriched["parentName"] = parent.get("name", "") if parent else ""
+    enriched["productsCount"] = len(products)
+    enriched["visibleProductsCount"] = sum(
+        1 for product in products if product.get("status") == "active" and product.get("visibleInApp", True)
+    )
+    enriched["childrenCount"] = len(children)
+    enriched["imageStatus"] = "Completa" if enriched.get("imageUrl") else "Pendiente"
+    return enriched
+
+
+def category_payload(store: dict, existing: dict | None = None) -> dict:
+    name = request.form.get("name", "").strip()
+    uploaded_image = save_upload(request.files.get("imageFile"), "categories")
+    image_url = uploaded_image or request.form.get("imageUrl", "").strip() or (existing or {}).get("imageUrl", "")
+    status = request.form.get("status", "active")
+    visible_in_app = request.form.get("visibleInApp") == "on"
+    if status != "active":
+        visible_in_app = False
+    parent_id = request.form.get("parentId", "").strip()
+    if existing and parent_id == existing.get("id"):
+        parent_id = ""
+    now = utc_now()
+    payload = {
+        "name": name,
+        "slug": category_slug(request.form.get("slug", "").strip() or name),
+        "description": request.form.get("description", "").strip(),
+        "imageUrl": image_url,
+        "icon": request.form.get("icon", "bi-tags").strip() or "bi-tags",
+        "sortOrder": max(0, safe_int(request.form.get("sortOrder"), 0)),
+        "status": status,
+        "visibleInApp": visible_in_app,
+        "parentId": parent_id if find_by_id(store.get("categories", []), parent_id) else "",
+        "updatedAt": now,
+    }
+    if existing is None:
+        payload["id"] = next_id("cat", payload["slug"] or name)
+        payload["createdAt"] = now
+    else:
+        payload["id"] = existing["id"]
+        payload["createdAt"] = existing.get("createdAt", now)
+    return payload
+
+
+def category_form_snapshot() -> dict:
+    name = request.form.get("name", "").strip()
+    status = request.form.get("status", "active")
+    return {
+        "name": name,
+        "slug": category_slug(request.form.get("slug", "").strip() or name),
+        "description": request.form.get("description", "").strip(),
+        "imageUrl": request.form.get("imageUrl", "").strip(),
+        "icon": request.form.get("icon", "bi-tags").strip() or "bi-tags",
+        "sortOrder": request.form.get("sortOrder", "0"),
+        "status": status,
+        "visibleInApp": request.form.get("visibleInApp") == "on" and status == "active",
+        "parentId": request.form.get("parentId", "").strip(),
+    }
+
+
+def category_descendant_ids(store: dict, category_id: str) -> set[str]:
+    descendants: set[str] = set()
+    pending = [category_id]
+    while pending:
+        parent_id = pending.pop()
+        for category in store.get("categories", []):
+            if category.get("parentId") == parent_id and category.get("id") not in descendants:
+                descendants.add(category.get("id", ""))
+                pending.append(category.get("id", ""))
+    return descendants
+
+
+def category_form_error(store: dict, existing: dict | None = None) -> str:
+    name = request.form.get("name", "").strip()
+    slug = category_slug(request.form.get("slug", "").strip() or name)
+    status = request.form.get("status", "active")
+    sort_order = safe_int(request.form.get("sortOrder"), 0)
+    parent_id = request.form.get("parentId", "").strip()
+    if not name:
+        return "El nombre de la categoria es obligatorio."
+    if not slug:
+        return "El slug de la categoria no es valido."
+    duplicated = any(
+        category_slug(category.get("slug", "") or category.get("name", "")) == slug
+        and (existing is None or category.get("id") != existing.get("id"))
+        for category in store.get("categories", [])
+    )
+    if duplicated:
+        return f"El slug {slug} ya existe en categorias."
+    if status not in {key for key, _label in CATEGORY_STATUS_OPTIONS}:
+        return "El estado de la categoria no es valido."
+    if sort_order < 0:
+        return "El orden de visualizacion no puede ser negativo."
+    if parent_id:
+        if existing and parent_id == existing.get("id"):
+            return "Una categoria no puede ser su propia categoria padre."
+        if existing and parent_id in category_descendant_ids(store, existing.get("id", "")):
+            return "La categoria padre seleccionada generaria una jerarquia circular."
+        if not find_by_id(store.get("categories", []), parent_id):
+            return "Selecciona una categoria padre valida."
+    return ""
+
+
+def category_page_context(store: dict, error: str = "") -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "visibility": request.args.get("visibility", "").strip(),
+        "parent": request.args.get("parent", "").strip(),
+    }
+    categories = [
+        enrich_category(category, store)
+        for category in store.get("categories", [])
+        if category.get("status") != "deleted"
+    ]
+    filtered = categories
+    if filters["q"]:
+        filtered = [
+            category
+            for category in filtered
+            if filters["q"] in " ".join(
+                [
+                    category.get("name", ""),
+                    category.get("slug", ""),
+                    category.get("description", ""),
+                    category.get("parentName", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        filtered = [category for category in filtered if category.get("status") == filters["status"]]
+    if filters["visibility"] == "visible":
+        filtered = [category for category in filtered if category.get("visibleInApp")]
+    elif filters["visibility"] == "hidden":
+        filtered = [category for category in filtered if not category.get("visibleInApp")]
+    elif filters["visibility"] == "missing_image":
+        filtered = [category for category in filtered if not category.get("imageUrl")]
+    if filters["parent"] == "root":
+        filtered = [category for category in filtered if not category.get("parentId")]
+    elif filters["parent"]:
+        filtered = [category for category in filtered if category.get("parentId") == filters["parent"]]
+    metrics = {
+        "total": len(categories),
+        "active": sum(1 for category in categories if category.get("status") == "active"),
+        "visible": sum(1 for category in categories if category.get("visibleInApp")),
+        "with_image": sum(1 for category in categories if category.get("imageUrl")),
+        "root": sum(1 for category in categories if not category.get("parentId")),
+        "children": sum(1 for category in categories if category.get("parentId")),
+    }
+    return {
+        "categories": sorted(filtered, key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", ""))),
+        "all_categories": sorted(categories, key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", ""))),
+        "filters": filters,
+        "metrics": metrics,
+        "category_status_options": CATEGORY_STATUS_OPTIONS,
+        "category_charts": {
+            "products": graphify_from_pairs(
+                [(category.get("name", ""), float(category.get("productsCount") or 0)) for category in categories],
+                6,
+            ),
+            "visibility": graphify_from_pairs(
+                [
+                    ("Visibles app", metrics["visible"]),
+                    ("Ocultas", metrics["total"] - metrics["visible"]),
+                    ("Con imagen", metrics["with_image"]),
+                    ("Raiz", metrics["root"]),
+                ],
+                4,
+            ),
+        },
+        "can_create_categories": can_module_action("categories", "create"),
+        "can_edit_categories": can_module_action("categories", "edit"),
+        "error": error,
+        "bulk_result": consume_bulk_result("categories") if not error else None,
+    }
+
+
+def product_category_options(store: dict) -> list[dict]:
+    return sorted(
+        [
+            enrich_category(category, store)
+            for category in store.get("categories", [])
+            if category.get("status") != "deleted"
+        ],
+        key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", "")),
+    )
 
 
 def credential_form_error(password: str, existing: dict | None = None) -> str:
@@ -4431,7 +4722,7 @@ def products_page_context(store: dict, error: str = "", include_bulk: bool = Tru
     return {
         "products": sorted(products, key=lambda item: (item.get("categoryName", ""), item.get("title", ""))),
         "all_products": all_products,
-        "categories": sorted(store.get("categories", []), key=lambda item: item.get("name", "")),
+        "categories": product_category_options(store),
         "filters": filters,
         "metrics": metrics,
         "product_status_options": PRODUCT_STATUS_OPTIONS,
@@ -5121,7 +5412,7 @@ def product_new():
         if error:
             return render_template(
                 "product_form.html",
-                categories=store["categories"],
+                categories=product_category_options(store),
                 product_status_options=PRODUCT_STATUS_OPTIONS,
                 product_type_options=PRODUCT_TYPE_OPTIONS,
                 rate=current_rate(),
@@ -5146,7 +5437,7 @@ def product_new():
 
     return render_template(
         "product_form.html",
-        categories=store["categories"],
+        categories=product_category_options(store),
         product_status_options=PRODUCT_STATUS_OPTIONS,
         product_type_options=PRODUCT_TYPE_OPTIONS,
         rate=current_rate(),
@@ -5172,7 +5463,7 @@ def product_edit(product_id: str):
             snapshot["createdAt"] = product.get("createdAt")
             return render_template(
                 "product_form.html",
-                categories=store["categories"],
+                categories=product_category_options(store),
                 product_status_options=PRODUCT_STATUS_OPTIONS,
                 product_type_options=PRODUCT_TYPE_OPTIONS,
                 rate=current_rate(),
@@ -5198,7 +5489,7 @@ def product_edit(product_id: str):
 
     return render_template(
         "product_form.html",
-        categories=store["categories"],
+        categories=product_category_options(store),
         product_status_options=PRODUCT_STATUS_OPTIONS,
         product_type_options=PRODUCT_TYPE_OPTIONS,
         rate=current_rate(),
@@ -5401,22 +5692,97 @@ def categories():
     if request.method == "POST":
         if not can_module_action("categories", "create"):
             return forbidden_response()
-        name = request.form.get("name", "").strip()
-        image_url = request.form.get("imageUrl", "").strip() or save_upload(request.files.get("imageFile"), "categories")
-        category = {
-            "id": next_id("cat", name),
-            "name": name,
-            "description": request.form.get("description", "").strip(),
-            "imageUrl": image_url,
-            "status": request.form.get("status", "active"),
-            "updatedAt": utc_now(),
-        }
+        error = category_form_error(store)
+        if error:
+            return render_template("categories.html", **category_page_context(store, error))
+        category = category_payload(store)
         store["categories"].append(category)
-        record_audit_event(store, "create", "category", category["id"], f"Categoria creada: {category['name']}.")
+        record_change_event(
+            store,
+            "create",
+            "category",
+            category["id"],
+            f"Categoria creada: {category['name']}.",
+            None,
+            category,
+        )
         save_store(store)
         return redirect(url_for("categories"))
 
-    return render_template("categories.html", categories=store["categories"], bulk_result=consume_bulk_result("categories"))
+    return render_template("categories.html", **category_page_context(store))
+
+
+@app.get("/categories/export")
+@require_roles(*roles_for_action("categories", "export"))
+def categories_export():
+    store = load_store()
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "visibility": request.args.get("visibility", "").strip(),
+        "parent": request.args.get("parent", "").strip(),
+    }
+    categories_list = [
+        enrich_category(category, store)
+        for category in store.get("categories", [])
+        if category.get("status") != "deleted"
+    ]
+    if filters["q"]:
+        categories_list = [
+            category
+            for category in categories_list
+            if filters["q"] in " ".join([category.get("name", ""), category.get("slug", ""), category.get("description", "")]).lower()
+        ]
+    if filters["status"]:
+        categories_list = [category for category in categories_list if category.get("status") == filters["status"]]
+    if filters["visibility"] == "visible":
+        categories_list = [category for category in categories_list if category.get("visibleInApp")]
+    elif filters["visibility"] == "hidden":
+        categories_list = [category for category in categories_list if not category.get("visibleInApp")]
+    elif filters["visibility"] == "missing_image":
+        categories_list = [category for category in categories_list if not category.get("imageUrl")]
+    if filters["parent"] == "root":
+        categories_list = [category for category in categories_list if not category.get("parentId")]
+    elif filters["parent"]:
+        categories_list = [category for category in categories_list if category.get("parentId") == filters["parent"]]
+
+    output = io.StringIO()
+    fieldnames = [
+        "id",
+        "nombre",
+        "slug",
+        "descripcion",
+        "imagen_url",
+        "icono",
+        "orden",
+        "categoria_padre",
+        "visible_app",
+        "estado",
+        "productos",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for category in sorted(categories_list, key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", ""))):
+        writer.writerow(
+            {
+                "id": category.get("id", ""),
+                "nombre": category.get("name", ""),
+                "slug": category.get("slug", ""),
+                "descripcion": category.get("description", ""),
+                "imagen_url": category.get("imageUrl", ""),
+                "icono": category.get("icon", ""),
+                "orden": category.get("sortOrder", 0),
+                "categoria_padre": category.get("parentName", ""),
+                "visible_app": "si" if category.get("visibleInApp") else "no",
+                "estado": category.get("status", ""),
+                "productos": category.get("productsCount", 0),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=categorias_wulkan.csv"},
+    )
 
 
 @app.post("/categories/import")
@@ -5431,18 +5797,11 @@ def category_edit(category_id: str):
     store = load_store()
     category = find_by_id(store["categories"], category_id)
     if category:
+        error = category_form_error(store, category)
+        if error:
+            return render_template("categories.html", **category_page_context(store, error))
         before = copy.deepcopy(category)
-        image_url = request.form.get("imageUrl", "").strip() or category.get("imageUrl", "")
-        uploaded = save_upload(request.files.get("imageFile"), "categories")
-        category.update(
-            {
-                "name": request.form.get("name", "").strip(),
-                "description": request.form.get("description", "").strip(),
-                "imageUrl": uploaded or image_url,
-                "status": request.form.get("status", "active"),
-                "updatedAt": utc_now(),
-            }
-        )
+        category.update(category_payload(store, category))
         for product in store["products"]:
             if product.get("categoryId") == category_id:
                 product["categoryName"] = category["name"]
@@ -5459,23 +5818,66 @@ def category_edit(category_id: str):
     return redirect(url_for("categories"))
 
 
+@app.post("/categories/<category_id>/status")
+@require_roles(*roles_for_action("categories", "edit"))
+def category_status(category_id: str):
+    store = load_store()
+    category = find_by_id(store.get("categories", []), category_id)
+    target_status = request.form.get("status", "").strip()
+    if category and target_status in {key for key, _label in CATEGORY_STATUS_OPTIONS}:
+        before = copy.deepcopy(category)
+        category["status"] = target_status
+        category["visibleInApp"] = request.form.get("visibleInApp") == "on" and target_status == "active"
+        category["updatedAt"] = utc_now()
+        record_change_event(
+            store,
+            "status_update",
+            "category",
+            category_id,
+            f"Categoria marcada como {category_status_label(target_status)}: {category.get('name', category_id)}.",
+            before,
+            category,
+        )
+        save_store(store)
+    return redirect(url_for("categories"))
+
+
 @app.post("/categories/<category_id>/delete")
 @require_roles(*roles_for_action("categories", "delete"))
 def category_delete(category_id: str):
     store = load_store()
-    if not any(product.get("categoryId") == category_id for product in store["products"]):
-        category = find_by_id(store["categories"], category_id)
+    category = find_by_id(store["categories"], category_id)
+    if not category:
+        return redirect(url_for("categories"))
+    before = copy.deepcopy(category)
+    is_referenced = any(product.get("categoryId") == category_id for product in store["products"]) or any(
+        item.get("parentId") == category_id for item in store["categories"]
+    )
+    if is_referenced:
+        category["status"] = "deleted"
+        category["visibleInApp"] = False
+        category["deletedAt"] = utc_now()
+        record_change_event(
+            store,
+            "logical_delete",
+            "category",
+            category_id,
+            f"Categoria eliminada logicamente: {category.get('name', category_id)}.",
+            before,
+            category,
+        )
+    else:
         store["categories"] = [category for category in store["categories"] if category["id"] != category_id]
         record_change_event(
             store,
             "delete",
             "category",
             category_id,
-            f"Categoria eliminada: {(category or {}).get('name', category_id)}.",
-            category,
+            f"Categoria eliminada: {category.get('name', category_id)}.",
+            before,
             None,
         )
-        save_store(store)
+    save_store(store)
     return redirect(url_for("categories"))
 
 
@@ -6510,9 +6912,22 @@ def api_categories():
     if auth_error:
         return auth_error, 401
     categories = [
-        category
-        for category in store["categories"]
-        if category.get("status", "active") == "active"
+        {
+            "id": category.get("id", ""),
+            "name": category.get("name", ""),
+            "slug": category.get("slug", ""),
+            "description": category.get("description", ""),
+            "imageUrl": category.get("imageUrl", ""),
+            "icon": category.get("icon", "bi-tags"),
+            "sortOrder": category.get("sortOrder", 0),
+            "parentId": category.get("parentId", ""),
+            "productsCount": category.get("productsCount", 0),
+        }
+        for category in sorted(
+            [enrich_category(item, store) for item in store["categories"] if item.get("status", "active") == "active"],
+            key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", "")),
+        )
+        if category.get("visibleInApp")
     ]
     return jsonify({"items": categories})
 

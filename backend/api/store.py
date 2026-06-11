@@ -354,7 +354,17 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         product.setdefault("reserved", 0)
     for category in store.get("categories", []):
         category.setdefault("imageUrl", "")
+        category.setdefault("slug", str(category.get("id") or category.get("name", "")).strip().lower().replace(" ", "-"))
+        category.setdefault("description", "")
+        category.setdefault("icon", "bi-tags")
+        category.setdefault("sortOrder", 0)
         category.setdefault("status", "active")
+        category.setdefault("visibleInApp", category.get("status", "active") == "active")
+        category.setdefault("parentId", "")
+        category.setdefault("createdAt", utc_now())
+        category.setdefault("updatedAt", utc_now())
+        if category.get("status") != "active":
+            category["visibleInApp"] = False
 
 
 def save_json_store(store: dict[str, list[dict[str, Any]]]) -> None:
