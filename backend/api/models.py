@@ -165,6 +165,31 @@ class Order(TimestampMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class Quote(TimestampMixin, Base):
+    __tablename__ = "quotes"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    quote_number: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    client_id: Mapped[str] = mapped_column(String(80), ForeignKey("clients.id"), nullable=False)
+    seller_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    valid_until: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    sale_type: Mapped[str] = mapped_column(String(50), default="cash", nullable=False)
+    payment_terms_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_ves: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    exchange_rate_usd_ves: Mapped[float] = mapped_column(Float, default=38.5, nullable=False)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    client_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    versions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    history: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    internal_comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    converted_order_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class CreditMovement(Base):
     __tablename__ = "credit_movements"
 

@@ -14,6 +14,7 @@ from models import (
     MediaAsset,
     Order,
     Product,
+    Quote,
     ServiceTechnician,
     StockMovement,
 )
@@ -281,6 +282,36 @@ def order_to_dict(row: Order) -> dict[str, Any]:
     return payload
 
 
+def quote_to_dict(row: Quote) -> dict[str, Any]:
+    payload = copy_payload(row.payload)
+    payload.update(
+        {
+            "id": row.id,
+            "quoteNumber": row.quote_number,
+            "clientId": row.client_id,
+            "client": row.client_snapshot or {},
+            "sellerId": row.seller_id,
+            "status": row.status,
+            "version": row.version,
+            "validUntil": row.valid_until,
+            "saleType": row.sale_type,
+            "paymentTermDays": row.payment_terms_days,
+            "totalUsd": row.total_usd,
+            "totalVes": row.total_ves,
+            "exchangeRateUsdVes": row.exchange_rate_usd_ves,
+            "items": row.items or [],
+            "versions": row.versions or [],
+            "history": row.history or [],
+            "comment": row.comment,
+            "internalComment": row.internal_comment,
+            "convertedOrderId": row.converted_order_id,
+            "createdAt": iso_dt(row.created_at),
+            "updatedAt": iso_dt(row.updated_at),
+        }
+    )
+    return payload
+
+
 def credit_movement_to_dict(row: CreditMovement) -> dict[str, Any]:
     payload = copy_payload(row.payload)
     payload.update(
@@ -379,6 +410,7 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
             ],
             "stock_movements": [stock_movement_to_dict(row) for row in session.query(StockMovement).all()],
             "orders": [order_to_dict(row) for row in session.query(Order).all()],
+            "quotes": [quote_to_dict(row) for row in session.query(Quote).all()],
             "credit_movements": [credit_movement_to_dict(row) for row in session.query(CreditMovement).all()],
             "service_technicians": [
                 service_technician_to_dict(row)
@@ -405,6 +437,8 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
         sync_announcements(session, store)
         sync_stock_movements(session, store)
         sync_orders(session, store)
+        session.flush()
+        sync_quotes(session, store)
         session.flush()
         sync_credit_movements(session, store)
         sync_service_technicians(session, store)
@@ -696,6 +730,46 @@ def sync_orders(session, store: dict[str, Any]) -> None:
                 "payload": order,
             },
         )
+
+
+def sync_quotes(session, store: dict[str, Any]) -> None:
+    live_ids: set[str] = set()
+    for quote in store.get("quotes", []):
+        client_id = quote.get("clientId", "")
+        if not client_id or not session.get(Client, client_id):
+            continue
+        object_id = quote["id"]
+        live_ids.add(object_id)
+        upsert(
+            session,
+            Quote,
+            object_id,
+            {
+                "id": object_id,
+                "quote_number": quote.get("quoteNumber", object_id),
+                "client_id": client_id,
+                "seller_id": quote.get("sellerId", ""),
+                "status": quote.get("status", "draft"),
+                "version": int(quote.get("version") or 1),
+                "valid_until": quote.get("validUntil", ""),
+                "sale_type": quote.get("saleType", "cash"),
+                "payment_terms_days": int(quote.get("paymentTermDays") or 0),
+                "total_usd": float(quote.get("totalUsd") or 0),
+                "total_ves": float(quote.get("totalVes") or 0),
+                "exchange_rate_usd_ves": float(quote.get("exchangeRateUsdVes") or 38.5),
+                "items": quote.get("items") or [],
+                "client_snapshot": quote.get("client") or {},
+                "versions": quote.get("versions") or [],
+                "history": quote.get("history") or [],
+                "comment": quote.get("comment", ""),
+                "internal_comment": quote.get("internalComment", ""),
+                "converted_order_id": quote.get("convertedOrderId", ""),
+                "created_at": parse_dt(quote.get("createdAt")),
+                "updated_at": parse_dt(quote.get("updatedAt")),
+                "payload": quote,
+            },
+        )
+    soft_prune(session, Quote, live_ids)
 
 
 def sync_credit_movements(session, store: dict[str, Any]) -> None:

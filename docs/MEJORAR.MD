@@ -16,7 +16,7 @@
 - [x] Fase 1.10 - Credito B2B: submodulos de lineas, vencimientos e historial; filtros compactos; Graphify de estado/riesgo; export CSV; score, riesgo, deuda vigente/vencida, ultimo pago, promedio de pago, observacion de gerencia y decisiones completas con auditoria.
 - [x] Fase 1.11 - Cobranza: modulo independiente con cuentas por cobrar, vencidas, criticas, promesas, pagadas, acciones de gestion, abonos, bloqueo/liberacion de cliente, estado de cuenta y export CSV.
 - [x] Fase 1.12 - Despacho / Logistica: modulo logistico conectado a ordenes, estados de despacho, transportista, guia, receptor, fechas, evidencia, historial, export CSV y auditoria before/after.
-- [ ] Fase 1.13 - Cotizaciones.
+- [x] Fase 1.13 - Cotizaciones: modulo comercial con creacion/edicion, descuentos por linea, vigencia, versiones, historial, estados, duplicado, export CSV, documento imprimible y conversion trazable a orden.
 - [ ] Fase 1.14 - CRM Comercial.
 - [ ] Fase 1.15 - Comisiones.
 - [ ] Fase 1.16 - Reportes.
@@ -835,6 +835,19 @@ Debe existir módulo de cotizaciones antes de la orden.
 * Convertir en orden.
 * Ver versiones.
 * Ver historial.
+
+### Check implementado
+
+* [x] Modulo Cotizaciones visible en Comercial segun permisos `quotes`.
+* [x] Tabla SQL `quotes` con migracion Alembic para produccion DigitalOcean/PostgreSQL.
+* [x] Creacion y edicion con cliente, vendedor asignado, vigencia, condicion de venta, plazo, tasa, productos, cantidades, precio unitario y descuento.
+* [x] Estados: borrador, enviada, vista, negociacion, aceptada, rechazada, vencida y convertida.
+* [x] Versionado automatico al editar con snapshots de lineas, total y comentarios.
+* [x] Historial operativo por cotizacion con actor, fecha, estado y nota.
+* [x] Duplicado de cotizacion como borrador nuevo.
+* [x] Exportacion CSV filtrada.
+* [x] Documento imprimible/descargable para guardar como PDF desde navegador.
+* [x] Conversion a orden usando el flujo comercial existente de credito, stock, comision y auditoria.
 
 ---
 

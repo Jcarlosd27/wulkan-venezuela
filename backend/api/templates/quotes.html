@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% set heading = "Cotizaciones" %}
+{% set description = "Preventas B2B, versiones, negociacion comercial y conversion controlada a orden." %}
+
+{% macro quote_graph(title, chart, empty_text) -%}
+<article class="panel order-chart h-100">
+  <div class="panel-header">
+    <h2>{{ title }}</h2>
+    <span>Graphify</span>
+  </div>
+  {% if chart.values %}
+  <div class="graphify-bars" data-labels='{{ chart["labels"] | tojson }}' data-values='{{ chart["values"] | tojson }}'></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-file-earmark-text"></i></div>
+    <strong>Sin datos</strong>
+    <span>{{ empty_text }}</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
+
+{% block top_action %}
+<div class="d-flex flex-wrap gap-2">
+  {% if can_export_quotes %}
+  <a class="btn btn-light" href="{{ url_for('quotes_export', **request.args.to_dict()) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+  {% endif %}
+  {% if can_create_quotes %}
+  <a class="btn btn-primary" href="{{ url_for('quote_new') }}">
+    <i class="bi bi-plus-lg"></i> Nueva cotizacion
+  </a>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<section class="row g-3 mb-3">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-file-earmark-text"></i></div>
+      <span>Cotizaciones</span>
+      <strong>{{ metrics.quotes }}</strong>
+      <em>{{ metrics.filtered }} vista</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
+      <span>Abiertas</span>
+      <strong>{{ metrics.open }}</strong>
+      <em>Comercial</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Aceptadas</span>
+      <strong>{{ metrics.accepted }}</strong>
+      <em>Listas</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-receipt"></i></div>
+      <span>Convertidas</span>
+      <strong>{{ metrics.converted }}</strong>
+      <em>Ordenes</em>
+    </article>
+  </div>
+  <div class="col-12 col-lg-8 col-xl-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+      <span>Total filtrado</span>
+      <strong>{{ money_usd(metrics.total) }}</strong>
+      <em>Preventas</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel product-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label">Buscar</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Cotizacion, cliente, vendedor o SKU">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in seller_options %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Cliente</label>
+      <select class="form-select" name="client">
+        <option value="">Todos</option>
+        {% for client in client_options %}
+        <option value="{{ client.id }}" {% if filters.client == client.id %}selected{% endif %}>{{ client.businessName }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-6">{{ quote_graph("Cotizaciones por estado", quote_charts.status, "Los estados apareceran al crear cotizaciones.") }}</div>
+  <div class="col-12 col-xl-6">{{ quote_graph("Monto por vendedor", quote_charts.seller, "Los montos se agruparan por cartera.") }}</div>
+</section>
+
+<section class="panel order-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Gestion de cotizaciones</h2>
+      <span>Versiones, vigencia, condicion de pago, historial y conversion a orden.</span>
+    </div>
+    <span>{{ quotes | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle order-table">
+      <thead>
+        <tr>
+          <th>Cotizacion</th>
+          <th>Cliente</th>
+          <th>Vendedor</th>
+          <th>Condicion</th>
+          <th>Total</th>
+          <th>Estado</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for quote in quotes %}
+        <tr>
+          <td>
+            <strong class="d-block">{{ quote.quoteNumber }}</strong>
+            <small class="text-secondary">v{{ quote.version }} - {{ quote.createdAt }}</small>
+            <small class="d-block text-secondary">{{ quote.itemsCount }} unidades</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ quote.clientName }}</strong>
+            <small class="text-secondary">{{ quote.clientId }}</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ quote.sellerName }}</strong>
+            <small class="text-secondary">Cartera asignada</small>
+          </td>
+          <td>
+            <span class="badge {{ quote.saleType | badge_class }}">{{ quote.saleTypeLabel }}</span>
+            <small class="d-block text-secondary">{{ quote.paymentTermDays }} dias</small>
+            <small class="d-block text-secondary">Vence {{ quote.validUntil or 'sin fecha' }}</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(quote.totalUsd) }}</strong>
+            <small class="d-block text-secondary">VES {{ "{:,.2f}".format(quote.totalVes or 0) }}</small>
+          </td>
+          <td>
+            <span class="badge {{ quote.displayStatus | badge_class }}">{{ quote.statusLabel }}</span>
+            {% if quote.convertedOrderId %}
+            <small class="d-block text-secondary">{{ quote.convertedOrderId }}</small>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#quoteModal{{ loop.index }}">
+                <i class="bi bi-eye"></i> Detalle
+              </button>
+              {% if can_edit_quotes %}
+              <a class="btn btn-outline-primary" href="{{ url_for('quote_edit', quote_id=quote.id) }}"><i class="bi bi-pencil"></i> Editar</a>
+              {% endif %}
+              {% if can_export_quotes %}
+              <a class="btn btn-outline-secondary" href="{{ url_for('quote_download', quote_id=quote.id) }}"><i class="bi bi-filetype-pdf"></i></a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-file-earmark-text"></i></div>
+              <strong>Sin cotizaciones registradas</strong>
+              <span>Crea una cotizacion desde productos activos y clientes B2B.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% for quote in quotes %}
+<div class="modal fade" id="quoteModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title">{{ quote.quoteNumber }}</h5>
+          <small class="text-secondary">{{ quote.clientName }} - {{ quote.statusLabel }}</small>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-lg-8">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th>Cant.</th>
+                    <th>Precio</th>
+                    <th>Desc.</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                    {% for item in quote["items"] %}
+                  <tr>
+                    <td>{{ item.sku }}</td>
+                    <td>{{ item.title }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>{{ money_usd(item.unitPriceUsd) }}</td>
+                    <td>{{ item.discountPercent }}%</td>
+                    <td>{{ money_usd(item.lineTotalUsd) }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% if quote.comment %}
+            <div class="alert alert-light border"><strong>Comentario cliente:</strong> {{ quote.comment }}</div>
+            {% endif %}
+            {% if quote.internalComment %}
+            <div class="alert alert-secondary border-0"><strong>Interno:</strong> {{ quote.internalComment }}</div>
+            {% endif %}
+          </div>
+          <div class="col-12 col-lg-4">
+            <div class="list-group mb-3">
+              <div class="list-group-item d-flex justify-content-between"><span>Total</span><strong>{{ money_usd(quote.totalUsd) }}</strong></div>
+              <div class="list-group-item d-flex justify-content-between"><span>Versiones</span><strong>{{ quote.versions | length }}</strong></div>
+              <div class="list-group-item d-flex justify-content-between"><span>Vigencia</span><strong>{{ quote.validUntil or 'Sin fecha' }}</strong></div>
+            </div>
+            {% if can_edit_quotes %}
+            <form method="post" action="{{ url_for('quote_status_update', quote_id=quote.id) }}" class="border rounded-3 p-3 mb-3">
+              {{ csrf_field() }}
+              <label class="form-label fw-semibold">Cambiar estado</label>
+              <select class="form-select mb-2" name="status">
+                {% for value, label in status_options %}
+                <option value="{{ value }}" {% if quote.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <textarea class="form-control mb-2" name="note" rows="2" placeholder="Comentario de gestion"></textarea>
+              <button class="btn btn-primary w-100" type="submit"><i class="bi bi-check2"></i> Guardar estado</button>
+            </form>
+            <form method="post" action="{{ url_for('quote_duplicate', quote_id=quote.id) }}" class="mb-2">
+              {{ csrf_field() }}
+              <button class="btn btn-light w-100" type="submit"><i class="bi bi-files"></i> Duplicar cotizacion</button>
+            </form>
+            {% endif %}
+            {% if can_convert_quotes and quote.displayStatus in ['accepted', 'sent', 'viewed', 'negotiation'] and not quote.convertedOrderId %}
+            <form method="post" action="{{ url_for('quote_convert', quote_id=quote.id) }}">
+              {{ csrf_field() }}
+              <button class="btn btn-success w-100" type="submit"><i class="bi bi-receipt"></i> Convertir en orden</button>
+            </form>
+            {% endif %}
+          </div>
+          <div class="col-12">
+            <h6 class="fw-bold">Historial</h6>
+            <div class="d-flex flex-column gap-2">
+              {% for event in quote.history[:6] %}
+              <div class="border rounded-3 p-2">
+                <strong>{{ event.label }}</strong>
+                <small class="text-secondary"> - {{ event.createdAt }} - {{ event.adminName }}</small>
+                {% if event.note %}<p class="mb-0 text-secondary">{{ event.note }}</p>{% endif %}
+              </div>
+              {% else %}
+              <span class="text-secondary">Sin eventos.</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

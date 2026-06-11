@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% set heading = "Editar cotizacion" if quote else "Nueva cotizacion" %}
+{% set description = "Crea preventas B2B con productos, descuentos, vigencia y condicion comercial antes de convertirlas en orden." %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<form method="post" class="panel">
+  {{ csrf_field() }}
+  <div class="panel-header">
+    <div>
+      <h2>Informacion comercial</h2>
+      <span>La cotizacion no consume credito ni inventario hasta convertirse en orden.</span>
+    </div>
+    <a class="btn btn-light btn-sm" href="{{ url_for('quotes') }}"><i class="bi bi-arrow-left"></i> Volver</a>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-4">
+      <label class="form-label fw-semibold">Cliente ferretero</label>
+      <select class="form-select" name="clientId" required>
+        <option value="">Seleccionar cliente</option>
+        {% for client in clients %}
+        <option value="{{ client.id }}" {% if quote and quote.clientId == client.id %}selected{% endif %}>
+          {{ client.businessName }} - {{ client.assignedSellerName or 'Sin vendedor' }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label fw-semibold">Estado</label>
+      <select class="form-select" name="status">
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if (quote and quote.status == value) or (not quote and value == 'draft') %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label fw-semibold">Vigencia</label>
+      <input class="form-control" type="date" name="validUntil" value="{{ quote.validUntil if quote else default_valid_until }}">
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label fw-semibold">Tipo de venta</label>
+      <select class="form-select" name="saleType">
+        {% for value, label in sale_type_options %}
+        <option value="{{ value }}" {% if quote and quote.saleType == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-1">
+      <label class="form-label fw-semibold">Plazo</label>
+      <select class="form-select" name="paymentTermDays">
+        {% for term in payment_terms %}
+        <option value="{{ term }}" {% if quote and quote.paymentTermDays == term %}selected{% endif %}>{{ term }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-1">
+      <label class="form-label fw-semibold">Tasa</label>
+      <input class="form-control" name="exchangeRateUsdVes" value="{{ quote.exchangeRateUsdVes if quote else 38.5 }}">
+    </div>
+  </div>
+
+  <hr class="my-4">
+
+  <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+    <div>
+      <h3 class="h5 fw-bold mb-1">Productos cotizados</h3>
+      <p class="text-secondary mb-0">Precio unitario en USD, descuento por linea y cantidades solicitadas.</p>
+    </div>
+    <span class="badge text-bg-light">{{ products | length }} activos</span>
+  </div>
+
+  <div class="quote-lines">
+    {% for index in range(1, 9) %}
+    {% set current = quote["items"][index - 1] if quote and quote["items"]|length >= index else none %}
+    <div class="row g-2 align-items-end py-2 border-bottom">
+      <div class="col-12 col-lg-6">
+        <label class="form-label">Producto {{ index }}</label>
+        <select class="form-select" name="productId{{ index }}">
+          <option value="">Sin producto</option>
+          {% for product in products %}
+          <option value="{{ product.id }}" {% if current and current.productId == product.id %}selected{% endif %}>
+            {{ product.sku }} - {{ product.title }} - {{ money_usd(product.b2bPriceUsd or product.publicPriceUsd) }} - {{ product.availableStock }} disp.
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-4 col-lg-2">
+        <label class="form-label">Cantidad</label>
+        <input class="form-control" name="quantity{{ index }}" inputmode="numeric" value="{{ current.quantity if current else '' }}" placeholder="0">
+      </div>
+      <div class="col-4 col-lg-2">
+        <label class="form-label">Precio USD</label>
+        <input class="form-control" name="unitPriceUsd{{ index }}" inputmode="decimal" value="{{ current.unitPriceUsd if current else '' }}" placeholder="B2B">
+      </div>
+      <div class="col-4 col-lg-2">
+        <label class="form-label">Descuento %</label>
+        <input class="form-control" name="discountPercent{{ index }}" inputmode="decimal" value="{{ current.discountPercent if current else '' }}" placeholder="0">
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row g-3 mt-3">
+    <div class="col-12 col-lg-6">
+      <label class="form-label fw-semibold">Comentario para cliente</label>
+      <textarea class="form-control" name="comment" rows="4" placeholder="Condiciones, entrega, garantia o observacion visible">{{ quote.comment if quote else '' }}</textarea>
+    </div>
+    <div class="col-12 col-lg-6">
+      <label class="form-label fw-semibold">Observacion interna</label>
+      <textarea class="form-control" name="internalComment" rows="4" placeholder="Negociacion, autorizaciones o margen interno">{{ quote.internalComment if quote else '' }}</textarea>
+    </div>
+  </div>
+
+  {% if quote %}
+  <section class="mt-4">
+    <h3 class="h5 fw-bold">Versiones registradas</h3>
+    <div class="row g-2">
+      {% for version in quote.versions[:4] %}
+      <div class="col-12 col-lg-6">
+        <div class="border rounded-3 p-3">
+          <strong>Version {{ version.version }}</strong>
+          <small class="d-block text-secondary">{{ version.createdAt }} - {{ version.createdBy }}</small>
+          <span class="badge {{ version.status | badge_class }}">{{ quote_status_label(version.status) }}</span>
+          <span class="ms-2">{{ money_usd(version.totalUsd) }}</span>
+        </div>
+      </div>
+      {% else %}
+      <div class="col-12"><span class="text-secondary">Sin versiones anteriores.</span></div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="d-flex justify-content-end gap-2 mt-4">
+    <a class="btn btn-light" href="{{ url_for('quotes') }}">Cancelar</a>
+    <button class="btn btn-primary" type="submit"><i class="bi bi-check2-circle"></i> Guardar cotizacion</button>
+  </div>
+</form>
+{% endblock %}

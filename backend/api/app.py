@@ -208,6 +208,16 @@ ORDER_COLLECTION_STATUS_OPTIONS = [
     ("uncollectible", "Incobrable"),
     ("closed", "Cerrado"),
 ]
+QUOTE_STATUS_OPTIONS = [
+    ("draft", "Borrador"),
+    ("sent", "Enviada"),
+    ("viewed", "Vista"),
+    ("negotiation", "En negociacion"),
+    ("accepted", "Aceptada"),
+    ("rejected", "Rechazada"),
+    ("expired", "Vencida"),
+    ("converted", "Convertida en orden"),
+]
 CREDIT_RISK_OPTIONS = [
     ("low", "Bajo"),
     ("medium", "Medio"),
@@ -437,6 +447,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "collections", "endpoint": "collections", "label": "Cobranza", "icon": "bi-cash-coin", "active": ["collections", "collections_export", "collection_action", "collection_statement"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "orders_export", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "dispatch", "endpoint": "dispatch", "label": "Despacho", "icon": "bi-truck", "active": ["dispatch", "dispatch_export", "dispatch_update"]},
+            {"module": "quotes", "endpoint": "quotes", "label": "Cotizaciones", "icon": "bi-file-earmark-text", "active": ["quotes", "quote_new", "quote_edit", "quote_status_update", "quote_duplicate", "quote_convert", "quote_download", "quotes_export"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
         ],
     },
@@ -901,6 +912,10 @@ def commission_status_label(value: str) -> str:
     }.get(value, value or "Sin definir")
 
 
+def quote_status_label(value: str) -> str:
+    return dict(QUOTE_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
 def parse_utc_datetime(value: str | None) -> datetime:
     if not value:
         return datetime.now(timezone.utc)
@@ -1203,6 +1218,35 @@ def can_access_order_record(order: dict | None, store: dict) -> bool:
     return bool(client and client.get("assignedSellerId") == seller_id)
 
 
+def visible_quotes_for_current_user(store: dict) -> list[dict]:
+    quotes = store.get("quotes", [])
+    if current_admin_role() != "sales":
+        return quotes
+    seller_id = session.get("admin_user_id", "")
+    assigned_client_ids = {
+        client.get("id", "")
+        for client in store.get("clients", [])
+        if client.get("assignedSellerId") == seller_id
+    }
+    return [
+        quote
+        for quote in quotes
+        if quote.get("sellerId") == seller_id or quote.get("clientId") in assigned_client_ids
+    ]
+
+
+def can_access_quote_record(quote: dict | None, store: dict) -> bool:
+    if not quote:
+        return False
+    if current_admin_role() != "sales":
+        return True
+    seller_id = session.get("admin_user_id", "")
+    if quote.get("sellerId") == seller_id:
+        return True
+    client = find_by_id(store.get("clients", []), quote.get("clientId", ""))
+    return bool(client and client.get("assignedSellerId") == seller_id)
+
+
 def product_has_commercial_history(store: dict, product: dict | None) -> bool:
     if not product:
         return False
@@ -1480,6 +1524,7 @@ def security_context():
         "seller_status_label": seller_status_label,
         "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
+        "quote_status_label": quote_status_label,
         "sales_channel_label": sales_channel_label,
         "dispatch_status_label": dispatch_status_label,
         "due_status_label": due_status_label,
@@ -1725,6 +1770,7 @@ def readyz():
                 "products": len(store.get("products", [])),
                 "clients": len(store.get("clients", [])),
                 "orders": len(store.get("orders", [])),
+                "quotes": len(store.get("quotes", [])),
             }
         )
     except Exception as exc:
@@ -5278,6 +5324,304 @@ def assisted_order_payload_from_form() -> dict:
     }
 
 
+def next_quote_number(client_name: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    suffix = secrets.token_hex(2).upper()
+    seed = re.sub(r"[^A-Za-z0-9]+", "", client_name or "Wulkan")[:8].upper()
+    return f"COT-{stamp}-{seed}-{suffix}"
+
+
+def append_quote_history(quote: dict, status: str, note: str = "") -> None:
+    quote.setdefault("history", []).append(
+        {
+            "status": status,
+            "label": quote_status_label(status),
+            "note": note,
+            "adminUserId": session.get("admin_user_id", ""),
+            "adminName": session.get("admin_name", "Sistema"),
+            "createdAt": utc_now(),
+        }
+    )
+
+
+def quote_version_snapshot(quote: dict, note: str = "") -> dict:
+    return {
+        "version": quote.get("version", 1),
+        "status": quote.get("status", "draft"),
+        "totalUsd": quote.get("totalUsd", 0),
+        "items": copy.deepcopy(quote.get("items") or []),
+        "comment": quote.get("comment", ""),
+        "internalComment": quote.get("internalComment", ""),
+        "note": note,
+        "createdAt": utc_now(),
+        "createdBy": session.get("admin_name", "Sistema"),
+    }
+
+
+def quote_items_from_form(store: dict) -> tuple[list[dict], float, float, str]:
+    items: list[dict] = []
+    gross_usd = 0.0
+    total_usd = 0.0
+    for index in range(1, 9):
+        product_id = request.form.get(f"productId{index}", "").strip()
+        quantity = safe_int(request.form.get(f"quantity{index}"), 0)
+        if not product_id or quantity <= 0:
+            continue
+        product = find_by_id(store.get("products", []), product_id)
+        if not product:
+            return [], 0.0, 0.0, f"Producto {index} no encontrado."
+        unit_price = safe_float(
+            request.form.get(f"unitPriceUsd{index}"),
+            safe_float(product.get("b2bPriceUsd"), safe_float(product.get("publicPriceUsd"), 0)),
+        )
+        discount_percent = max(0.0, min(100.0, safe_float(request.form.get(f"discountPercent{index}"), 0)))
+        line_gross = round(unit_price * quantity, 2)
+        line_discount = round(line_gross * discount_percent / 100, 2)
+        line_total = round(max(0.0, line_gross - line_discount), 2)
+        gross_usd += line_gross
+        total_usd += line_total
+        items.append(
+            {
+                "productId": product.get("id", ""),
+                "sku": product.get("sku", ""),
+                "title": product.get("title", "Producto Wulkan"),
+                "quantity": quantity,
+                "unitPriceUsd": unit_price,
+                "discountPercent": discount_percent,
+                "lineGrossUsd": line_gross,
+                "lineDiscountUsd": line_discount,
+                "lineTotalUsd": line_total,
+                "imageUrl": product.get("imageUrl", ""),
+                "requiresQuote": bool(product.get("requiresQuote")),
+                "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
+            }
+        )
+    return items, round(gross_usd, 2), round(total_usd, 2), ""
+
+
+def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[dict | None, str]:
+    client_id = request.form.get("clientId", "").strip()
+    client = find_by_id(store.get("clients", []), client_id)
+    if not can_access_client_record(client):
+        return None, "Cliente no encontrado o fuera de tu alcance."
+    items, gross_usd, total_usd, error = quote_items_from_form(store)
+    if error:
+        return None, error
+    if not items:
+        return None, "Agrega al menos un producto a la cotizacion."
+
+    exchange_rate = safe_float(request.form.get("exchangeRateUsdVes"), current_rate())
+    seller_id = client.get("assignedSellerId", "") if client else ""
+    seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
+    status = request.form.get("status", (existing or {}).get("status", "draft"))
+    if status not in dict(QUOTE_STATUS_OPTIONS):
+        status = "draft"
+    sale_type = request.form.get("saleType", (existing or {}).get("saleType", "cash"))
+    if sale_type not in dict(SALE_TYPE_OPTIONS):
+        sale_type = "cash"
+    payment_term_days = safe_int(request.form.get("paymentTermDays"), safe_int((existing or {}).get("paymentTermDays"), 0))
+    if sale_type == "cash":
+        payment_term_days = 0
+
+    quote = copy.deepcopy(existing or {})
+    now = utc_now()
+    if not quote:
+        quote["id"] = next_id("quote", client.get("businessName", "wulkan"))
+        quote["quoteNumber"] = next_quote_number(client.get("businessName", "Wulkan"))
+        quote["version"] = 1
+        quote["versions"] = []
+        quote["history"] = []
+        quote["createdAt"] = now
+        quote["createdById"] = session.get("admin_user_id", "")
+        quote["createdByName"] = session.get("admin_name", "Sistema")
+    quote.update(
+        {
+            "clientId": client["id"],
+            "client": {
+                "id": client["id"],
+                "name": client.get("businessName", ""),
+                "taxId": client.get("taxId", ""),
+                "email": client.get("email", ""),
+                "phone": client.get("phone", ""),
+                "address": client.get("address", ""),
+                "city": client.get("city", ""),
+                "state": client.get("state", ""),
+            },
+            "sellerId": seller_id,
+            "sellerName": seller_name,
+            "items": items,
+            "grossUsd": gross_usd,
+            "discountUsd": round(max(0.0, gross_usd - total_usd), 2),
+            "totalUsd": total_usd,
+            "totalVes": round(total_usd * exchange_rate, 2),
+            "exchangeRateUsdVes": exchange_rate,
+            "saleType": sale_type,
+            "paymentTermDays": payment_term_days,
+            "validUntil": request.form.get("validUntil", "").strip(),
+            "status": status,
+            "comment": request.form.get("comment", "").strip(),
+            "internalComment": request.form.get("internalComment", "").strip(),
+            "updatedAt": now,
+        }
+    )
+    return quote, ""
+
+
+def enrich_quote(quote: dict) -> dict:
+    enriched = dict(quote)
+    status = enriched.get("status", "draft")
+    valid_until = enriched.get("validUntil", "")
+    if status not in {"accepted", "rejected", "converted"} and valid_until:
+        try:
+            if datetime.strptime(valid_until, "%Y-%m-%d").date() < datetime.now(timezone.utc).date():
+                status = "expired"
+        except ValueError:
+            pass
+    enriched["displayStatus"] = status
+    enriched["statusLabel"] = quote_status_label(status)
+    enriched["rawStatusLabel"] = quote_status_label(enriched.get("status", "draft"))
+    enriched["saleTypeLabel"] = sale_type_label(enriched.get("saleType", "cash"))
+    enriched["clientName"] = (enriched.get("client") or {}).get("name", "Cliente Wulkan")
+    enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
+    enriched["itemsCount"] = sum(int(item.get("quantity") or 0) for item in enriched.get("items") or [])
+    enriched["versions"] = sorted(enriched.get("versions") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
+    enriched["history"] = sorted(enriched.get("history") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
+    return enriched
+
+
+def quote_to_order_payload(quote: dict) -> dict:
+    items = []
+    for item in quote.get("items") or []:
+        quantity = safe_int(item.get("quantity"), 0)
+        if quantity <= 0:
+            continue
+        unit_price = safe_float(item.get("lineTotalUsd"), 0) / quantity if quantity else safe_float(item.get("unitPriceUsd"), 0)
+        items.append(
+            {
+                "productId": item.get("productId", ""),
+                "sku": item.get("sku", ""),
+                "title": item.get("title", ""),
+                "quantity": quantity,
+                "unitPriceUsd": round(unit_price, 2),
+                "imageUrl": item.get("imageUrl", ""),
+            }
+        )
+    client = quote.get("client") or {}
+    return {
+        "customerId": quote.get("clientId", ""),
+        "items": items,
+        "saleType": quote.get("saleType", "cash"),
+        "paymentTermDays": quote.get("paymentTermDays", 0),
+        "salesChannel": "admin",
+        "shippingAddress": client.get("address", ""),
+        "customerComment": quote.get("comment", ""),
+        "internalComment": f"Orden convertida desde cotizacion {quote.get('quoteNumber', '')}. {quote.get('internalComment', '')}".strip(),
+        "notes": quote.get("internalComment", ""),
+        "preview": {
+            "grossUsd": quote.get("grossUsd", quote.get("totalUsd", 0)),
+            "subtotalUsd": quote.get("totalUsd", 0),
+            "totalUsd": quote.get("totalUsd", 0),
+            "totalVes": quote.get("totalVes", 0),
+            "exchangeRateUsdVes": quote.get("exchangeRateUsdVes", current_rate()),
+        },
+    }
+
+
+def quote_form_context(store: dict, quote: dict | None = None, error: str = "") -> dict:
+    clients_list = [
+        enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+        for client in visible_clients_for_current_user(store)
+        if client.get("status") in {"active", "prospect", "review"}
+    ]
+    products = [
+        enrich_inventory_product(product, store.get("orders", []))
+        for product in store.get("products", [])
+        if product.get("status") == "active"
+    ]
+    default_valid_until = (datetime.now(timezone.utc) + timedelta(days=7)).date().isoformat()
+    return {
+        "quote": enrich_quote(quote) if quote else None,
+        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "products": sorted(products, key=lambda item: item.get("title", "")),
+        "status_options": QUOTE_STATUS_OPTIONS,
+        "sale_type_options": SALE_TYPE_OPTIONS,
+        "payment_terms": PAYMENT_TERM_OPTIONS,
+        "default_valid_until": default_valid_until,
+        "error": error,
+    }
+
+
+def quotes_page_context(store: dict, error: str = "") -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "client": request.args.get("client", "").strip(),
+    }
+    all_quotes = [
+        enrich_quote(quote)
+        for quote in sorted(visible_quotes_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
+    ]
+    quotes_list = all_quotes
+    if filters["q"]:
+        quotes_list = [
+            quote for quote in quotes_list
+            if filters["q"] in " ".join(
+                [
+                    quote.get("quoteNumber", ""),
+                    quote.get("clientName", ""),
+                    quote.get("sellerName", ""),
+                    quote.get("comment", ""),
+                    quote.get("internalComment", ""),
+                    " ".join(item.get("sku", "") for item in quote.get("items") or []),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        quotes_list = [quote for quote in quotes_list if quote.get("displayStatus") == filters["status"] or quote.get("status") == filters["status"]]
+    if filters["seller"]:
+        quotes_list = [quote for quote in quotes_list if quote.get("sellerId") == filters["seller"]]
+    if filters["client"]:
+        quotes_list = [quote for quote in quotes_list if quote.get("clientId") == filters["client"]]
+
+    status_counts: dict[str, int] = {}
+    seller_totals: dict[str, float] = {}
+    for quote in all_quotes:
+        status_counts[quote.get("statusLabel", "Sin estado")] = status_counts.get(quote.get("statusLabel", "Sin estado"), 0) + 1
+        seller = quote.get("sellerName") or "Sin vendedor"
+        seller_totals[seller] = seller_totals.get(seller, 0.0) + float(quote.get("totalUsd") or 0)
+    sellers = [
+        seller
+        for seller in store.get("admin_users", [])
+        if seller.get("role") == "sales" and seller.get("status") != "deleted"
+    ]
+    metrics = {
+        "quotes": len(all_quotes),
+        "filtered": len(quotes_list),
+        "open": sum(1 for quote in all_quotes if quote.get("displayStatus") in {"draft", "sent", "viewed", "negotiation"}),
+        "accepted": sum(1 for quote in all_quotes if quote.get("displayStatus") == "accepted"),
+        "converted": sum(1 for quote in all_quotes if quote.get("displayStatus") == "converted"),
+        "total": round(sum(float(quote.get("totalUsd") or 0) for quote in quotes_list), 2),
+    }
+    return {
+        "quotes": quotes_list,
+        "metrics": metrics,
+        "filters": filters,
+        "status_options": QUOTE_STATUS_OPTIONS,
+        "seller_options": sorted(sellers, key=lambda item: item.get("name", "")),
+        "client_options": sorted(visible_clients_for_current_user(store), key=lambda item: item.get("businessName", "")),
+        "quote_charts": {
+            "status": graphify_from_pairs(list(status_counts.items()), 8),
+            "seller": graphify_from_pairs(list(seller_totals.items()), 6),
+        },
+        "can_create_quotes": can_module_action("quotes", "create"),
+        "can_edit_quotes": can_module_action("quotes", "edit"),
+        "can_export_quotes": can_module_action("quotes", "export"),
+        "can_convert_quotes": can_module_action("quotes", "edit") or can_module_action("orders", "create"),
+        "error": error,
+    }
+
+
 def orders_page_context(store: dict, error: str = "") -> dict:
     filters = {
         "q": request.args.get("q", "").strip().lower(),
@@ -7194,6 +7538,7 @@ def audit():
         "commission_update",
         "collection_update",
         "dispatch_update",
+        "quote_convert",
         "password_change",
         "bulk_import",
     }
@@ -7213,6 +7558,253 @@ def audit():
         action_options=sorted({event.get("action", "") for event in all_events if event.get("action")}),
         entity_options=sorted({event.get("entityType", "") for event in all_events if event.get("entityType")}),
         actor_options=sorted({event.get("actorName", "") for event in all_events if event.get("actorName")}),
+    )
+
+
+@app.get("/quotes")
+@require_roles(*roles_for_action("quotes", "view"))
+def quotes():
+    store = load_store()
+    return render_template("quotes.html", **quotes_page_context(store))
+
+
+@app.get("/quotes/export")
+@require_roles(*roles_for_action("quotes", "export"))
+def quotes_export():
+    store = load_store()
+    context = quotes_page_context(store)
+    output = io.StringIO()
+    fieldnames = [
+        "cotizacion",
+        "fecha",
+        "cliente",
+        "vendedor",
+        "estado",
+        "vigencia",
+        "tipo_venta",
+        "plazo_dias",
+        "version",
+        "total_usd",
+        "total_ves",
+        "items",
+        "orden_convertida",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for quote in context["quotes"]:
+        writer.writerow(
+            {
+                "cotizacion": quote.get("quoteNumber", ""),
+                "fecha": quote.get("createdAt", ""),
+                "cliente": quote.get("clientName", ""),
+                "vendedor": quote.get("sellerName", ""),
+                "estado": quote.get("statusLabel", ""),
+                "vigencia": quote.get("validUntil", ""),
+                "tipo_venta": quote.get("saleTypeLabel", ""),
+                "plazo_dias": quote.get("paymentTermDays", 0),
+                "version": quote.get("version", 1),
+                "total_usd": quote.get("totalUsd", 0),
+                "total_ves": quote.get("totalVes", 0),
+                "items": "|".join(
+                    f"{item.get('sku', '')}:{item.get('quantity', 0)}"
+                    for item in quote.get("items") or []
+                ),
+                "orden_convertida": quote.get("convertedOrderId", ""),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=cotizaciones_wulkan.csv"},
+    )
+
+
+@app.route("/quotes/new", methods=["GET", "POST"])
+@require_roles(*roles_for_action("quotes", "create"))
+def quote_new():
+    store = load_store()
+    if request.method == "POST":
+        quote, error = quote_payload_from_form(store)
+        if error:
+            return render_template("quote_form.html", **quote_form_context(store, None, error)), 400
+        append_quote_history(quote, quote.get("status", "draft"), "Cotizacion creada.")
+        store.setdefault("quotes", []).append(quote)
+        record_audit_event(
+            store,
+            "create",
+            "quote",
+            quote["id"],
+            f"Cotizacion {quote['quoteNumber']} creada para {quote['client'].get('name', 'cliente')}.",
+        )
+        save_store(store)
+        return redirect(url_for("quotes"))
+    return render_template("quote_form.html", **quote_form_context(store))
+
+
+@app.route("/quotes/<quote_id>/edit", methods=["GET", "POST"])
+@require_roles(*roles_for_action("quotes", "edit"))
+def quote_edit(quote_id: str):
+    store = load_store()
+    quote = find_by_id(store.get("quotes", []), quote_id)
+    if not quote or not can_access_quote_record(quote, store):
+        return redirect(url_for("quotes"))
+    if request.method == "POST":
+        before = copy.deepcopy(quote)
+        updated, error = quote_payload_from_form(store, quote)
+        if error:
+            return render_template("quote_form.html", **quote_form_context(store, quote, error)), 400
+        updated.setdefault("versions", []).append(quote_version_snapshot(before, "Version anterior antes de editar."))
+        quote.clear()
+        quote.update(updated)
+        quote["version"] = safe_int(before.get("version"), 1) + 1
+        append_quote_history(quote, quote.get("status", "draft"), f"Cotizacion editada a version {quote['version']}.")
+        record_change_event(
+            store,
+            "update",
+            "quote",
+            quote_id,
+            f"Cotizacion {quote.get('quoteNumber', quote_id)} editada.",
+            before,
+            quote,
+        )
+        save_store(store)
+        return redirect(url_for("quotes"))
+    return render_template("quote_form.html", **quote_form_context(store, quote))
+
+
+@app.post("/quotes/<quote_id>/status")
+@require_roles(*roles_for_action("quotes", "edit"))
+def quote_status_update(quote_id: str):
+    store = load_store()
+    quote = find_by_id(store.get("quotes", []), quote_id)
+    if not quote or not can_access_quote_record(quote, store):
+        return redirect(url_for("quotes"))
+    before = copy.deepcopy(quote)
+    status = request.form.get("status", quote.get("status", "draft"))
+    if status not in dict(QUOTE_STATUS_OPTIONS):
+        return redirect(url_for("quotes"))
+    note = request.form.get("note", "").strip()
+    now = utc_now()
+    quote["status"] = status
+    quote["updatedAt"] = now
+    if status == "sent":
+        quote["sentAt"] = quote.get("sentAt") or now
+    elif status == "viewed":
+        quote["viewedAt"] = quote.get("viewedAt") or now
+    elif status == "accepted":
+        quote["acceptedAt"] = quote.get("acceptedAt") or now
+    elif status == "rejected":
+        quote["rejectedAt"] = quote.get("rejectedAt") or now
+    append_quote_history(quote, status, note or f"Estado cambiado a {quote_status_label(status)}.")
+    record_change_event(
+        store,
+        "update_status",
+        "quote",
+        quote_id,
+        f"Cotizacion movida a {quote_status_label(status)}.",
+        before,
+        quote,
+    )
+    save_store(store)
+    return redirect(url_for("quotes"))
+
+
+@app.post("/quotes/<quote_id>/duplicate")
+@require_roles(*roles_for_action("quotes", "create"))
+def quote_duplicate(quote_id: str):
+    store = load_store()
+    source = find_by_id(store.get("quotes", []), quote_id)
+    if not source or not can_access_quote_record(source, store):
+        return redirect(url_for("quotes"))
+    quote = copy.deepcopy(source)
+    quote["id"] = next_id("quote", quote.get("clientName") or quote.get("quoteNumber", "wulkan"))
+    quote["quoteNumber"] = next_quote_number((quote.get("client") or {}).get("name", "Wulkan"))
+    quote["status"] = "draft"
+    quote["version"] = 1
+    quote["versions"] = []
+    quote["convertedOrderId"] = ""
+    quote["createdAt"] = utc_now()
+    quote["updatedAt"] = quote["createdAt"]
+    quote["createdById"] = session.get("admin_user_id", "")
+    quote["createdByName"] = session.get("admin_name", "Sistema")
+    quote["history"] = []
+    append_quote_history(quote, "draft", f"Duplicada desde {source.get('quoteNumber', source.get('id', ''))}.")
+    store.setdefault("quotes", []).append(quote)
+    record_audit_event(
+        store,
+        "create",
+        "quote",
+        quote["id"],
+        f"Cotizacion {quote['quoteNumber']} duplicada desde {source.get('quoteNumber', '')}.",
+    )
+    save_store(store)
+    return redirect(url_for("quotes"))
+
+
+@app.post("/quotes/<quote_id>/convert")
+@require_roles(*roles_for_action("orders", "create"))
+def quote_convert(quote_id: str):
+    store = load_store()
+    quote = find_by_id(store.get("quotes", []), quote_id)
+    if not quote or not can_access_quote_record(quote, store):
+        return redirect(url_for("quotes"))
+    if quote.get("convertedOrderId"):
+        return redirect(url_for("orders"))
+    before = copy.deepcopy(quote)
+    if quote.get("status") not in {"accepted", "sent", "viewed", "negotiation"}:
+        quote["status"] = "accepted"
+        quote["acceptedAt"] = utc_now()
+        append_quote_history(quote, "accepted", "Aceptada al convertir en orden.")
+    order, error = build_commercial_order(
+        store,
+        quote_to_order_payload(quote),
+        actor=order_actor(),
+        default_channel="seller_assisted",
+    )
+    if error:
+        return render_template("quotes.html", **quotes_page_context(store, error)), 400
+    order["quoteId"] = quote["id"]
+    order["quoteNumber"] = quote.get("quoteNumber", "")
+    append_order_history(order, order.get("status", ""), f"Orden creada desde cotizacion {quote.get('quoteNumber', '')}.")
+    store.setdefault("orders", []).append(order)
+    quote["status"] = "converted"
+    quote["convertedOrderId"] = order["orderId"]
+    quote["updatedAt"] = utc_now()
+    append_quote_history(quote, "converted", f"Convertida en orden {order['orderId']}.")
+    record_change_event(
+        store,
+        "quote_convert",
+        "quote",
+        quote_id,
+        f"Cotizacion {quote.get('quoteNumber', quote_id)} convertida en orden {order['orderId']}.",
+        before,
+        quote,
+    )
+    record_audit_event(
+        store,
+        "create",
+        "order",
+        order["orderId"],
+        f"Orden creada desde cotizacion {quote.get('quoteNumber', '')}.",
+    )
+    save_store(store)
+    return redirect(url_for("orders"))
+
+
+@app.get("/quotes/<quote_id>/download")
+@require_roles(*roles_for_action("quotes", "export"))
+def quote_download(quote_id: str):
+    store = load_store()
+    quote = find_by_id(store.get("quotes", []), quote_id)
+    if not quote or not can_access_quote_record(quote, store):
+        return redirect(url_for("quotes"))
+    enriched = enrich_quote(quote)
+    html = render_template("quote_print.html", quote=enriched)
+    filename = f"{enriched.get('quoteNumber', 'cotizacion')}.html".replace("/", "-")
+    return Response(
+        html,
+        mimetype="text/html; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

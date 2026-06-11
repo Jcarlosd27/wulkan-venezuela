@@ -77,6 +77,7 @@ DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
     "products": [],
     "announcements": [],
     "orders": [],
+    "quotes": [],
     "admin_users": [],
     "clients": [],
     "credit_movements": [],
@@ -318,6 +319,38 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         order.setdefault("statusHistory", [])
         order.setdefault("createdAt", utc_now())
         order.setdefault("updatedAt", order.get("createdAt", utc_now()))
+    store.setdefault("quotes", [])
+    for quote in store.get("quotes", []):
+        quote.setdefault("id", quote.get("quoteNumber", ""))
+        quote.setdefault("quoteNumber", quote.get("id", ""))
+        quote.setdefault("clientId", "")
+        quote.setdefault("client", {"name": "Cliente Wulkan"})
+        quote.setdefault("sellerId", "")
+        quote.setdefault("sellerName", "")
+        quote.setdefault("items", [])
+        quote.setdefault("grossUsd", quote.get("totalUsd", 0.0))
+        quote.setdefault("discountUsd", 0.0)
+        quote.setdefault("totalUsd", 0.0)
+        quote.setdefault("totalVes", 0.0)
+        quote.setdefault("exchangeRateUsdVes", 38.5)
+        quote.setdefault("saleType", "cash")
+        quote.setdefault("paymentTermDays", 0)
+        quote.setdefault("validUntil", "")
+        quote.setdefault("status", "draft")
+        quote.setdefault("comment", "")
+        quote.setdefault("internalComment", "")
+        quote.setdefault("version", 1)
+        quote.setdefault("versions", [])
+        quote.setdefault("history", [])
+        quote.setdefault("convertedOrderId", "")
+        quote.setdefault("sentAt", "")
+        quote.setdefault("viewedAt", "")
+        quote.setdefault("acceptedAt", "")
+        quote.setdefault("rejectedAt", "")
+        quote.setdefault("createdById", "")
+        quote.setdefault("createdByName", "")
+        quote.setdefault("createdAt", utc_now())
+        quote.setdefault("updatedAt", quote.get("createdAt", utc_now()))
     for movement in store.get("credit_movements", []):
         movement.setdefault("movementType", "payment")
         movement.setdefault("clientId", "")
