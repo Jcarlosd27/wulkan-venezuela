@@ -20,7 +20,7 @@
 - [x] Fase 1.14 - CRM Comercial: modulo de leads, prospectos, oportunidades, tareas y visitas con pipeline, actividades, proxima accion, valor ponderado, filtros, Graphify, export CSV, permisos y auditoria.
 - [x] Fase 1.15 - Comisiones: estados pendiente/revision/aprobada/pagada/retenida/anulada, base comisionable, regla, bloqueo de pago por saldo/mora/devolucion, filtros, Graphify, export CSV y auditoria before/after.
 - [x] Fase 1.16 - Reportes: modulo consolidado con filtros por fecha, vendedor, cliente, categoria, producto y estado; reportes comercial/financiero/inventario/vendedores; Graphify ejecutivo; export CSV, Excel y vista imprimible PDF con auditoria de descarga.
-- [ ] Fase 1.17 - Auditoria.
+- [x] Fase 1.17 - Auditoria: filtros por fecha, accion, modulo, actor y criticidad; clasificacion seguridad/cambio/exportacion/lectura; Graphify por criticidad, accion, modulo y actor; export CSV auditado; detalle before/after protegido.
 - [ ] Fase 1.18 - Configuracion General.
 - [ ] Fase 1.19 - Importaciones Masivas.
 - [ ] Fase 1.20 - Documentos.

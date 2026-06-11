@@ -307,6 +307,30 @@ REPORT_TYPE_OPTIONS = [
     ("inventory", "Inventario"),
     ("sellers", "Vendedores"),
 ]
+AUDIT_WRITE_ACTIONS = {
+    "create",
+    "update",
+    "delete",
+    "payment",
+    "update_status",
+    "credit_decision",
+    "commission_update",
+    "collection_update",
+    "dispatch_update",
+    "quote_convert",
+    "crm_activity",
+    "password_change",
+    "bulk_import",
+}
+AUDIT_SECURITY_ACTIONS = {
+    "login",
+    "logout",
+    "login_failed",
+    "login_limited",
+    "login_blocked",
+    "password_reset",
+    "session_revoke",
+}
 ROLE_LABELS = {
     "super_admin": "Super admin",
     "general_manager": "Gerente general",
@@ -538,7 +562,7 @@ ADMIN_MENU_GROUPS = [
         "icon": "bi-shield-lock",
         "items": [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
-            {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit"]},
+            {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit", "audit_export"]},
             {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
             {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete", "admin_user_status", "admin_user_reset_password", "admin_user_revoke_sessions"]},
         ],
@@ -8216,9 +8240,18 @@ def credit_decision(client_id: str):
 
 
 def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:
+    created_at = parse_utc_datetime(event.get("createdAt", ""))
+    date_from = parse_filter_date(filters.get("date_from"))
+    date_to = parse_filter_date(filters.get("date_to"))
+    if date_from and created_at < date_from:
+        return False
+    if date_to and created_at >= date_to + timedelta(days=1):
+        return False
     if filters["action"] and event.get("action", "") != filters["action"]:
         return False
     if filters["entity_type"] and event.get("entityType", "") != filters["entity_type"]:
+        return False
+    if filters.get("severity") and event.get("severity", "") != filters["severity"]:
         return False
     actor_haystack = f"{event.get('actorName', '')} {event.get('actorRole', '')}".lower()
     if filters["actor"] and filters["actor"].lower() not in actor_haystack:
@@ -8243,53 +8276,153 @@ def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:
     return True
 
 
-@app.get("/audit")
-@require_roles(*roles_for_action("audit", "view"))
-def audit():
-    store = load_store()
+def audit_event_severity(event: dict) -> str:
+    action = event.get("action", "")
+    if action in {"delete", "login_failed", "login_limited", "login_blocked"}:
+        return "critical"
+    if action in AUDIT_SECURITY_ACTIONS:
+        return "security"
+    if action in AUDIT_WRITE_ACTIONS or event.get("metadata", {}).get("changedFields"):
+        return "write"
+    if action == "export":
+        return "export"
+    return "read"
+
+
+def audit_event_label(value: str) -> str:
+    return {
+        "critical": "Critico",
+        "security": "Seguridad",
+        "write": "Cambio",
+        "export": "Exportacion",
+        "read": "Lectura",
+    }.get(value, value or "Lectura")
+
+
+def audit_page_context(store: dict) -> dict:
     all_events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)
+    for event in all_events:
+        event["severity"] = audit_event_severity(event)
+        event["severityLabel"] = audit_event_label(event["severity"])
+        metadata = event.get("metadata") or {}
+        event["changedFieldsCount"] = len(metadata.get("changedFields") or [])
+        event["hasSnapshot"] = bool(metadata.get("before") or metadata.get("after"))
     filters = {
         "q": request.args.get("q", "").strip(),
+        "date_from": request.args.get("date_from", "").strip(),
+        "date_to": request.args.get("date_to", "").strip(),
         "action": request.args.get("action", "").strip(),
         "entity_type": request.args.get("entity_type", "").strip(),
         "actor": request.args.get("actor", "").strip(),
+        "severity": request.args.get("severity", "").strip(),
     }
-    filtered_events = [
-        event for event in all_events
-        if audit_event_matches_filters(event, filters)
-    ]
+    filtered_events = [event for event in all_events if audit_event_matches_filters(event, filters)]
     events = filtered_events[:1000]
-    write_actions = {
-        "create",
-        "update",
-        "delete",
-        "payment",
-        "update_status",
-        "credit_decision",
-        "commission_update",
-        "collection_update",
-        "dispatch_update",
-        "quote_convert",
-        "crm_activity",
-        "password_change",
-        "bulk_import",
-    }
+    action_counts: dict[str, float] = {}
+    entity_counts: dict[str, float] = {}
+    actor_counts: dict[str, float] = {}
+    severity_counts: dict[str, float] = {}
+    for event in filtered_events:
+        action = event.get("action", "sin_accion")
+        entity = event.get("entityType", "sin_modulo")
+        actor = event.get("actorName", "Sistema")
+        severity = event.get("severityLabel", "Lectura")
+        action_counts[action] = action_counts.get(action, 0) + 1
+        entity_counts[entity] = entity_counts.get(entity, 0) + 1
+        actor_counts[actor] = actor_counts.get(actor, 0) + 1
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
     metrics = {
         "total": len(all_events),
         "filtered": len(filtered_events),
         "actors": len({event.get("actorId") or event.get("actorName") for event in filtered_events}),
-        "writes": sum(1 for event in filtered_events if event.get("action") in write_actions),
+        "writes": sum(1 for event in filtered_events if event.get("severity") == "write"),
+        "security": sum(1 for event in filtered_events if event.get("severity") in {"security", "critical"}),
+        "exports": sum(1 for event in filtered_events if event.get("severity") == "export"),
+        "snapshots": sum(1 for event in filtered_events if event.get("hasSnapshot")),
     }
     graphify_summary = f"{metrics['writes']} cambios / {metrics['actors']} actores"
-    return render_template(
-        "audit.html",
-        events=events,
-        metrics=metrics,
-        graphify_summary=graphify_summary,
-        filters=filters,
-        action_options=sorted({event.get("action", "") for event in all_events if event.get("action")}),
-        entity_options=sorted({event.get("entityType", "") for event in all_events if event.get("entityType")}),
-        actor_options=sorted({event.get("actorName", "") for event in all_events if event.get("actorName")}),
+    return {
+        "events": events,
+        "metrics": metrics,
+        "graphify_summary": graphify_summary,
+        "filters": filters,
+        "action_options": sorted({event.get("action", "") for event in all_events if event.get("action")}),
+        "entity_options": sorted({event.get("entityType", "") for event in all_events if event.get("entityType")}),
+        "actor_options": sorted({event.get("actorName", "") for event in all_events if event.get("actorName")}),
+        "severity_options": [
+            ("critical", "Critico"),
+            ("security", "Seguridad"),
+            ("write", "Cambio"),
+            ("export", "Exportacion"),
+            ("read", "Lectura"),
+        ],
+        "charts": {
+            "actions": graphify_from_pairs(list(action_counts.items()), 8),
+            "entities": graphify_from_pairs(list(entity_counts.items()), 8),
+            "actors": graphify_from_pairs(list(actor_counts.items()), 8),
+            "severity": graphify_from_pairs(list(severity_counts.items()), 8),
+        },
+        "can_export_audit": can_module_action("audit", "export"),
+    }
+
+
+@app.get("/audit")
+@require_roles(*roles_for_action("audit", "view"))
+def audit():
+    store = load_store()
+    return render_template("audit.html", **audit_page_context(store))
+
+
+@app.get("/audit/export")
+@require_roles(*roles_for_action("audit", "export"))
+def audit_export():
+    store = load_store()
+    context = audit_page_context(store)
+    output = io.StringIO()
+    fieldnames = [
+        "fecha",
+        "criticidad",
+        "accion",
+        "actor",
+        "rol",
+        "entidad",
+        "id_entidad",
+        "detalle",
+        "campos_cambiados",
+        "origen",
+        "ip",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for event in context["events"]:
+        writer.writerow(
+            {
+                "fecha": event.get("createdAt", ""),
+                "criticidad": event.get("severityLabel", ""),
+                "accion": event.get("action", ""),
+                "actor": event.get("actorName", ""),
+                "rol": event.get("actorRole", ""),
+                "entidad": event.get("entityType", ""),
+                "id_entidad": event.get("entityId", ""),
+                "detalle": event.get("detail", ""),
+                "campos_cambiados": ", ".join((event.get("metadata") or {}).get("changedFields") or []),
+                "origen": f"{event.get('method', '')} {event.get('path', '')}",
+                "ip": event.get("ipAddress", ""),
+            }
+        )
+    record_audit_event(
+        store,
+        "export",
+        "audit",
+        "audit_events",
+        "Auditoria exportada.",
+        metadata={"filters": context["filters"], "count": len(context["events"])},
+    )
+    save_store(store)
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=auditoria_wulkan.csv"},
     )
 
 

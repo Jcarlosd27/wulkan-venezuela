@@ -2,6 +2,14 @@
 {% set heading = "Auditoria" %}
 {% set description = "Trazabilidad de accesos, cambios comerciales y operaciones sensibles del admin." %}
 
+{% block top_action %}
+{% if can_export_audit %}
+<a class="btn btn-light" href="{{ url_for('audit_export') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">
+  <i class="bi bi-download"></i> Exportar CSV
+</a>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <section class="row g-3 mb-3">
   <div class="col-12 col-md-6 col-xl-3">
@@ -14,41 +22,58 @@
   </div>
   <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-person-check"></i></div>
-      <span>Actores</span>
-      <strong>{{ metrics.actors }}</strong>
-      <em>Actividad</em>
-    </article>
-  </div>
-  <div class="col-12 col-md-6 col-xl-3">
-    <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-pencil-square"></i></div>
-      <span>Cambios operativos</span>
+      <span>Cambios</span>
       <strong>{{ metrics.writes }}</strong>
-      <em>Escritura</em>
+      <em>{{ metrics.snapshots }} con before/after</em>
     </article>
   </div>
   <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-diagram-3"></i></div>
-      <span>Graphify</span>
-      <strong class="audit-graphify-value">{{ graphify_summary }}</strong>
-      <em>Resumen</em>
+      <div class="metric-icon"><i class="bi bi-shield-lock"></i></div>
+      <span>Seguridad</span>
+      <strong>{{ metrics.security }}</strong>
+      <em>Login, clave y sesiones</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-download"></i></div>
+      <span>Exportaciones</span>
+      <strong>{{ metrics.exports }}</strong>
+      <em>{{ graphify_summary }}</em>
     </article>
   </div>
 </section>
 
 <section class="panel audit-filter-panel mb-3">
   <form class="row g-2 align-items-end" method="get">
-    <div class="col-12 col-xl-4">
-      <label class="form-label">Buscar en auditoria</label>
+    <div class="col-12 col-xl-3">
+      <label class="form-label small text-secondary fw-semibold">Buscar</label>
       <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
         <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Actor, entidad, detalle u origen">
       </div>
     </div>
-    <div class="col-12 col-md-4 col-xl-2">
-      <label class="form-label">Accion</label>
+    <div class="col-6 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Desde</label>
+      <input class="form-control" type="date" name="date_from" value="{{ filters.date_from }}">
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Hasta</label>
+      <input class="form-control" type="date" name="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="col-12 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Criticidad</label>
+      <select class="form-select" name="severity">
+        <option value="">Todas</option>
+        {% for value, label in severity_options %}
+        <option value="{{ value }}" {% if filters.severity == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Accion</label>
       <select class="form-select" name="action">
         <option value="">Todas</option>
         {% for action in action_options %}
@@ -57,7 +82,7 @@
       </select>
     </div>
     <div class="col-12 col-md-4 col-xl-2">
-      <label class="form-label">Modulo</label>
+      <label class="form-label small text-secondary fw-semibold">Modulo</label>
       <select class="form-select" name="entity_type">
         <option value="">Todos</option>
         {% for entity in entity_options %}
@@ -66,7 +91,7 @@
       </select>
     </div>
     <div class="col-12 col-md-4 col-xl-2">
-      <label class="form-label">Actor</label>
+      <label class="form-label small text-secondary fw-semibold">Actor</label>
       <select class="form-select" name="actor">
         <option value="">Todos</option>
         {% for actor in actor_options %}
@@ -74,7 +99,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-12 col-xl-2 d-flex gap-2">
+    <div class="col-12 col-md-4 col-xl-2 d-flex gap-2">
       <button class="btn btn-primary flex-fill" type="submit">
         <i class="bi bi-funnel"></i> Filtrar
       </button>
@@ -85,11 +110,45 @@
   </form>
 </section>
 
+<section class="row g-3 mb-3">
+  {% set graph_items = [
+    ("Criticidad", charts.severity),
+    ("Acciones", charts.actions),
+    ("Modulos", charts.entities),
+    ("Actores", charts.actors)
+  ] %}
+  {% for title, graph in graph_items %}
+  <div class="col-12 col-lg-6 col-xxl-3">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>{{ title }}</h2>
+          <span>Graphify</span>
+        </div>
+      </div>
+      {% set max_value = graph["values"]|max if graph["values"] else 0 %}
+      <div class="graphify-bars">
+        {% for label in graph["labels"] %}
+        {% set value = graph["values"][loop.index0] %}
+        <div class="graphify-row">
+          <span class="graphify-label">{{ label }}</span>
+          <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if max_value == 0 else (value / max_value * 100) }}%"></span></span>
+          <strong>{{ value }}</strong>
+        </div>
+        {% else %}
+        <span class="text-secondary small">Sin datos filtrados.</span>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+  {% endfor %}
+</section>
+
 <section class="panel category-panel audit-panel">
   <div class="panel-header">
     <div>
       <h2>Registro operativo</h2>
-      <span>Eventos recientes ordenados por fecha, actor y modulo afectado.</span>
+      <span>Eventos recientes ordenados por fecha, actor, modulo afectado y origen.</span>
     </div>
     <span>{{ events | length }} eventos visibles</span>
   </div>
@@ -106,22 +165,21 @@
       </thead>
       <tbody>
         {% for event in events %}
-        {% set action_class = 'text-bg-secondary' %}
-        {% if event.action in ['login'] %}
-          {% set action_class = 'text-bg-primary' %}
-        {% elif event.action in ['create'] %}
-          {% set action_class = 'text-bg-success' %}
-        {% elif event.action in ['update', 'update_status'] %}
-          {% set action_class = 'text-bg-warning' %}
-        {% elif event.action in ['delete'] %}
-          {% set action_class = 'text-bg-danger' %}
-        {% elif event.action in ['payment'] %}
-          {% set action_class = 'text-bg-info' %}
+        {% set severity_class = 'text-bg-secondary' %}
+        {% if event.severity == 'critical' %}
+          {% set severity_class = 'text-bg-danger' %}
+        {% elif event.severity == 'security' %}
+          {% set severity_class = 'text-bg-primary' %}
+        {% elif event.severity == 'write' %}
+          {% set severity_class = 'text-bg-warning' %}
+        {% elif event.severity == 'export' %}
+          {% set severity_class = 'text-bg-info' %}
         {% endif %}
         <tr>
           <td>
-            <span class="badge {{ action_class }}">{{ event.action }}</span>
-            <small class="d-block text-secondary mt-1">{{ event.createdAt }}</small>
+            <span class="badge {{ severity_class }}">{{ event.severityLabel }}</span>
+            <strong class="d-block mt-2">{{ event.action }}</strong>
+            <small class="d-block text-secondary">{{ event.createdAt }}</small>
           </td>
           <td>
             <strong>{{ event.actorName }}</strong>
