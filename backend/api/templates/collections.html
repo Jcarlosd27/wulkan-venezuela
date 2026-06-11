@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% set heading = "Cobranza" %}
+{% set description = "Gestiona cuentas por cobrar, promesas de pago, mora y estados de cuenta por cliente." %}
+
+{% block page_actions %}
+{% if can_export_collections %}
+<a class="btn btn-light" href="{{ url_for('collections_export', q=filters.q, status=filters.status, seller=filters.seller, view=filters.view) }}">
+  <i class="bi bi-download"></i> Exportar CSV
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<form class="seller-filter-panel mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-lg-3">
+      <label class="form-label">Buscar</label>
+      <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Orden, cliente, vendedor o comentario">
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Vista</label>
+      <select class="form-select" name="view">
+        <option value="open" {% if filters.view == 'open' %}selected{% endif %}>Abiertas</option>
+        <option value="overdue" {% if filters.view == 'overdue' %}selected{% endif %}>Vencidas</option>
+        <option value="promise" {% if filters.view == 'promise' %}selected{% endif %}>Promesas</option>
+        <option value="paid" {% if filters.view == 'paid' %}selected{% endif %}>Pagadas</option>
+        <option value="all" {% if filters.view == 'all' %}selected{% endif %}>Todas</option>
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in collection_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in sellers %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </div>
+</form>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
+      <span>Cuentas por cobrar</span>
+      <strong>{{ money_usd(metrics.receivable) }}</strong>
+      <em>Saldo abierto</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-calendar2-week"></i></div>
+      <span>Por vencer</span>
+      <strong>{{ money_usd(metrics.due_soon) }}</strong>
+      <em>Gestion preventiva</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
+      <span>Vencido</span>
+      <strong>{{ money_usd(metrics.overdue) }}</strong>
+      <em>Mora activa</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-fire"></i></div>
+      <span>Critico</span>
+      <strong>{{ money_usd(metrics.critical) }}</strong>
+      <em>{{ metrics.promises }} promesas</em>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-8">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Gestion operativa</h2>
+          <span>Ordenes con saldo, estado de cobranza y proxima accion.</span>
+        </div>
+        <span>{{ orders | length }} registros</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Orden</th>
+              <th>Cliente</th>
+              <th>Vendedor</th>
+              <th>Saldo</th>
+              <th>Vence</th>
+              <th>Cobranza</th>
+              <th>Gestion</th>
+              {% if can_edit_collections %}<th class="text-end">Acciones</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for order in orders %}
+            <tr>
+              <td>
+                <strong>{{ order.orderId }}</strong>
+                <small class="d-block text-secondary">{{ order.createdAt }}</small>
+              </td>
+              <td>
+                <strong>{{ order.customerName }}</strong>
+                {% if can_export_collections %}
+                <a class="small d-block" href="{{ url_for('collection_statement', client_id=order.customerId) }}">Estado de cuenta</a>
+                {% endif %}
+              </td>
+              <td>{{ order.sellerName or 'Sin vendedor' }}</td>
+              <td>
+                <strong>{{ money_usd(order.balanceUsd) }}</strong>
+                <small class="d-block text-secondary">Abonado {{ money_usd(order.paidUsd) }}</small>
+              </td>
+              <td>
+                <span class="badge {{ order.dueStatus | badge_class }}">{{ due_status_label(order.dueStatus) }}</span>
+                <small class="d-block text-secondary">{{ order.dueDate or 'Sin fecha' }}</small>
+              </td>
+              <td>
+                <span class="badge {{ order.collectionStatus | badge_class }}">{{ order.collectionStatusLabel }}</span>
+                <small class="d-block text-secondary">{{ order.collectionOwner }}</small>
+              </td>
+              <td>
+                <strong class="small">{{ order.nextCollectionActionAt or order.paymentPromiseAt or 'Sin agenda' }}</strong>
+                <small class="d-block text-secondary">{{ order.collectionComment or 'Sin comentario' }}</small>
+              </td>
+              {% if can_edit_collections %}
+              <td class="text-end">
+                <div class="btn-group">
+                  <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#paymentModal{{ loop.index }}">
+                    <i class="bi bi-cash"></i> Abono
+                  </button>
+                  <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#collectionModal{{ loop.index }}">
+                    <i class="bi bi-journal-check"></i> Gestion
+                  </button>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="{{ 8 if can_edit_collections else 7 }}">
+                <div class="empty-state compact">
+                  <div class="empty-icon"><i class="bi bi-cash-coin"></i></div>
+                  <strong>Sin cuentas por cobrar</strong>
+                  <span>Las ordenes con saldo pendiente apareceran en este modulo.</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Graphify cobranza</h2>
+          <span>Distribucion por estado.</span>
+        </div>
+      </div>
+      <div class="graphify-bars">
+        {% for item in status_graph["items"] %}
+        <div class="graphify-row">
+          <span class="graphify-label">{{ item.label }}</span>
+          <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
+          <strong>{{ item.value }}</strong>
+        </div>
+        {% else %}
+        <span class="text-secondary small">Sin datos filtrados.</span>
+        {% endfor %}
+      </div>
+      <dl class="detail-list mt-3">
+        <div><dt>Abonos registrados</dt><dd>{{ money_usd(metrics.payments) }}</dd></div>
+        <div><dt>Promesas</dt><dd>{{ metrics.promises }}</dd></div>
+      </dl>
+    </article>
+  </div>
+</section>
+
+{% if can_edit_collections %}
+{% for order in orders %}
+<div class="modal fade" id="paymentModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="post" action="{{ url_for('order_payment_create', order_id=order.orderId) }}">
+      {{ csrf_field() }}
+      <input type="hidden" name="next" value="{{ url_for('collections') }}">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Registrar abono</h2>
+          <p class="mb-0 text-secondary">{{ order.orderId }} - saldo {{ money_usd(order.balanceUsd) }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Monto USD</label>
+            <input class="form-control" name="amountUsd" inputmode="decimal" max="{{ order.balanceUsd }}" required>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Metodo</label>
+            <select class="form-select" name="method">
+              {% for value, label in payment_methods %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Referencia</label>
+            <input class="form-control" name="reference" placeholder="Recibo, transferencia, efectivo recibido">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Nota</label>
+            <textarea class="form-control" name="note" rows="2"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Registrar abono</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="collectionModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form class="modal-content" method="post" action="{{ url_for('collection_action', order_id=order.orderId) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Gestion de cobranza</h2>
+          <p class="mb-0 text-secondary">{{ order.customerName }} - {{ order.orderId }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Accion</label>
+            <select class="form-select" name="action">
+              <option value="in_management">En gestion</option>
+              <option value="promise">Promesa de pago</option>
+              <option value="critical">Marcar critico</option>
+              <option value="uncollectible">Marcar incobrable</option>
+              <option value="block_client">Bloquear cliente por mora</option>
+              <option value="release_client">Liberar cliente</option>
+              <option value="close">Cerrar cobranza</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Responsable</label>
+            <input class="form-control" name="collectionOwner" value="{{ order.collectionOwner }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Proxima gestion</label>
+            <input class="form-control" name="nextCollectionActionAt" type="datetime-local">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">Promesa de pago</label>
+            <input class="form-control" name="paymentPromiseAt" type="datetime-local">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Comentario interno</label>
+            <textarea class="form-control" name="collectionComment" rows="3" placeholder="Resultado de llamada, acuerdo, motivo de mora o proxima accion.">{{ order.collectionComment }}</textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar gestion</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

@@ -191,6 +191,17 @@ COLLECTION_STATUS_OPTIONS = [
     ("blocked", "Bloqueado por cobranza"),
     ("without_debt", "Sin deuda"),
 ]
+ORDER_COLLECTION_STATUS_OPTIONS = [
+    ("current", "Al dia"),
+    ("due_soon", "Por vencer"),
+    ("overdue", "Vencido"),
+    ("in_management", "En gestion"),
+    ("promise", "Promesa de pago"),
+    ("partial_paid", "Pago parcial"),
+    ("critical", "Critico"),
+    ("uncollectible", "Incobrable"),
+    ("closed", "Cerrado"),
+]
 CREDIT_RISK_OPTIONS = [
     ("low", "Bajo"),
     ("medium", "Medio"),
@@ -417,6 +428,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
             {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "client_status_update", "clients_import", "client_delete"]},
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
+            {"module": "collections", "endpoint": "collections", "label": "Cobranza", "icon": "bi-cash-coin", "active": ["collections", "collections_export", "collection_action", "collection_statement"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "orders_export", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
         ],
@@ -797,7 +809,8 @@ def client_status_label(value: str) -> str:
 
 
 def collection_status_label(value: str) -> str:
-    return dict(COLLECTION_STATUS_OPTIONS).get(value, value or "Sin cobranza")
+    labels = {**dict(COLLECTION_STATUS_OPTIONS), **dict(ORDER_COLLECTION_STATUS_OPTIONS)}
+    return labels.get(value, value or "Sin cobranza")
 
 
 def client_type_label(value: str) -> str:
@@ -3794,6 +3807,26 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     due_status, due_days = order_due_status(enriched)
     enriched["dueStatus"] = due_status
     enriched["dueDays"] = due_days
+    explicit_collection = enriched.get("collectionStatus", "")
+    if balance <= 0 or enriched.get("status") in {"paid", "cancelled"}:
+        collection_status = "closed"
+    elif explicit_collection in {"in_management", "promise", "critical", "uncollectible"}:
+        collection_status = explicit_collection
+    elif paid > 0:
+        collection_status = "partial_paid"
+    elif due_status == "overdue" and due_days >= 15:
+        collection_status = "critical"
+    elif due_status in {"overdue", "due_soon", "current"}:
+        collection_status = due_status
+    else:
+        collection_status = "in_management" if balance > 0 else "closed"
+    enriched["collectionStatus"] = collection_status
+    enriched["collectionStatusLabel"] = collection_status_label(collection_status)
+    enriched["collectionOwner"] = enriched.get("collectionOwner") or ("Cobranza" if balance > 0 else "Comercial")
+    enriched["lastCollectionActionAt"] = enriched.get("lastCollectionActionAt", "")
+    enriched["nextCollectionActionAt"] = enriched.get("nextCollectionActionAt", "")
+    enriched["paymentPromiseAt"] = enriched.get("paymentPromiseAt", "")
+    enriched["collectionComment"] = enriched.get("collectionComment", "")
     enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
     enriched["commissionRatePercent"] = float(enriched.get("commissionRatePercent") or 0)
     enriched["commissionUsd"] = float(enriched.get("commissionUsd") or 0)
@@ -7140,6 +7173,7 @@ def audit():
         "update_status",
         "credit_decision",
         "commission_update",
+        "collection_update",
         "password_change",
         "bulk_import",
     }
@@ -7356,16 +7390,17 @@ def order_status_update(order_id: str):
 @require_roles("super_admin", "general_manager", "commercial_manager", "operator", "collections")
 def order_payment_create(order_id: str):
     store = load_store()
+    next_url = request.form.get("next") or url_for("orders")
     order = find_order(store["orders"], order_id)
     if not order or not can_access_order_record(order, store):
-        return redirect(url_for("orders"))
+        return redirect(next_url)
 
     before = copy.deepcopy(order)
     movements = store.setdefault("credit_movements", [])
     balance_before = order_balance_usd(order, movements)
     amount_usd = min(float(request.form.get("amountUsd") or 0), balance_before)
     if amount_usd <= 0:
-        return redirect(url_for("orders"))
+        return redirect(next_url)
 
     exchange_rate = float(request.form.get("exchangeRateUsdVes") or order.get("exchangeRateUsdVes") or current_rate())
     amount_ves = float(request.form.get("amountVes") or round(amount_usd * exchange_rate, 2))
@@ -7390,6 +7425,9 @@ def order_payment_create(order_id: str):
     order["paidUsd"] = paid_after
     order["balanceUsd"] = balance_after
     order["paymentStatus"] = "paid" if balance_after <= 0 else "partial"
+    order["collectionStatus"] = "closed" if balance_after <= 0 else "partial_paid"
+    order["lastCollectionActionAt"] = utc_now()
+    order["collectionOwner"] = "Cobranza" if balance_after > 0 else "Cierre"
     order["status"] = "paid" if balance_after <= 0 else "partial_paid"
     if balance_after <= 0:
         order["creditStatus"] = "without_credit" if order.get("saleType") == "cash" else "released"
@@ -7416,7 +7454,255 @@ def order_payment_create(order_id: str):
         order,
     )
     save_store(store)
-    return redirect(url_for("orders"))
+    return redirect(next_url)
+
+
+def collections_page_context(store: dict) -> dict:
+    movements = store.get("credit_movements", [])
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "view": request.args.get("view", "open").strip() or "open",
+    }
+    client_lookup = {
+        client.get("id", ""): enrich_client(client, store.get("orders", []), movements)
+        for client in visible_clients_for_current_user(store)
+    }
+    orders = [
+        enrich_order(order, movements)
+        for order in visible_orders_for_current_user(store)
+        if order.get("customerId", "") in client_lookup
+        and order.get("status") not in {"cancelled", "rejected"}
+        and order.get("saleType") in {"term_credit", "credit_line", "cash"}
+    ]
+    if filters["view"] == "open":
+        orders = [order for order in orders if float(order.get("balanceUsd") or 0) > 0]
+    elif filters["view"] == "paid":
+        orders = [order for order in orders if float(order.get("balanceUsd") or 0) <= 0]
+    elif filters["view"] == "overdue":
+        orders = [order for order in orders if order.get("collectionStatus") in {"overdue", "critical"}]
+    elif filters["view"] == "promise":
+        orders = [order for order in orders if order.get("collectionStatus") == "promise"]
+    if filters["q"]:
+        query = filters["q"].lower()
+        orders = [
+            order for order in orders
+            if query in " ".join(
+                [
+                    order.get("orderId", ""),
+                    order.get("customerName", ""),
+                    order.get("sellerName", ""),
+                    order.get("collectionComment", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        orders = [order for order in orders if order.get("collectionStatus") == filters["status"]]
+    if filters["seller"]:
+        orders = [order for order in orders if order.get("sellerId") == filters["seller"]]
+    metrics = {
+        "receivable": round(sum(float(order.get("balanceUsd") or 0) for order in orders), 2),
+        "due_soon": round(sum(float(order.get("balanceUsd") or 0) for order in orders if order.get("collectionStatus") == "due_soon"), 2),
+        "overdue": round(sum(float(order.get("balanceUsd") or 0) for order in orders if order.get("collectionStatus") == "overdue"), 2),
+        "critical": round(sum(float(order.get("balanceUsd") or 0) for order in orders if order.get("collectionStatus") == "critical"), 2),
+        "promises": sum(1 for order in orders if order.get("collectionStatus") == "promise"),
+        "payments": round(sum(float(payment.get("amountUsd") or 0) for payment in movements if payment.get("movementType") == "payment"), 2),
+    }
+    status_graph = {
+        "title": "Cobranza por estado",
+        "items": [
+            {"label": label, "value": sum(1 for order in orders if order.get("collectionStatus") == status)}
+            for status, label in ORDER_COLLECTION_STATUS_OPTIONS
+            if sum(1 for order in orders if order.get("collectionStatus") == status)
+        ],
+    }
+    status_graph["max"] = max([item["value"] for item in status_graph["items"]] or [1])
+    return {
+        "orders": sorted(orders, key=lambda item: (item.get("dueDate", ""), item.get("createdAt", ""))),
+        "clients": sorted(client_lookup.values(), key=lambda item: item.get("businessName", "")),
+        "metrics": metrics,
+        "filters": filters,
+        "status_graph": status_graph,
+        "sellers": sales_users(store),
+        "collection_status_options": ORDER_COLLECTION_STATUS_OPTIONS,
+        "payment_methods": PAYMENT_METHOD_OPTIONS,
+        "can_edit_collections": can_module_action("collections", "edit"),
+        "can_export_collections": can_module_action("collections", "export"),
+    }
+
+
+@app.get("/collections")
+@require_roles(*roles_for_action("collections", "view"))
+def collections():
+    store = load_store()
+    return render_template("collections.html", **collections_page_context(store))
+
+
+@app.get("/collections/export")
+@require_roles(*roles_for_action("collections", "export"))
+def collections_export():
+    store = load_store()
+    context = collections_page_context(store)
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "orden",
+            "cliente",
+            "vendedor",
+            "total_usd",
+            "abonado_usd",
+            "saldo_usd",
+            "fecha_emision",
+            "fecha_vencimiento",
+            "dias_atraso",
+            "estado_cobranza",
+            "responsable",
+            "ultima_gestion",
+            "proxima_gestion",
+            "promesa_pago",
+            "comentario",
+        ],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for order in context["orders"]:
+        writer.writerow(
+            {
+                "orden": order.get("orderId", ""),
+                "cliente": order.get("customerName", ""),
+                "vendedor": order.get("sellerName", ""),
+                "total_usd": order.get("totalUsd", 0),
+                "abonado_usd": order.get("paidUsd", 0),
+                "saldo_usd": order.get("balanceUsd", 0),
+                "fecha_emision": order.get("createdAt", ""),
+                "fecha_vencimiento": order.get("dueDate", ""),
+                "dias_atraso": order.get("dueDays", 0) if order.get("dueStatus") == "overdue" else 0,
+                "estado_cobranza": order.get("collectionStatusLabel", ""),
+                "responsable": order.get("collectionOwner", ""),
+                "ultima_gestion": order.get("lastCollectionActionAt", ""),
+                "proxima_gestion": order.get("nextCollectionActionAt", ""),
+                "promesa_pago": order.get("paymentPromiseAt", ""),
+                "comentario": order.get("collectionComment", ""),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=cobranza_wulkan.csv"},
+    )
+
+
+@app.get("/collections/client/<client_id>/statement.csv")
+@require_roles(*roles_for_action("collections", "export"))
+def collection_statement(client_id: str):
+    store = load_store()
+    client = find_by_id(store.get("clients", []), client_id)
+    if not client:
+        return redirect(url_for("collections"))
+    movements = store.get("credit_movements", [])
+    orders = [
+        enrich_order(order, movements)
+        for order in store.get("orders", [])
+        if order.get("customerId") == client_id and order.get("status") not in {"cancelled", "rejected"}
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=["fecha", "tipo", "documento", "debe_usd", "haber_usd", "saldo_usd", "detalle"],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    running_balance = 0.0
+    for order in sorted(orders, key=lambda item: item.get("createdAt", "")):
+        running_balance += float(order.get("totalUsd") or 0)
+        writer.writerow(
+            {
+                "fecha": order.get("createdAt", ""),
+                "tipo": "orden",
+                "documento": order.get("orderId", ""),
+                "debe_usd": order.get("totalUsd", 0),
+                "haber_usd": 0,
+                "saldo_usd": round(running_balance, 2),
+                "detalle": order.get("saleTypeLabel", ""),
+            }
+        )
+        for payment in sorted(order.get("payments") or [], key=lambda item: item.get("createdAt", "")):
+            running_balance -= float(payment.get("amountUsd") or 0)
+            writer.writerow(
+                {
+                    "fecha": payment.get("createdAt", ""),
+                    "tipo": "abono",
+                    "documento": payment.get("orderId", ""),
+                    "debe_usd": 0,
+                    "haber_usd": payment.get("amountUsd", 0),
+                    "saldo_usd": round(running_balance, 2),
+                    "detalle": payment.get("reference") or payment.get("method", ""),
+                }
+            )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=estado_cuenta_{client_id}.csv"},
+    )
+
+
+@app.post("/collections/<order_id>/action")
+@require_roles(*roles_for_action("collections", "edit"))
+def collection_action(order_id: str):
+    store = load_store()
+    order = find_order(store.get("orders", []), order_id)
+    if not order or not can_access_order_record(order, store):
+        return redirect(url_for("collections"))
+    client = find_by_id(store.get("clients", []), order.get("customerId", ""))
+    before = copy.deepcopy({"order": order, "client": client})
+    action = request.form.get("action", "in_management")
+    note = request.form.get("collectionComment", "").strip()
+    owner = request.form.get("collectionOwner", "").strip() or session.get("admin_name", "Cobranza")
+    now = utc_now()
+    order["collectionOwner"] = owner
+    order["collectionComment"] = note or order.get("collectionComment", "")
+    order["nextCollectionActionAt"] = request.form.get("nextCollectionActionAt", "").strip()
+    order["paymentPromiseAt"] = request.form.get("paymentPromiseAt", "").strip()
+    order["lastCollectionActionAt"] = now
+    if action in dict(ORDER_COLLECTION_STATUS_OPTIONS):
+        order["collectionStatus"] = action
+    if action == "promise":
+        order["collectionStatus"] = "promise"
+        if not order["paymentPromiseAt"]:
+            order["paymentPromiseAt"] = order["nextCollectionActionAt"]
+    elif action == "block_client" and client:
+        order["collectionStatus"] = "critical"
+        client["status"] = "blocked_debt"
+        client["collectionStatus"] = "blocked"
+        client["creditRequestStatus"] = "blocked_debt"
+        client["creditEnabled"] = False
+        client["updatedAt"] = now
+    elif action == "release_client" and client:
+        client["status"] = "active"
+        client["collectionStatus"] = "current" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else "without_debt"
+        if client.get("creditLimitUsd", 0) > 0 and client.get("creditRequestStatus") == "blocked_debt":
+            client["creditRequestStatus"] = "approved"
+            client["creditEnabled"] = True
+        client["updatedAt"] = now
+    elif action == "close" and order_balance_usd(order, store.get("credit_movements", [])) <= 0:
+        order["collectionStatus"] = "closed"
+        order["currentOwner"] = "Cierre"
+    order["currentOwner"] = "Cobranza" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else order.get("currentOwner", "Cierre")
+    order["updatedAt"] = now
+    append_order_history(order, order.get("status", "partial_paid"), f"Cobranza: {collection_status_label(order.get('collectionStatus', ''))}. {note}".strip())
+    record_change_event(
+        store,
+        "collection_update",
+        "order",
+        order_id,
+        f"Cobranza actualizada: {collection_status_label(order.get('collectionStatus', ''))}.",
+        before,
+        {"order": order, "client": client},
+    )
+    save_store(store)
+    return redirect(url_for("collections"))
 
 
 @app.get("/commissions")

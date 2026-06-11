@@ -14,7 +14,7 @@
 - [x] Fase 1.8 - Inventario / Stock: fisico, reservado, disponible real, minimo/maximo, reposicion, ubicacion, ultimo movimiento, importacion con preview, export CSV, filtros y trazabilidad before/after.
 - [x] Fase 1.9 - Ordenes: filtros operativos, export CSV, detalle con productos/abonos/historial, estados con motivo obligatorio para rechazo/anulacion, trazabilidad credito-stock-comision y campos de despacho.
 - [x] Fase 1.10 - Credito B2B: submodulos de lineas, vencimientos e historial; filtros compactos; Graphify de estado/riesgo; export CSV; score, riesgo, deuda vigente/vencida, ultimo pago, promedio de pago, observacion de gerencia y decisiones completas con auditoria.
-- [ ] Fase 1.11 - Cobranza.
+- [x] Fase 1.11 - Cobranza: modulo independiente con cuentas por cobrar, vencidas, criticas, promesas, pagadas, acciones de gestion, abonos, bloqueo/liberacion de cliente, estado de cuenta y export CSV.
 - [ ] Fase 1.12 - Despacho / Logistica.
 - [ ] Fase 1.13 - Cotizaciones.
 - [ ] Fase 1.14 - CRM Comercial.
@@ -717,6 +717,20 @@ Debe existir un módulo completo de cuentas por cobrar.
 * Liberar cliente.
 * Descargar estado de cuenta.
 * Exportar cobranza.
+
+---
+
+### Check implementado
+
+* [x] Modulo Cobranza visible por permisos y rol `collections`.
+* [x] Vistas filtrables: abiertas, vencidas, promesas, pagadas y todas.
+* [x] Campos por orden: total, abonado, saldo, emision, vencimiento, dias atraso, estado, responsable, ultima/proxima gestion, promesa y comentario.
+* [x] Estados: al dia, por vencer, vencido, en gestion, promesa, pago parcial, critico, incobrable y cerrado.
+* [x] Registro de abonos conectado a la misma ruta financiera de Ordenes.
+* [x] Acciones de promesa, comentario, reprogramacion, critico, incobrable, bloqueo y liberacion de cliente.
+* [x] Estado de cuenta CSV por cliente.
+* [x] Exportacion CSV de cobranza filtrada.
+* [x] Auditoria before/after para gestiones de cobranza.
 
 ---
 
