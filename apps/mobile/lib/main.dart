@@ -522,6 +522,14 @@ class _WulkanShellState extends State<WulkanShell> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.session.mustChangePassword) {
+      return _PasswordChangeRequiredScreen(
+        session: widget.session,
+        onSessionChanged: widget.onSessionChanged,
+        onSignOut: widget.onSignOut,
+      );
+    }
+
     if (widget.session.isMobileSalesUser) {
       return _SellerShell(
         session: widget.session,
@@ -619,6 +627,134 @@ class _WulkanShellState extends State<WulkanShell> {
               icon: Icon(Icons.location_on_outlined), label: 'Puntos'),
           NavigationDestination(
               icon: Icon(Icons.person_outline), label: 'Perfil'),
+        ],
+      ),
+    );
+  }
+}
+
+class _PasswordChangeRequiredScreen extends StatefulWidget {
+  const _PasswordChangeRequiredScreen({
+    required this.session,
+    required this.onSessionChanged,
+    required this.onSignOut,
+  });
+
+  final MobileUserSession session;
+  final Future<void> Function() onSessionChanged;
+  final Future<void> Function() onSignOut;
+
+  @override
+  State<_PasswordChangeRequiredScreen> createState() =>
+      _PasswordChangeRequiredScreenState();
+}
+
+class _PasswordChangeRequiredScreenState
+    extends State<_PasswordChangeRequiredScreen> {
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _changePassword() async {
+    if (_isSaving) {
+      return;
+    }
+    if (_newPasswordController.text != _confirmPasswordController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('La confirmacion no coincide.')),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+
+    try {
+      await mobileAuthRepository.changePassword(
+        currentPassword: _currentPasswordController.text,
+        newPassword: _newPasswordController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmPasswordController.clear();
+      await widget.onSessionChanged();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Clave actualizada.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(error.toString().replaceFirst('Bad state: ', ''))),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const WulkanLogo(compact: true),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                widget.session.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Cerrar sesion',
+            onPressed: widget.onSignOut,
+            icon: const Icon(Icons.logout_outlined),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          const _InlineNotice(
+            icon: Icons.security_outlined,
+            title: 'Clave temporal obligatoria',
+            message:
+                'Antes de comprar, tomar pedidos o ver cartera debes crear una clave privada.',
+            color: _wulkanOrange,
+          ),
+          const SizedBox(height: 12),
+          _PasswordChangePanel(
+            currentPasswordController: _currentPasswordController,
+            newPasswordController: _newPasswordController,
+            confirmPasswordController: _confirmPasswordController,
+            isSaving: _isSaving,
+            requiredChange: true,
+            onSubmit: _changePassword,
+          ),
         ],
       ),
     );
@@ -3192,119 +3328,6 @@ class _StockBadge extends StatelessWidget {
   }
 }
 
-class ProductDetailScreen extends StatefulWidget {
-  const ProductDetailScreen({super.key, this.productId});
-
-  final String? productId;
-
-  @override
-  State<ProductDetailScreen> createState() => _ProductDetailScreenState();
-}
-
-class _ProductDetailScreenState extends State<ProductDetailScreen> {
-  late final PageController _imageController;
-  late final Future<MobileProduct?> _productFuture;
-  int _imageIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _imageController = PageController();
-    _productFuture = _loadProduct();
-  }
-
-  @override
-  void dispose() {
-    _imageController.dispose();
-    super.dispose();
-  }
-
-  Future<MobileProduct?> _loadProduct() async {
-    final productId = widget.productId;
-    if (productId != null && productId.isNotEmpty) {
-      return mobileRepository.getProduct(productId);
-    }
-    final products = await mobileRepository.listProducts();
-    return products.isEmpty ? null : products.first;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<MobileProduct?>(
-      future: _productFuture,
-      builder: (context, snapshot) {
-        final product = snapshot.data;
-
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const _LoadingState();
-        }
-
-        if (product == null) {
-          return const _EmptyState(message: 'Producto no disponible');
-        }
-
-        final accentColor = _productAccentColor(product.categoryName);
-
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _ProductImageCarousel(
-              images: product.galleryImageUrls,
-              title: product.name,
-              accentColor: accentColor,
-              controller: _imageController,
-              selectedIndex: _imageIndex,
-              onChanged: (index) => setState(() => _imageIndex = index),
-            ),
-            const SizedBox(height: 12),
-            _SectionTitle(title: product.name),
-            Text('SKU ${product.sku}'),
-            const SizedBox(height: 12),
-            _InfoPanel(
-              title: 'Ficha tecnica',
-              lines: [
-                'Categoria: ${product.categoryName}',
-                'Precio publico: USD ${product.publicPriceUsd.toStringAsFixed(0)}',
-                'Precio B2B: USD ${product.b2bPriceUsd.toStringAsFixed(0)}',
-                'Stock disponible: ${product.availableStock}',
-                'Garantia: 6 meses',
-              ],
-            ),
-            _InfoPanel(
-              title: 'Compatibilidad',
-              lines: product.compatibilityNotes,
-            ),
-            if (product.pdfUrls.isNotEmpty) ...[
-              const SizedBox(height: 2),
-              _DocumentLinksPanel(
-                title: 'Documentos tecnicos',
-                urls: product.pdfUrls,
-              ),
-            ],
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: () {
-                mobileCartController.addProduct(product);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('${product.name} agregado')),
-                );
-              },
-              icon: const Icon(Icons.add_shopping_cart),
-              label: const Text('Agregar al carrito'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.support_agent),
-              label: const Text('Solicitar validacion tecnica'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
 class CartScreen extends StatelessWidget {
   const CartScreen({
     super.key,
@@ -3687,93 +3710,6 @@ class _CreateOrderButtonState extends State<_CreateOrderButton> {
   }
 }
 
-class ProjectRequestScreen extends StatelessWidget {
-  const ProjectRequestScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const _SectionTitle(title: 'Proyecto tecnico'),
-        DropdownButtonFormField<String>(
-          initialValue: 'lighting',
-          decoration: const InputDecoration(
-            labelText: 'Categoria tecnica',
-            border: OutlineInputBorder(),
-          ),
-          items: const [
-            DropdownMenuItem(value: 'lighting', child: Text('Iluminacion')),
-            DropdownMenuItem(value: 'solar', child: Text('Energia solar')),
-            DropdownMenuItem(
-                value: 'electricity', child: Text('Electricidad limpia')),
-          ],
-          onChanged: (_) {},
-        ),
-        const SizedBox(height: 12),
-        const TextField(
-          decoration: InputDecoration(
-            labelText: 'Direccion del proyecto',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const TextField(
-          decoration: InputDecoration(
-            labelText: 'Medidas, fotos o requerimiento',
-            border: OutlineInputBorder(),
-          ),
-          minLines: 4,
-          maxLines: 6,
-        ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.calendar_month_outlined),
-          label: const Text('Solicitar evaluacion'),
-        ),
-      ],
-    );
-  }
-}
-
-class QuotesScreen extends StatelessWidget {
-  const QuotesScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const _SectionTitle(title: 'Solicitud de cotizacion'),
-        const TextField(
-          decoration: InputDecoration(
-            labelText: 'Producto, SKU o necesidad tecnica',
-            border: OutlineInputBorder(),
-          ),
-          minLines: 1,
-          maxLines: 2,
-        ),
-        const SizedBox(height: 12),
-        const TextField(
-          decoration: InputDecoration(
-            labelText: 'Descripcion',
-            border: OutlineInputBorder(),
-          ),
-          minLines: 4,
-          maxLines: 6,
-        ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.send_outlined),
-          label: const Text('Enviar solicitud'),
-        ),
-      ],
-    );
-  }
-}
-
 class LocationsScreen extends StatelessWidget {
   const LocationsScreen({super.key});
 
@@ -3868,84 +3804,100 @@ bool _canAddProductQuantity(
   return true;
 }
 
-class WorkModeScreen extends StatelessWidget {
-  const WorkModeScreen({super.key});
+class OrderHistoryScreen extends StatelessWidget {
+  const OrderHistoryScreen({super.key, required this.customerId});
+
+  final String customerId;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: const [
-        _SectionTitle(title: 'Acceso por rol'),
-        _ModuleTile(
-            title: 'Cliente final',
-            subtitle: 'Compras, cotizaciones y seguimiento'),
-        _ModuleTile(
-            title: 'Ferretero', subtitle: 'Catalogo B2B y ordenes de compra'),
-        _InfoPanel(
-          title: 'Orden B2B asistida',
-          lines: [
-            'Ferretero: cliente asignado',
-            'Producto: WUL-REP-CAD18',
-            'Cantidad: 10',
-            'Total: USD 150',
-            'Estado: revision Wulkan',
-          ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Ordenes',
+          style: TextStyle(fontWeight: FontWeight.w900),
         ),
-        _InfoPanel(
-          title: 'Condiciones B2B',
-          lines: [
-            'Descuento base: 8%',
-            'Minimo de compra: USD 150',
-            'Credito: no habilitado',
-            'Reposicion: disponible por solicitud',
-          ],
-        ),
-        _ModuleTile(
-            title: 'Servicio tecnico',
-            subtitle: 'Casos, diagnosticos y repuestos'),
-        _InfoPanel(
-          title: 'Caso tecnico',
-          lines: [
-            'Maquina: Motosierra 45cc',
-            'Sintoma: No enciende',
-            'Diagnostico: pendiente de repuesto',
-            'Repuesto solicitado: WUL-REP-CAD18',
-          ],
-        ),
-      ],
+      ),
+      body: FutureBuilder<List<MobileOrderSummary>>(
+        future: mobileRepository.listOrders(customerId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const _LoadingState();
+          }
+
+          final orders = snapshot.data ?? [];
+          if (orders.isEmpty) {
+            return const _EmptyState(message: 'Sin ordenes registradas');
+          }
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _SectionTitle(title: 'Historial de ordenes'),
+              for (final order in orders) _CustomerOrderHistoryCard(order),
+            ],
+          );
+        },
+      ),
     );
   }
 }
 
-class OrderHistoryScreen extends StatelessWidget {
-  const OrderHistoryScreen({super.key});
+class _CustomerOrderHistoryCard extends StatelessWidget {
+  const _CustomerOrderHistoryCard(this.order);
+
+  final MobileOrderSummary order;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: const [
-        _SectionTitle(title: 'Historial de ordenes'),
-        _InfoPanel(
-          title: 'ORD-1001',
-          lines: [
-            'Producto: Motosierra 45cc',
-            'Total: USD 185',
-            'Pago: en revision',
-            'Entrega: pendiente de confirmacion',
+    final status = _customerOrderStatus(order.status, order.paymentStatus);
+    final dueLabel = order.dueDate == null
+        ? 'Sin vencimiento'
+        : 'Vence ${_formatCustomerDate(order.dueDate!)}';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SoftIcon(icon: status.icon, color: status.color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    order.id,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${order.saleTypeLabel} - ${status.label}',
+                    style: const TextStyle(
+                      color: _wulkanMuted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Total USD ${order.totalUsd.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  Text(
+                    'Saldo USD ${order.balanceUsd.toStringAsFixed(2)} - $dueLabel',
+                    style: const TextStyle(color: _wulkanMuted),
+                  ),
+                ],
+              ),
+            ),
+            _StatusPill(label: status.label, color: status.color),
           ],
         ),
-        _InfoPanel(
-          title: 'PO-2001',
-          lines: [
-            'Tipo: Orden B2B',
-            'Producto: Cadena 18 pulgadas compatible',
-            'Cantidad: 10',
-            'Estado: revision Wulkan',
-          ],
-        ),
-      ],
+      ),
     );
   }
 }
@@ -4095,6 +4047,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         _CreditSnapshotPanel(customerId: session.id),
         _OrderSummaryPanel(customerId: session.id),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => OrderHistoryScreen(customerId: session.id),
+            ),
+          ),
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('Ver historial completo'),
+        ),
+        const SizedBox(height: 12),
         _InfoPanel(
           title: 'Preferencias de ecommerce',
           lines: [
@@ -4274,7 +4236,7 @@ class _AccountMetaLine extends StatelessWidget {
   }
 }
 
-class _PasswordChangePanel extends StatelessWidget {
+class _PasswordChangePanel extends StatefulWidget {
   const _PasswordChangePanel({
     required this.currentPasswordController,
     required this.newPasswordController,
@@ -4294,6 +4256,35 @@ class _PasswordChangePanel extends StatelessWidget {
   final bool asCard;
 
   @override
+  State<_PasswordChangePanel> createState() => _PasswordChangePanelState();
+}
+
+class _PasswordChangePanelState extends State<_PasswordChangePanel> {
+  bool _showCurrentPassword = false;
+  bool _showNewPassword = false;
+  bool _showConfirmPassword = false;
+
+  InputDecoration _passwordDecoration({
+    required String labelText,
+    required IconData prefixIcon,
+    required bool isVisible,
+    required VoidCallback onToggle,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      prefixIcon: Icon(prefixIcon),
+      suffixIcon: IconButton(
+        tooltip: isVisible ? 'Ocultar clave' : 'Ver clave',
+        onPressed: onToggle,
+        icon: Icon(
+          isVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+        ),
+      ),
+      border: const OutlineInputBorder(),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final content = Padding(
       padding: const EdgeInsets.all(16),
@@ -4306,7 +4297,7 @@ class _PasswordChangePanel extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  requiredChange
+                  widget.requiredChange
                       ? 'Actualiza tu clave temporal'
                       : 'Cambiar contrasena',
                   style: Theme.of(context)
@@ -4324,54 +4315,65 @@ class _PasswordChangePanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: currentPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
+            controller: widget.currentPasswordController,
+            obscureText: !_showCurrentPassword,
+            decoration: _passwordDecoration(
               labelText: 'Contrasena actual',
-              prefixIcon: Icon(Icons.lock_outline),
-              border: OutlineInputBorder(),
+              prefixIcon: Icons.lock_outline,
+              isVisible: _showCurrentPassword,
+              onToggle: () => setState(
+                () => _showCurrentPassword = !_showCurrentPassword,
+              ),
             ),
           ),
           const SizedBox(height: 10),
           TextField(
-            controller: newPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
+            controller: widget.newPasswordController,
+            obscureText: !_showNewPassword,
+            decoration: _passwordDecoration(
               labelText: 'Nueva contrasena',
-              prefixIcon: Icon(Icons.key_outlined),
-              border: OutlineInputBorder(),
+              prefixIcon: Icons.key_outlined,
+              isVisible: _showNewPassword,
+              onToggle: () => setState(
+                () => _showNewPassword = !_showNewPassword,
+              ),
             ),
           ),
           const SizedBox(height: 10),
           TextField(
-            controller: confirmPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
+            controller: widget.confirmPasswordController,
+            obscureText: !_showConfirmPassword,
+            decoration: _passwordDecoration(
               labelText: 'Confirmar nueva contrasena',
-              prefixIcon: Icon(Icons.verified_user_outlined),
-              border: OutlineInputBorder(),
+              prefixIcon: Icons.verified_user_outlined,
+              isVisible: _showConfirmPassword,
+              onToggle: () => setState(
+                () => _showConfirmPassword = !_showConfirmPassword,
+              ),
             ),
           ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: isSaving ? null : onSubmit,
-              icon: isSaving
+              onPressed: widget.isSaving ? null : widget.onSubmit,
+              icon: widget.isSaving
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.shield_outlined),
-              label: Text(isSaving ? 'Guardando' : 'Guardar contrasena'),
+              label: Text(
+                widget.isSaving ? 'Guardando' : 'Guardar contrasena',
+              ),
             ),
           ),
         ],
       ),
     );
 
-    if (!asCard) {
+    if (!widget.asCard) {
       return content;
     }
 
@@ -5745,29 +5747,6 @@ class _SectionTitle extends StatelessWidget {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _ModuleTile extends StatelessWidget {
-  const _ModuleTile({
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right),
       ),
     );
   }

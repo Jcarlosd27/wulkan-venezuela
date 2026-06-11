@@ -24,7 +24,7 @@
 - [x] Fase 1.18 - Configuracion General: modulo editable y persistente en SQL/JSON para datos empresa, logo, moneda, tasa USD/VES, plazos de credito, umbral de aprobacion, mora, regla/porcentaje de comision, stock minimo, politicas de archivos, textos comerciales y correos; auditoria before/after.
 - [x] Fase 1.19 - Importaciones Masivas: plantillas oficiales, preview antes de guardar, confirmacion/descartar, deteccion de creados/actualizados/omitidos, errores y advertencias por fila, historial reciente y descarga CSV de incidencias por carga.
 - [x] Fase 1.20 - Documentos: repositorio documental por cliente, producto, orden o administracion; RIF, contratos, credito, estados de cuenta, fichas, manuales, garantias, certificados, cotizaciones, comprobantes, guias, evidencias y facturas; carga manual, importacion Excel/CSV con preview, export CSV, visibilidad por rol/app, vencimiento, Graphify y auditoria before/after.
-- [ ] Fase 2 - App Movil Cliente y Vendedor.
+- [x] Fase 2 - App Movil Cliente y Vendedor: login por rol, clave temporal obligatoria, sesion validada con backend, catalogo real, galeria/carrusel de productos, carrito persistente, checkout ferretero/vendedor, ordenes, credito, cartera, comisiones, servicios tecnicos y bloqueo de pantallas/datos demo.
 - [ ] Fase 3 - Backend API versionada y endpoints faltantes.
 - [ ] Fase 4 - Seguridad avanzada.
 - [x] Fase 5 - UI/UX Admin Panel.
@@ -1124,6 +1124,8 @@ La app debe tener dos experiencias separadas:
 2. Vendedor.
 
 Ambos roles pueden usar la misma app, pero con pantallas y permisos diferentes según login.
+
+Estado Fase 2: cerrado y validado con `flutter analyze`, `flutter test` y `python backend/api/scripts/smoke_commercial_flow.py`. La app usa backend real por defecto, refresca sesion contra `/api/v1/mobile/auth/refresh`, invalida logout contra `/api/v1/mobile/auth/logout`, fuerza cambio de clave temporal antes de operar y retiro pantallas moviles con datos fijos no conectados.
 
 ---
 

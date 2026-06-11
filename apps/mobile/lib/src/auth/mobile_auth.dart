@@ -140,7 +140,11 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
     final stored = await _readStoredSession();
     if (stored != null) {
       _session = stored;
-      return stored;
+      final refreshed = await _refreshStoredSession(stored);
+      if (refreshed != null) {
+        return refreshed;
+      }
+      return await getCurrentSession();
     }
 
     return const MobileUserSession(
@@ -172,45 +176,97 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
       }
 
       final payload = jsonDecode(body);
-      final customer =
-          payload is Map<String, dynamic> ? payload["customer"] : null;
-      final data =
-          customer is Map<String, dynamic> ? customer : <String, dynamic>{};
-      final token = payload is Map<String, dynamic>
-          ? payload["accessToken"]?.toString() ?? ""
-          : "";
-      final assignedSeller = data["assignedSeller"];
-      final sellerData = assignedSeller is Map<String, dynamic>
-          ? assignedSeller
-          : <String, dynamic>{};
-      final accountRole = data["accountRole"]?.toString() ??
-          data["clientType"]?.toString() ??
-          "client";
-      final roleLabel = data["roleLabel"]?.toString() ??
-          (accountRole == "sales" ? "Vendedor" : "Ferretero B2B");
-
-      _session = MobileUserSession(
-        id: data["id"]?.toString() ?? "",
-        name: data["businessName"]?.toString() ?? "Cliente Wulkan",
-        email: data["email"]?.toString() ?? email,
-        roleLabel: roleLabel,
-        isAuthenticated: true,
-        accountRole: accountRole,
-        accessToken: token,
-        mustChangePassword: data["mustChangePassword"] == true,
-        allowedPaymentTermsDays:
-            _asIntList(data["allowedPaymentTermsDays"], fallback: const [0]),
-        defaultSaleType: data["defaultSaleType"]?.toString() ?? "cash",
-        assignedSeller: MobileSellerSnapshot(
-          id: sellerData["id"]?.toString() ?? "",
-          name: sellerData["name"]?.toString() ?? "",
-        ),
-      );
+      final parsed =
+          payload is Map<String, dynamic> ? payload : <String, dynamic>{};
+      _session = _sessionFromAuthPayload(parsed, fallbackEmail: email);
       await _persistSession(_session!);
       return _session!;
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<MobileUserSession?> _refreshStoredSession(
+    MobileUserSession stored,
+  ) async {
+    if (stored.accessToken.isEmpty) {
+      return stored;
+    }
+
+    final uri = _baseUri.replace(path: "${_baseUri.path}/auth/refresh");
+    final client = HttpClient();
+
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      request.headers.set("Authorization", "Bearer ${stored.accessToken}");
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode == HttpStatus.unauthorized ||
+          response.statusCode == HttpStatus.forbidden) {
+        _session = null;
+        await _storage.delete(key: _sessionKey);
+        return null;
+      }
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return stored;
+      }
+
+      final payload = jsonDecode(body);
+      final parsed =
+          payload is Map<String, dynamic> ? payload : <String, dynamic>{};
+      _session = _sessionFromAuthPayload(
+        parsed,
+        fallbackEmail: stored.email,
+        fallbackToken: stored.accessToken,
+      );
+      await _persistSession(_session!);
+      return _session;
+    } catch (_) {
+      return stored;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  MobileUserSession _sessionFromAuthPayload(
+    Map<String, dynamic> payload, {
+    required String fallbackEmail,
+    String fallbackToken = "",
+  }) {
+    final customer = payload["customer"];
+    final data =
+        customer is Map<String, dynamic> ? customer : <String, dynamic>{};
+    final token = payload["accessToken"]?.toString() ?? fallbackToken;
+    final assignedSeller = data["assignedSeller"];
+    final sellerData = assignedSeller is Map<String, dynamic>
+        ? assignedSeller
+        : <String, dynamic>{};
+    final accountRole = data["accountRole"]?.toString() ??
+        data["clientType"]?.toString() ??
+        "client";
+    final roleLabel = data["roleLabel"]?.toString() ??
+        (accountRole == "sales" ? "Vendedor" : "Ferretero B2B");
+
+    return MobileUserSession(
+      id: data["id"]?.toString() ?? "",
+      name: data["businessName"]?.toString() ?? "Cliente Wulkan",
+      email: data["email"]?.toString() ?? fallbackEmail,
+      roleLabel: roleLabel,
+      isAuthenticated: true,
+      accountRole: accountRole,
+      accessToken: token,
+      mustChangePassword: data["mustChangePassword"] == true,
+      allowedPaymentTermsDays:
+          _asIntList(data["allowedPaymentTermsDays"], fallback: const [0]),
+      defaultSaleType: data["defaultSaleType"]?.toString() ?? "cash",
+      assignedSeller: MobileSellerSnapshot(
+        id: sellerData["id"]?.toString() ?? "",
+        name: sellerData["name"]?.toString() ?? "",
+      ),
+    );
   }
 
   @override
@@ -291,6 +347,26 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
 
   @override
   Future<void> signOut() async {
+    final session = _session ?? await _readStoredSession();
+
+    if (session != null && session.accessToken.isNotEmpty) {
+      final uri = _baseUri.replace(path: "${_baseUri.path}/auth/logout");
+      final client = HttpClient();
+
+      try {
+        final request = await client.postUrl(uri);
+        request.headers.contentType = ContentType.json;
+        request.headers.set("Authorization", "Bearer ${session.accessToken}");
+        final response = await request.close();
+        await response.drain<void>();
+      } catch (_) {
+        // Local session cleanup must succeed even if the token was already
+        // expired or the backend rejected the logout call.
+      } finally {
+        client.close(force: true);
+      }
+    }
+
     _session = null;
     await _storage.delete(key: _sessionKey);
   }
