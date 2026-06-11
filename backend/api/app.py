@@ -104,9 +104,15 @@ SALES_CHANNEL_LABELS = {
 DISPATCH_STATUS_LABELS = {
     "pending": "Pendiente",
     "preparing": "Preparando",
+    "prepared": "Preparado",
     "ready": "Listo para despacho",
+    "in_route": "En ruta",
     "dispatched": "Despachado",
     "delivered": "Entregado",
+    "failed": "Entrega fallida",
+    "rescheduled": "Reprogramado",
+    "returned": "Devuelto",
+    "closed": "Cerrado",
     "cancelled": "Cancelado",
 }
 PAYMENT_TERM_OPTIONS = [0, 10, 15, 20, 30, 40]
@@ -430,6 +436,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
             {"module": "collections", "endpoint": "collections", "label": "Cobranza", "icon": "bi-cash-coin", "active": ["collections", "collections_export", "collection_action", "collection_statement"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "orders_export", "order_new", "order_status_update", "order_payment_create"]},
+            {"module": "dispatch", "endpoint": "dispatch", "label": "Despacho", "icon": "bi-truck", "active": ["dispatch", "dispatch_export", "dispatch_update"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
         ],
     },
@@ -3800,6 +3807,18 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["salesChannelLabel"] = sales_channel_label(enriched["salesChannel"])
     enriched["dispatchStatus"] = enriched.get("dispatchStatus", "pending")
     enriched["dispatchStatusLabel"] = dispatch_status_label(enriched["dispatchStatus"])
+    enriched["receiverName"] = enriched.get("receiverName", "")
+    enriched["receiverPhone"] = enriched.get("receiverPhone", "")
+    enriched["carrierName"] = enriched.get("carrierName", "")
+    enriched["trackingNumber"] = enriched.get("trackingNumber", "")
+    enriched["estimatedDispatchAt"] = enriched.get("estimatedDispatchAt", "")
+    enriched["dispatchedAt"] = enriched.get("dispatchedAt", "")
+    enriched["estimatedDeliveryAt"] = enriched.get("estimatedDeliveryAt", "")
+    enriched["deliveredAt"] = enriched.get("deliveredAt", "")
+    enriched["deliveryEvidenceUrl"] = enriched.get("deliveryEvidenceUrl", "")
+    enriched["logisticsNote"] = enriched.get("logisticsNote", "")
+    enriched["logisticsOwner"] = enriched.get("logisticsOwner") or enriched.get("currentOwner") or "Despacho"
+    enriched["dispatchHistory"] = sorted(enriched.get("dispatchHistory") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
     enriched["invoiceStatus"] = enriched.get("invoiceStatus", "pending")
     enriched["currentOwner"] = enriched.get("currentOwner") or "Comercial"
     if not enriched.get("dueDate") and enriched["paymentTermDays"] > 0:
@@ -7174,6 +7193,7 @@ def audit():
         "credit_decision",
         "commission_update",
         "collection_update",
+        "dispatch_update",
         "password_change",
         "bulk_import",
     }
@@ -7703,6 +7723,206 @@ def collection_action(order_id: str):
     )
     save_store(store)
     return redirect(url_for("collections"))
+
+
+def dispatch_page_context(store: dict) -> dict:
+    movements = store.get("credit_movements", [])
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "view": request.args.get("view", "active").strip() or "active",
+    }
+    orders = [
+        enrich_order(order, movements)
+        for order in visible_orders_for_current_user(store)
+        if order.get("status") not in {"credit_review", "payment_under_review", "cancelled", "rejected"}
+    ]
+    if filters["view"] == "active":
+        orders = [order for order in orders if order.get("dispatchStatus") not in {"delivered", "closed", "cancelled"}]
+    elif filters["view"] == "delivered":
+        orders = [order for order in orders if order.get("dispatchStatus") in {"delivered", "closed"}]
+    elif filters["view"] == "issues":
+        orders = [order for order in orders if order.get("dispatchStatus") in {"failed", "rescheduled", "returned"}]
+    if filters["q"]:
+        query = filters["q"].lower()
+        orders = [
+            order for order in orders
+            if query in " ".join(
+                [
+                    order.get("orderId", ""),
+                    order.get("customerName", ""),
+                    order.get("sellerName", ""),
+                    order.get("shippingAddress", ""),
+                    order.get("carrierName", ""),
+                    order.get("trackingNumber", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        orders = [order for order in orders if order.get("dispatchStatus") == filters["status"]]
+    if filters["seller"]:
+        orders = [order for order in orders if order.get("sellerId") == filters["seller"]]
+    metrics = {
+        "pending": sum(1 for order in orders if order.get("dispatchStatus") == "pending"),
+        "preparing": sum(1 for order in orders if order.get("dispatchStatus") in {"preparing", "prepared", "ready"}),
+        "in_route": sum(1 for order in orders if order.get("dispatchStatus") in {"in_route", "dispatched"}),
+        "delivered": sum(1 for order in orders if order.get("dispatchStatus") in {"delivered", "closed"}),
+        "issues": sum(1 for order in orders if order.get("dispatchStatus") in {"failed", "rescheduled", "returned"}),
+    }
+    status_graph = {
+        "title": "Despacho por estado",
+        "items": [
+            {"label": label, "value": sum(1 for order in orders if order.get("dispatchStatus") == status)}
+            for status, label in DISPATCH_STATUS_LABELS.items()
+            if sum(1 for order in orders if order.get("dispatchStatus") == status)
+        ],
+    }
+    status_graph["max"] = max([item["value"] for item in status_graph["items"]] or [1])
+    return {
+        "orders": sorted(orders, key=lambda item: (item.get("estimatedDispatchAt", ""), item.get("createdAt", ""))),
+        "metrics": metrics,
+        "filters": filters,
+        "status_graph": status_graph,
+        "dispatch_status_options": list(DISPATCH_STATUS_LABELS.items()),
+        "sellers": sales_users(store),
+        "can_edit_dispatch": can_module_action("dispatch", "edit"),
+        "can_export_dispatch": can_module_action("dispatch", "export"),
+    }
+
+
+@app.get("/dispatch")
+@require_roles(*roles_for_action("dispatch", "view"))
+def dispatch():
+    store = load_store()
+    return render_template("dispatch.html", **dispatch_page_context(store))
+
+
+@app.get("/dispatch/export")
+@require_roles(*roles_for_action("dispatch", "export"))
+def dispatch_export():
+    store = load_store()
+    context = dispatch_page_context(store)
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "orden",
+            "cliente",
+            "direccion_despacho",
+            "receptor",
+            "telefono_receptor",
+            "transportista",
+            "guia",
+            "estimado_despacho",
+            "despachado",
+            "estimado_entrega",
+            "entregado",
+            "estado",
+            "responsable",
+            "evidencia",
+            "observacion",
+        ],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for order in context["orders"]:
+        writer.writerow(
+            {
+                "orden": order.get("orderId", ""),
+                "cliente": order.get("customerName", ""),
+                "direccion_despacho": order.get("shippingAddress", ""),
+                "receptor": order.get("receiverName", ""),
+                "telefono_receptor": order.get("receiverPhone", ""),
+                "transportista": order.get("carrierName", ""),
+                "guia": order.get("trackingNumber", ""),
+                "estimado_despacho": order.get("estimatedDispatchAt", ""),
+                "despachado": order.get("dispatchedAt", ""),
+                "estimado_entrega": order.get("estimatedDeliveryAt", ""),
+                "entregado": order.get("deliveredAt", ""),
+                "estado": order.get("dispatchStatusLabel", ""),
+                "responsable": order.get("logisticsOwner", ""),
+                "evidencia": order.get("deliveryEvidenceUrl", ""),
+                "observacion": order.get("logisticsNote", ""),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=despacho_wulkan.csv"},
+    )
+
+
+@app.post("/dispatch/<order_id>/update")
+@require_roles(*roles_for_action("dispatch", "edit"))
+def dispatch_update(order_id: str):
+    store = load_store()
+    order = find_order(store.get("orders", []), order_id)
+    if not order or not can_access_order_record(order, store):
+        return redirect(url_for("dispatch"))
+    before = copy.deepcopy(order)
+    target_status = request.form.get("dispatchStatus", order.get("dispatchStatus", "pending"))
+    if target_status not in DISPATCH_STATUS_LABELS:
+        target_status = order.get("dispatchStatus", "pending")
+    evidence_url = request.form.get("deliveryEvidenceUrl", "").strip() or save_upload(request.files.get("deliveryEvidenceFile"), "library")
+    now = utc_now()
+    for field in (
+        "receiverName",
+        "receiverPhone",
+        "carrierName",
+        "trackingNumber",
+        "estimatedDispatchAt",
+        "dispatchedAt",
+        "estimatedDeliveryAt",
+        "deliveredAt",
+        "logisticsNote",
+        "logisticsOwner",
+    ):
+        incoming = request.form.get(field, "").strip()
+        if incoming:
+            order[field] = incoming
+    if evidence_url:
+        order["deliveryEvidenceUrl"] = evidence_url
+    order["dispatchStatus"] = target_status
+    if target_status == "preparing":
+        order["status"] = "preparing"
+        order["currentOwner"] = "Despacho"
+    elif target_status in {"ready", "prepared"}:
+        order["currentOwner"] = "Despacho"
+    elif target_status in {"in_route", "dispatched"}:
+        order["dispatchedAt"] = order.get("dispatchedAt") or now
+        order["currentOwner"] = "Despacho"
+    elif target_status == "delivered":
+        order["deliveredAt"] = order.get("deliveredAt") or now
+        apply_inventory_transition(store, order, "delivered")
+        order["status"] = "delivered" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else "paid"
+        order["currentOwner"] = "Cobranza" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else "Cierre"
+    elif target_status == "closed":
+        order["currentOwner"] = "Cierre"
+    elif target_status in {"failed", "rescheduled", "returned"}:
+        order["currentOwner"] = "Despacho"
+    order["updatedAt"] = now
+    order.setdefault("dispatchHistory", []).append(
+        {
+            "status": target_status,
+            "label": dispatch_status_label(target_status),
+            "note": order.get("logisticsNote", ""),
+            "adminName": session.get("admin_name", "Admin"),
+            "createdAt": now,
+        }
+    )
+    append_order_history(order, order.get("status", ""), f"Despacho: {dispatch_status_label(target_status)}.")
+    record_change_event(
+        store,
+        "dispatch_update",
+        "order",
+        order_id,
+        f"Despacho actualizado a {dispatch_status_label(target_status)}.",
+        before,
+        order,
+    )
+    save_store(store)
+    return redirect(url_for("dispatch"))
 
 
 @app.get("/commissions")

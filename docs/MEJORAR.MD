@@ -15,7 +15,7 @@
 - [x] Fase 1.9 - Ordenes: filtros operativos, export CSV, detalle con productos/abonos/historial, estados con motivo obligatorio para rechazo/anulacion, trazabilidad credito-stock-comision y campos de despacho.
 - [x] Fase 1.10 - Credito B2B: submodulos de lineas, vencimientos e historial; filtros compactos; Graphify de estado/riesgo; export CSV; score, riesgo, deuda vigente/vencida, ultimo pago, promedio de pago, observacion de gerencia y decisiones completas con auditoria.
 - [x] Fase 1.11 - Cobranza: modulo independiente con cuentas por cobrar, vencidas, criticas, promesas, pagadas, acciones de gestion, abonos, bloqueo/liberacion de cliente, estado de cuenta y export CSV.
-- [ ] Fase 1.12 - Despacho / Logistica.
+- [x] Fase 1.12 - Despacho / Logistica: modulo logistico conectado a ordenes, estados de despacho, transportista, guia, receptor, fechas, evidencia, historial, export CSV y auditoria before/after.
 - [ ] Fase 1.13 - Cotizaciones.
 - [ ] Fase 1.14 - CRM Comercial.
 - [ ] Fase 1.15 - Comisiones.
@@ -778,6 +778,19 @@ Debe existir módulo de despacho conectado a órdenes.
 * Reprogramar entrega.
 * Cerrar despacho.
 * Ver historial logístico.
+
+---
+
+### Check implementado
+
+* [x] Modulo Despacho visible por permisos y rol `dispatch`.
+* [x] Vista con filtros por orden, cliente, guia, transportista, vendedor, estado y vista activa/entregada/incidencias.
+* [x] Campos logisticos: direccion, receptor, telefono, transportista, guia, fechas estimadas/reales, evidencia, observacion y responsable.
+* [x] Estados: pendiente, preparacion, preparado, listo, en ruta, despachado, entregado, fallido, reprogramado, devuelto, cerrado y cancelado.
+* [x] Cambio de estado logistico conectado a estado de orden, stock y propietario operativo.
+* [x] Evidencia por URL o archivo subido a storage configurado.
+* [x] Historial logistico por orden y auditoria before/after.
+* [x] Exportacion CSV de despacho filtrada.
 
 ---
 

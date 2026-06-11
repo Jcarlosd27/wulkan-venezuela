@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% set heading = "Despacho" %}
+{% set description = "Gestiona preparacion, ruta, entrega, reprogramaciones y evidencia logisticas por orden." %}
+
+{% block page_actions %}
+{% if can_export_dispatch %}
+<a class="btn btn-light" href="{{ url_for('dispatch_export', q=filters.q, status=filters.status, seller=filters.seller, view=filters.view) }}">
+  <i class="bi bi-download"></i> Exportar CSV
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<form class="seller-filter-panel mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-lg-3">
+      <label class="form-label">Buscar</label>
+      <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Orden, cliente, guia, transportista">
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Vista</label>
+      <select class="form-select" name="view">
+        <option value="active" {% if filters.view == 'active' %}selected{% endif %}>Activos</option>
+        <option value="delivered" {% if filters.view == 'delivered' %}selected{% endif %}>Entregados</option>
+        <option value="issues" {% if filters.view == 'issues' %}selected{% endif %}>Incidencias</option>
+        <option value="all" {% if filters.view == 'all' %}selected{% endif %}>Todos</option>
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in dispatch_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in sellers %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </div>
+</form>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
+      <span>Pendientes</span>
+      <strong>{{ metrics.pending }}</strong>
+      <em>Por iniciar</em>
+    </article>
+  </div>
+  <div class="col-12 col-md">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-box-seam"></i></div>
+      <span>Preparacion</span>
+      <strong>{{ metrics.preparing }}</strong>
+      <em>Almacen</em>
+    </article>
+  </div>
+  <div class="col-12 col-md">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-truck"></i></div>
+      <span>En ruta</span>
+      <strong>{{ metrics.in_route }}</strong>
+      <em>Transporte</em>
+    </article>
+  </div>
+  <div class="col-12 col-md">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Entregadas</span>
+      <strong>{{ metrics.delivered }}</strong>
+      <em>Cerradas</em>
+    </article>
+  </div>
+  <div class="col-12 col-md">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <span>Incidencias</span>
+      <strong>{{ metrics.issues }}</strong>
+      <em>Revisar</em>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3">
+  <div class="col-12 col-xl-8">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Operacion logistica</h2>
+          <span>Preparacion, ruta, entrega y evidencia por orden.</span>
+        </div>
+        <span>{{ orders | length }} registros</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Orden</th>
+              <th>Cliente</th>
+              <th>Direccion</th>
+              <th>Transporte</th>
+              <th>Fechas</th>
+              <th>Estado</th>
+              {% if can_edit_dispatch %}<th class="text-end">Acciones</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for order in orders %}
+            <tr>
+              <td>
+                <strong>{{ order.orderId }}</strong>
+                <small class="d-block text-secondary">{{ order.itemsCount }} items</small>
+              </td>
+              <td>
+                <strong>{{ order.customerName }}</strong>
+                <small class="d-block text-secondary">{{ order.receiverName or 'Receptor pendiente' }}</small>
+              </td>
+              <td>
+                <span>{{ order.shippingAddress or 'Sin direccion' }}</span>
+                <small class="d-block text-secondary">{{ order.receiverPhone or 'Sin telefono' }}</small>
+              </td>
+              <td>
+                <strong>{{ order.carrierName or 'Sin transportista' }}</strong>
+                <small class="d-block text-secondary">{{ order.trackingNumber or 'Sin guia' }}</small>
+              </td>
+              <td>
+                <strong class="small">{{ order.estimatedDispatchAt or 'Sin estimado' }}</strong>
+                <small class="d-block text-secondary">Entrega {{ order.estimatedDeliveryAt or 'pendiente' }}</small>
+              </td>
+              <td>
+                <span class="badge {{ order.dispatchStatus | badge_class }}">{{ order.dispatchStatusLabel }}</span>
+                <small class="d-block text-secondary">{{ order.logisticsOwner }}</small>
+              </td>
+              {% if can_edit_dispatch %}
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#dispatchModal{{ loop.index }}">
+                  <i class="bi bi-pencil-square"></i> Gestionar
+                </button>
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="{{ 7 if can_edit_dispatch else 6 }}">
+                <div class="empty-state compact">
+                  <div class="empty-icon"><i class="bi bi-truck"></i></div>
+                  <strong>Sin despachos filtrados</strong>
+                  <span>Las ordenes aprobadas y listas para operar apareceran aqui.</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Graphify despacho</h2>
+          <span>Distribucion por estado logistico.</span>
+        </div>
+      </div>
+      <div class="graphify-bars">
+        {% for item in status_graph["items"] %}
+        <div class="graphify-row">
+          <span class="graphify-label">{{ item.label }}</span>
+          <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
+          <strong>{{ item.value }}</strong>
+        </div>
+        {% else %}
+        <span class="text-secondary small">Sin datos filtrados.</span>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+</section>
+
+{% if can_edit_dispatch %}
+{% for order in orders %}
+<div class="modal fade" id="dispatchModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <form class="modal-content" method="post" enctype="multipart/form-data" action="{{ url_for('dispatch_update', order_id=order.orderId) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Gestionar despacho</h2>
+          <p class="mb-0 text-secondary">{{ order.orderId }} - {{ order.customerName }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Estado logistico</label>
+            <select class="form-select" name="dispatchStatus">
+              {% for value, label in dispatch_status_options %}
+              <option value="{{ value }}" {% if order.dispatchStatus == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Responsable interno</label>
+            <input class="form-control" name="logisticsOwner" value="{{ order.logisticsOwner }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Transportista</label>
+            <input class="form-control" name="carrierName" value="{{ order.carrierName }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Numero guia</label>
+            <input class="form-control" name="trackingNumber" value="{{ order.trackingNumber }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Contacto receptor</label>
+            <input class="form-control" name="receiverName" value="{{ order.receiverName }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label fw-semibold">Telefono receptor</label>
+            <input class="form-control" name="receiverPhone" value="{{ order.receiverPhone }}">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Est. despacho</label>
+            <input class="form-control" type="datetime-local" name="estimatedDispatchAt">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Despachado</label>
+            <input class="form-control" type="datetime-local" name="dispatchedAt">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Est. entrega</label>
+            <input class="form-control" type="datetime-local" name="estimatedDeliveryAt">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label fw-semibold">Entregado</label>
+            <input class="form-control" type="datetime-local" name="deliveredAt">
+          </div>
+          <div class="col-12 col-md-7">
+            <label class="form-label fw-semibold">Evidencia URL</label>
+            <input class="form-control" name="deliveryEvidenceUrl" value="{{ order.deliveryEvidenceUrl }}" placeholder="https://...">
+          </div>
+          <div class="col-12 col-md-5">
+            <label class="form-label fw-semibold">Subir evidencia</label>
+            <input class="form-control" type="file" name="deliveryEvidenceFile" accept="image/*,.pdf">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Observacion logistica</label>
+            <textarea class="form-control" name="logisticsNote" rows="3">{{ order.logisticsNote }}</textarea>
+          </div>
+        </div>
+        {% if order.dispatchHistory %}
+        <div class="mt-3">
+          <h3 class="client-detail-title">Historial logistico</h3>
+          <div class="order-timeline">
+            {% for event in order.dispatchHistory[:5] %}
+            <div><strong>{{ event.label }}</strong><span>{{ event.createdAt }} - {{ event.adminName }}</span></div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar despacho</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}
