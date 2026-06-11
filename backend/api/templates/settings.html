@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% set heading = "Configuracion" %}
+{% set description = "Parametros generales del negocio, moneda, credito, comisiones, stock y textos comerciales." %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 shadow-sm"><i class="bi bi-exclamation-triangle me-2"></i>{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success border-0 shadow-sm"><i class="bi bi-check2-circle me-2"></i>{{ success }}</div>
+{% endif %}
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-building"></i></div>
+      <span>Empresa</span>
+      <strong>{{ settings.companyName }}</strong>
+      <em>{{ settings.companyLegalName or "Operacion Venezuela" }}</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-currency-exchange"></i></div>
+      <span>Tasa USD/VES</span>
+      <strong>{{ settings.exchangeRateUsdVes }}</strong>
+      <em>{{ settings.primaryCurrency }} / {{ settings.referenceCurrency }}</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-credit-card-2-front"></i></div>
+      <span>Credito</span>
+      <strong>{{ settings.overdueBlockDays }} dias</strong>
+      <em>Bloqueo por mora</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-percent"></i></div>
+      <span>Comision base</span>
+      <strong>{{ settings.defaultCommissionPercent }}%</strong>
+      <em>{{ commission_rule_label(settings.defaultCommissionRule) }}</em>
+    </article>
+  </div>
+</section>
+
+<form method="post" class="panel">
+  {{ csrf_field() }}
+  <div class="panel-header">
+    <div>
+      <h2>Parametros editables</h2>
+      <span>Estos valores afectan admin, calculos comerciales y sincronizacion movil.</span>
+    </div>
+    {% if can_edit_settings %}
+    <button class="btn btn-primary" type="submit"><i class="bi bi-save"></i> Guardar</button>
+    {% endif %}
+  </div>
+
+  <fieldset {% if not can_edit_settings %}disabled{% endif %}>
+    <div class="row g-4">
+      <div class="col-12 col-xl-6">
+        <div class="section-title">Empresa</div>
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label">Nombre comercial</label>
+            <input class="form-control" name="companyName" value="{{ settings.companyName }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Razon social</label>
+            <input class="form-control" name="companyLegalName" value="{{ settings.companyLegalName }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">RIF</label>
+            <input class="form-control" name="taxId" value="{{ settings.taxId }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Telefono soporte</label>
+            <input class="form-control" name="supportPhone" value="{{ settings.supportPhone }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Email soporte</label>
+            <input class="form-control" type="email" name="supportEmail" value="{{ settings.supportEmail }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Logo URL</label>
+            <input class="form-control" name="logoUrl" value="{{ settings.logoUrl }}" placeholder="https://...">
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <div class="section-title">Moneda y credito</div>
+        <div class="row g-3">
+          <div class="col-6 col-md-4">
+            <label class="form-label">Moneda principal</label>
+            <input class="form-control" name="primaryCurrency" value="{{ settings.primaryCurrency }}">
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label">Referencia</label>
+            <input class="form-control" name="referenceCurrency" value="{{ settings.referenceCurrency }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">Tasa USD/VES</label>
+            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ settings.exchangeRateUsdVes }}">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Plazos permitidos</label>
+            <input class="form-control" name="defaultPaymentTermsDays" value="{{ payment_terms_text }}" placeholder="0, 10, 15, 20, 30, 40">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label">Aprobacion USD</label>
+            <input class="form-control" name="creditApprovalThresholdUsd" inputmode="decimal" value="{{ settings.creditApprovalThresholdUsd }}">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label">Bloqueo mora</label>
+            <input class="form-control" name="overdueBlockDays" inputmode="numeric" value="{{ settings.overdueBlockDays }}">
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <div class="section-title">Comisiones y stock</div>
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label">Regla comision base</label>
+            <select class="form-select" name="defaultCommissionRule">
+              {% for value, label in commission_rule_options %}
+              <option value="{{ value }}" {% if settings.defaultCommissionRule == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label">% comision base</label>
+            <input class="form-control" name="defaultCommissionPercent" inputmode="decimal" value="{{ settings.defaultCommissionPercent }}">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label">Stock minimo</label>
+            <input class="form-control" name="stockMinDefault" inputmode="numeric" value="{{ settings.stockMinDefault }}">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">Max. archivo MB</label>
+            <input class="form-control" name="maxUploadMb" inputmode="numeric" value="{{ settings.maxUploadMb }}">
+          </div>
+          <div class="col-12 col-md-8">
+            <label class="form-label">Correos notificacion</label>
+            <textarea class="form-control" name="notificationEmails" rows="3" placeholder="uno por linea">{{ notification_emails_text }}</textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <div class="section-title">Textos comerciales</div>
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Pie de cotizacion</label>
+            <textarea class="form-control" name="quoteFooterText" rows="3">{{ settings.quoteFooterText }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Terminos de orden</label>
+            <textarea class="form-control" name="orderTermsText" rows="3">{{ settings.orderTermsText }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </fieldset>
+</form>
+{% endblock %}

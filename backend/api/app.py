@@ -563,6 +563,7 @@ ADMIN_MENU_GROUPS = [
         "items": [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit", "audit_export"]},
+            {"module": "settings", "endpoint": "settings", "label": "Configuracion", "icon": "bi-gear", "active": ["settings"]},
             {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
             {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete", "admin_user_status", "admin_user_reset_password", "admin_user_revoke_sessions"]},
         ],
@@ -1272,7 +1273,8 @@ def dashboard_charts(
 
 def seller_commission_rate(store: dict, seller_id: str) -> float:
     seller = find_by_id(store.get("admin_users", []), seller_id)
-    return float((seller or {}).get("commissionRatePercent") or 0)
+    seller_rate = safe_float((seller or {}).get("commissionRatePercent"), 0)
+    return seller_rate if seller_rate > 0 else safe_float(business_settings(store).get("defaultCommissionPercent"), 0)
 
 
 def seller_name_for(store: dict, seller_id: str) -> str:
@@ -1890,8 +1892,26 @@ def account_password():
     )
 
 
+def business_settings(store: dict | None = None) -> dict:
+    try:
+        active_store = store if store is not None else load_store()
+        return dict(active_store.get("business_settings") or {})
+    except Exception:
+        return {}
+
+
 def current_rate() -> float:
-    return 38.5
+    return safe_float(business_settings().get("exchangeRateUsdVes"), 38.5)
+
+
+def payment_term_options(store: dict | None = None) -> list[int]:
+    raw_terms = business_settings(store).get("defaultPaymentTermsDays") or PAYMENT_TERM_OPTIONS
+    terms = []
+    for term in raw_terms:
+        value = safe_int(term, -1)
+        if value >= 0 and value not in terms:
+            terms.append(value)
+    return sorted(terms) or list(PAYMENT_TERM_OPTIONS)
 
 
 @app.get("/healthz")
@@ -3149,7 +3169,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         terms = [
             int(term)
             for term in re.split(r"[\s,;|/]+", row_value(row, "allowedPaymentTermsDays", "plazos", "plazos_pago", default="0"))
-            if term.strip().isdigit() and int(term) in PAYMENT_TERM_OPTIONS
+            if term.strip().isdigit() and int(term) in payment_term_options(store)
         ] or list((client or {}).get("allowedPaymentTermsDays") or [0])
         payment_term = parse_import_int(row_value(row, "paymentTermsDays", "plazo_default", "dias_credito"), int((client or {}).get("paymentTermsDays") or 0))
         payload = {
@@ -3598,6 +3618,7 @@ def build_commercial_order(
     seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
     commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
     commission_usd = round(total_usd * commission_rate / 100, 2)
+    commission_rule = business_settings(store).get("defaultCommissionRule") or "sale_generated"
     can_use_credit = (
         sale_type == "credit_line"
         and client.get("status") == "active"
@@ -3653,7 +3674,7 @@ def build_commercial_order(
         "commissionBaseUsd": total_usd,
         "commissionUsd": commission_usd,
         "commissionStatus": "commission_pending" if commission_usd else "commission_cancelled",
-        "commissionRule": "sale_generated",
+        "commissionRule": commission_rule if commission_rule in dict(COMMISSION_RULE_OPTIONS) else "sale_generated",
         "commissionGeneratedAt": utc_now(),
         "commissionApprovedAt": "",
         "commissionApprovedBy": "",
@@ -4817,7 +4838,7 @@ def selected_payment_terms() -> list[int]:
             value = int(raw_value)
         except ValueError:
             continue
-        if value in PAYMENT_TERM_OPTIONS and value not in terms:
+        if value in payment_term_options() and value not in terms:
             terms.append(value)
     return terms or [0]
 
@@ -5077,7 +5098,7 @@ def clients_page_context(store: dict, error: str = "") -> dict:
     return {
         "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
         "sellers": sales_users(store),
-        "payment_terms": PAYMENT_TERM_OPTIONS,
+        "payment_terms": payment_term_options(store),
         "sale_type_options": SALE_TYPE_OPTIONS,
         "client_status_options": CLIENT_STATUS_OPTIONS,
         "client_type_options": CLIENT_TYPE_OPTIONS,
@@ -5268,7 +5289,7 @@ def assisted_order_page_context(store: dict, error: str = "") -> dict:
         "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
         "products": sorted(products, key=lambda item: item.get("title", "")),
         "sale_type_options": SALE_TYPE_OPTIONS,
-        "payment_terms": PAYMENT_TERM_OPTIONS,
+        "payment_terms": payment_term_options(store),
         "error": error,
     }
 
@@ -5705,7 +5726,7 @@ def quote_form_context(store: dict, quote: dict | None = None, error: str = "") 
         "products": sorted(products, key=lambda item: item.get("title", "")),
         "status_options": QUOTE_STATUS_OPTIONS,
         "sale_type_options": SALE_TYPE_OPTIONS,
-        "payment_terms": PAYMENT_TERM_OPTIONS,
+        "payment_terms": payment_term_options(store),
         "default_valid_until": default_valid_until,
         "error": error,
     }
@@ -7974,7 +7995,7 @@ def credit():
         credit_decision_options=context["credit_decision_options"],
         credit_risk_options=context["credit_risk_options"],
         collection_status_options=context["collection_status_options"],
-        payment_terms=PAYMENT_TERM_OPTIONS,
+        payment_terms=payment_term_options(store),
         can_approve_credit=role_allowed(CREDIT_APPROVAL_ROLES),
         can_export_credit=can_module_action("credit", "export"),
         error=session.pop("credit_error", ""),
@@ -8158,7 +8179,7 @@ def credit_decision(client_id: str):
     if credit_limit <= 0 and decision in {"approved", "reactivate"}:
         credit_limit = safe_float(client.get("creditRequestedUsd"), 0)
     payment_terms = safe_int(request.form.get("paymentTermsDays"), safe_int(client.get("paymentTermsDays"), 0))
-    if payment_terms not in PAYMENT_TERM_OPTIONS:
+    if payment_terms not in payment_term_options(store):
         payment_terms = 0
     requested = safe_float(request.form.get("creditRequestedUsd"), safe_float(client.get("creditRequestedUsd"), 0))
     score = max(0, min(100, safe_int(request.form.get("creditScore"), safe_int(client.get("creditScore"), 0))))
@@ -8366,6 +8387,62 @@ def audit_page_context(store: dict) -> dict:
     }
 
 
+def payment_terms_from_text(value: str) -> list[int]:
+    terms = [
+        safe_int(term, -1)
+        for term in re.split(r"[\s,;|/]+", value or "")
+        if term.strip()
+    ]
+    normalized = sorted({term for term in terms if term >= 0})
+    return normalized or [0]
+
+
+def settings_payload_from_form(existing: dict) -> dict:
+    now = utc_now()
+    payload = dict(existing or {})
+    payload.update(
+        {
+            "companyName": request.form.get("companyName", "").strip() or "Wulkan Venezuela",
+            "companyLegalName": request.form.get("companyLegalName", "").strip(),
+            "taxId": request.form.get("taxId", "").strip(),
+            "supportEmail": request.form.get("supportEmail", "").strip().lower(),
+            "supportPhone": request.form.get("supportPhone", "").strip(),
+            "logoUrl": request.form.get("logoUrl", "").strip(),
+            "primaryCurrency": request.form.get("primaryCurrency", "USD").strip().upper() or "USD",
+            "referenceCurrency": request.form.get("referenceCurrency", "VES").strip().upper() or "VES",
+            "exchangeRateUsdVes": safe_float(request.form.get("exchangeRateUsdVes"), 38.5),
+            "defaultPaymentTermsDays": payment_terms_from_text(request.form.get("defaultPaymentTermsDays", "")),
+            "creditApprovalThresholdUsd": safe_float(request.form.get("creditApprovalThresholdUsd"), 0),
+            "overdueBlockDays": max(0, safe_int(request.form.get("overdueBlockDays"), 15)),
+            "defaultCommissionRule": request.form.get("defaultCommissionRule", "sale_generated"),
+            "defaultCommissionPercent": max(0.0, min(safe_float(request.form.get("defaultCommissionPercent"), 0), 100.0)),
+            "stockMinDefault": max(0, safe_int(request.form.get("stockMinDefault"), 1)),
+            "maxUploadMb": max(1, safe_int(request.form.get("maxUploadMb"), 10)),
+            "quoteFooterText": request.form.get("quoteFooterText", "").strip(),
+            "orderTermsText": request.form.get("orderTermsText", "").strip(),
+            "notificationEmails": split_lines(request.form.get("notificationEmails", "")),
+            "updatedAt": now,
+        }
+    )
+    payload.setdefault("createdAt", existing.get("createdAt") or now)
+    if payload["defaultCommissionRule"] not in dict(COMMISSION_RULE_OPTIONS):
+        payload["defaultCommissionRule"] = "sale_generated"
+    return payload
+
+
+def settings_page_context(store: dict, error: str = "", success: str = "") -> dict:
+    settings_data = business_settings(store)
+    return {
+        "settings": settings_data,
+        "payment_terms_text": ", ".join(str(term) for term in settings_data.get("defaultPaymentTermsDays", [0])),
+        "notification_emails_text": "\n".join(settings_data.get("notificationEmails", [])),
+        "commission_rule_options": COMMISSION_RULE_OPTIONS,
+        "error": error,
+        "success": success,
+        "can_edit_settings": can_module_action("settings", "edit"),
+    }
+
+
 @app.get("/audit")
 @require_roles(*roles_for_action("audit", "view"))
 def audit():
@@ -8424,6 +8501,29 @@ def audit_export():
         mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=auditoria_wulkan.csv"},
     )
+
+
+@app.route("/settings", methods=["GET", "POST"])
+@require_roles(*roles_for_action("settings", "view"))
+def settings():
+    store = load_store()
+    if request.method == "POST":
+        if not can_module_action("settings", "edit"):
+            return forbidden_response()
+        before = copy.deepcopy(store.get("business_settings") or {})
+        store["business_settings"] = settings_payload_from_form(before)
+        record_change_event(
+            store,
+            "update",
+            "business_settings",
+            "default",
+            "Configuracion general actualizada.",
+            before,
+            store["business_settings"],
+        )
+        save_store(store)
+        return render_template("settings.html", **settings_page_context(store, success="Configuracion guardada correctamente."))
+    return render_template("settings.html", **settings_page_context(store))
 
 
 @app.route("/crm", methods=["GET", "POST"])
@@ -9974,7 +10074,7 @@ def api_mobile_seller_clients():
         terms = [
             int(term)
             for term in raw_terms
-            if str(term).strip().isdigit() and int(term) in PAYMENT_TERM_OPTIONS
+            if str(term).strip().isdigit() and int(term) in payment_term_options(store)
         ] or [0]
         temporary_password = str(payload.get("password") or secrets.token_urlsafe(10))
         client = {

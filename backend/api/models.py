@@ -139,6 +139,13 @@ class StockMovement(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class BusinessSetting(TimestampMixin, Base):
+    __tablename__ = "business_settings"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class Order(TimestampMixin, Base):
     __tablename__ = "orders"
 

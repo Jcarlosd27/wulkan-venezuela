@@ -8,6 +8,7 @@ from models import (
     AdminUser,
     Announcement,
     AuditEvent,
+    BusinessSetting,
     Category,
     Client,
     CrmRecord,
@@ -413,6 +414,7 @@ def audit_event_to_dict(row: AuditEvent) -> dict[str, Any]:
 def load_sql_store() -> dict[str, list[dict[str, Any]]]:
     init_database()
     with SessionLocal() as session:
+        settings = session.get(BusinessSetting, "default")
         return {
             "admin_users": [
                 admin_user_to_dict(row)
@@ -454,6 +456,7 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
                 audit_event_to_dict(row)
                 for row in session.query(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(1000).all()
             ],
+            "business_settings": copy_payload(settings.payload if settings else {}),
         }
 
 
@@ -479,7 +482,23 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
         sync_credit_movements(session, store)
         sync_service_technicians(session, store)
         sync_audit_events(session, store)
+        sync_business_settings(session, store)
         session.commit()
+
+
+def sync_business_settings(session, store: dict[str, Any]) -> None:
+    payload = copy_payload(store.get("business_settings") or {})
+    upsert(
+        session,
+        BusinessSetting,
+        "default",
+        {
+            "id": "default",
+            "payload": payload,
+            "created_at": parse_dt(payload.get("createdAt")),
+            "updated_at": parse_dt(payload.get("updatedAt")),
+        },
+    )
 
 
 def sync_admin_users(session, store: dict[str, Any]) -> None:
