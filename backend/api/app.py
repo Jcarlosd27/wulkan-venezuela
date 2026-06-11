@@ -2565,7 +2565,7 @@ def load_import_draft(module: str, draft_id: str):
         }
 
 
-def finish_import_draft(module: str, draft_id: str, status: str) -> bool:
+def finish_import_draft(module: str, draft_id: str, status: str, result: dict | None = None) -> bool:
     from db import SessionLocal, init_database
     from models import ImportDraft
 
@@ -2578,8 +2578,66 @@ def finish_import_draft(module: str, draft_id: str, status: str) -> bool:
             db_session.delete(draft)
         else:
             draft.status = status
+            if result is not None:
+                draft.result = result
         db_session.commit()
         return True
+
+
+def load_import_draft_record(module: str, draft_id: str) -> dict | None:
+    from db import SessionLocal, init_database
+    from models import ImportDraft
+
+    init_database()
+    with SessionLocal() as db_session:
+        draft = db_session.get(ImportDraft, draft_id)
+        if not draft or draft.module != module:
+            return None
+        return {
+            "id": draft.id,
+            "module": draft.module,
+            "entityType": draft.entity_type,
+            "status": draft.status,
+            "createdByName": draft.created_by_name,
+            "createdAt": draft.created_at.isoformat(),
+            "expiresAt": draft.expires_at.isoformat(),
+            "rows": list(draft.rows or []),
+            "result": dict(draft.result or {}),
+        }
+
+
+def list_import_history(limit: int = 24) -> list[dict]:
+    from db import SessionLocal, init_database
+    from models import ImportDraft
+
+    init_database()
+    purge_expired_import_drafts()
+    with SessionLocal() as db_session:
+        drafts = (
+            db_session.query(ImportDraft)
+            .order_by(ImportDraft.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        history = []
+        for draft in drafts:
+            result = dict(draft.result or {})
+            history.append(
+                {
+                    "id": draft.id,
+                    "module": draft.module,
+                    "entityType": draft.entity_type,
+                    "status": draft.status,
+                    "createdByName": draft.created_by_name,
+                    "createdAt": draft.created_at.isoformat(),
+                    "created": result.get("created", 0),
+                    "updated": result.get("updated", 0),
+                    "skipped": result.get("skipped", 0),
+                    "errors": len(result.get("errors") or result.get("errorRows") or []),
+                    "warnings": len(result.get("warnings") or result.get("warningRows") or []),
+                }
+            )
+        return history
 
 
 def find_product_by_sku(store: dict, sku: str) -> dict | None:
@@ -3446,6 +3504,7 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
 
         rows = draft["rows"]
         result = importer(store, rows)
+        result["module"] = module
         record_audit_event(
             store,
             "bulk_import_confirm",
@@ -3462,8 +3521,9 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
             },
         )
         save_store(store)
-        finish_import_draft(module, draft_id, "confirmed")
         result["confirmed"] = True
+        result["draftId"] = draft_id
+        finish_import_draft(module, draft_id, "confirmed", result)
         remember_bulk_result(module, result)
         return redirect(url_for(redirect_endpoint))
 
@@ -3472,6 +3532,7 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
         if import_mode == "preview":
             preview_store = copy.deepcopy(store)
             result = importer(preview_store, rows)
+            result["module"] = module
             result["preview"] = True
             result["draftId"] = create_import_draft(module, entity_type, rows, result)
             result["confirmEndpoint"] = request.endpoint
@@ -3481,6 +3542,7 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
             return redirect(url_for(redirect_endpoint))
 
         result = importer(store, rows)
+        result["module"] = module
         record_audit_event(
             store,
             "bulk_import",
@@ -6672,6 +6734,7 @@ def import_templates():
         "import_templates.html",
         template_groups=template_groups,
         total_templates=sum(len(group["items"]) for group in template_groups),
+        import_history=list_import_history(),
     )
 
 
@@ -6690,6 +6753,37 @@ def download_import_template(template_key: str, file_format: str):
     if normalized_format == "xlsx":
         return build_xlsx_template(spec)
     raise BadRequest("Formato no soportado. Descarga xlsx o csv.")
+
+
+@app.get("/imports/<module>/<draft_id>/issues.csv")
+@require_roles(*roles_for_action("import_templates", "view"))
+def import_issues_export(module: str, draft_id: str):
+    draft = load_import_draft_record(module, draft_id)
+    if not draft or not can_access_module(module):
+        return forbidden_response()
+    result = draft.get("result") or {}
+    output = io.StringIO()
+    fieldnames = ["tipo", "fila", "detalle"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for key, label in (
+        ("errorRows", "error"),
+        ("warningRows", "advertencia"),
+        ("skippedRows", "omitida"),
+        ("createdRows", "crear"),
+        ("updatedRows", "actualizar"),
+    ):
+        for row in result.get(key) or []:
+            writer.writerow({"tipo": label, "fila": row.get("row", ""), "detalle": row.get("label", "")})
+    for message in result.get("errors") or []:
+        writer.writerow({"tipo": "error", "fila": "", "detalle": message})
+    for message in result.get("warnings") or []:
+        writer.writerow({"tipo": "advertencia", "fila": "", "detalle": message})
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=incidencias_{module}_{draft_id}.csv"},
+    )
 
 
 @app.get("/permissions")

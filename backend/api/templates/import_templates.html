@@ -77,4 +77,67 @@
   </div>
 </section>
 {% endfor %}
+
+<section class="panel category-panel mt-4">
+  <div class="panel-header">
+    <div>
+      <h2>Historial de importaciones</h2>
+      <span>Previsualizaciones y cargas confirmadas recientes.</span>
+    </div>
+    <span>{{ import_history | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Modulo</th>
+          <th>Usuario</th>
+          <th>Estado</th>
+          <th>Resultado</th>
+          <th class="text-end">Incidencias</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in import_history %}
+        <tr>
+          <td>
+            <strong>{{ item.createdAt }}</strong>
+            <small class="d-block text-secondary">{{ item.id }}</small>
+          </td>
+          <td>
+            <strong>{{ item.module }}</strong>
+            <small class="d-block text-secondary">{{ item.entityType }}</small>
+          </td>
+          <td>{{ item.createdByName }}</td>
+          <td><span class="badge {{ item.status | badge_class }}">{{ item.status }}</span></td>
+          <td>
+            <span class="d-block">{{ item.created }} creados · {{ item.updated }} actualizados · {{ item.skipped }} omitidos</span>
+            <small class="text-secondary">{{ item.errors }} errores · {{ item.warnings }} advertencias</small>
+          </td>
+          <td class="text-end">
+            {% if item.errors or item.warnings or item.skipped %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('import_issues_export', module=item.module, draft_id=item.id) }}">
+              <i class="bi bi-download"></i> CSV
+            </a>
+            {% else %}
+            <span class="text-secondary">Sin incidencias</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-clock-history"></i></div>
+              <strong>Sin historial todavia</strong>
+              <span>Cuando se previsualicen o confirmen cargas masivas apareceran aqui.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

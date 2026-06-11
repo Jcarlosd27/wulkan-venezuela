@@ -93,6 +93,9 @@ STATUS_BADGES = {
     "hidden": "text-bg-secondary",
     "replenishment": "text-bg-warning",
     "discontinued": "text-bg-dark",
+    "preview": "text-bg-info",
+    "confirmed": "text-bg-success",
+    "discarded": "text-bg-secondary",
 }
 
 

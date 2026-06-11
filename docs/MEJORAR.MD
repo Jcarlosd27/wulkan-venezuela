@@ -22,7 +22,7 @@
 - [x] Fase 1.16 - Reportes: modulo consolidado con filtros por fecha, vendedor, cliente, categoria, producto y estado; reportes comercial/financiero/inventario/vendedores; Graphify ejecutivo; export CSV, Excel y vista imprimible PDF con auditoria de descarga.
 - [x] Fase 1.17 - Auditoria: filtros por fecha, accion, modulo, actor y criticidad; clasificacion seguridad/cambio/exportacion/lectura; Graphify por criticidad, accion, modulo y actor; export CSV auditado; detalle before/after protegido.
 - [x] Fase 1.18 - Configuracion General: modulo editable y persistente en SQL/JSON para datos empresa, logo, moneda, tasa USD/VES, plazos de credito, umbral de aprobacion, mora, regla/porcentaje de comision, stock minimo, politicas de archivos, textos comerciales y correos; auditoria before/after.
-- [ ] Fase 1.19 - Importaciones Masivas.
+- [x] Fase 1.19 - Importaciones Masivas: plantillas oficiales, preview antes de guardar, confirmacion/descartar, deteccion de creados/actualizados/omitidos, errores y advertencias por fila, historial reciente y descarga CSV de incidencias por carga.
 - [ ] Fase 1.20 - Documentos.
 - [ ] Fase 2 - App Movil Cliente y Vendedor.
 - [ ] Fase 3 - Backend API versionada y endpoints faltantes.
