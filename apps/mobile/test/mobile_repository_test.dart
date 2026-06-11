@@ -101,6 +101,7 @@ void main() {
         'availableStock': 12,
         'requiresQuote': false,
         'requiresTechnicalValidation': false,
+        'pdfUrls': ['https://cdn.wulkan/ficha-motosierra.pdf'],
       });
 
       expect(product.name, 'Motosierra 45cc');
@@ -108,6 +109,8 @@ void main() {
       expect(product.b2bPriceUsd, 162);
       expect(product.availableStock, 12);
       expect(product.badge, 'Comprar');
+      expect(
+          product.pdfUrls, contains('https://cdn.wulkan/ficha-motosierra.pdf'));
     });
 
     test('marks technical validation products with validar badge', () {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'src/auth/mobile_auth.dart';
 import 'src/brand/wulkan_logo.dart';
@@ -912,10 +913,9 @@ class _SellerSummaryCard extends StatelessWidget {
                   Expanded(
                     child: _DarkMetric(
                       label: 'Clientes',
-                      value:
-                          isLoading
-                              ? '...'
-                              : '${summary?.activeClientsCount ?? summary?.clientsCount ?? 0}/${summary?.clientsCount ?? 0}',
+                      value: isLoading
+                          ? '...'
+                          : '${summary?.activeClientsCount ?? summary?.clientsCount ?? 0}/${summary?.clientsCount ?? 0}',
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -3024,6 +3024,13 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
             title: 'Compatibilidad',
             lines: product.compatibilityNotes,
           ),
+          if (product.pdfUrls.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            _DocumentLinksPanel(
+              title: 'Documentos tecnicos',
+              urls: product.pdfUrls,
+            ),
+          ],
           _QuantitySelectorButton(
             quantity: _quantity,
             stock: product.availableStock,
@@ -3203,6 +3210,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               title: 'Compatibilidad',
               lines: product.compatibilityNotes,
             ),
+            if (product.pdfUrls.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              _DocumentLinksPanel(
+                title: 'Documentos tecnicos',
+                urls: product.pdfUrls,
+              ),
+            ],
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: () {
@@ -4683,6 +4697,81 @@ class _InfoPanel extends StatelessWidget {
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
       child: content,
+    );
+  }
+}
+
+class _DocumentLinksPanel extends StatelessWidget {
+  const _DocumentLinksPanel({
+    required this.title,
+    required this.urls,
+  });
+
+  final String title;
+  final List<String> urls;
+
+  Future<void> _open(BuildContext context, String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('URL de documento no valida.')),
+      );
+      return;
+    }
+
+    final opened = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el documento.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const _SoftIcon(
+                  icon: Icons.description_outlined,
+                  color: _wulkanBlack,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: _wulkanBlack,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            for (var index = 0; index < urls.length; index++)
+              Padding(
+                padding:
+                    EdgeInsets.only(bottom: index == urls.length - 1 ? 0 : 8),
+                child: OutlinedButton.icon(
+                  onPressed: () => _open(context, urls[index]),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: Text('Abrir documento ${index + 1}'),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

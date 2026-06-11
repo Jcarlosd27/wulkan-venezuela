@@ -578,6 +578,7 @@ MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
     originalPriceUsd: _asDouble(data["originalPriceUsd"], fallback: price),
     variants: _asStringList(data["variants"]),
     specifications: _asStringMap(data["specifications"]),
+    pdfUrls: _asStringList(data["pdfUrls"]),
     imageUrl: _asString(data["imageUrl"]),
   );
 }

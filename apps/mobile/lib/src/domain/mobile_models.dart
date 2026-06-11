@@ -40,6 +40,7 @@ class MobileProduct {
     this.originalPriceUsd,
     this.variants = const [],
     this.specifications = const {},
+    this.pdfUrls = const [],
     this.imageUrl,
   });
 
@@ -61,6 +62,7 @@ class MobileProduct {
   final double? originalPriceUsd;
   final List<String> variants;
   final Map<String, String> specifications;
+  final List<String> pdfUrls;
   final String? imageUrl;
 
   String get categoryName => verticalName;
