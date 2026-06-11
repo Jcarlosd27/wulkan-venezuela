@@ -106,17 +106,23 @@
             {% endif %}
           </td>
           <td>
-            <span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatus }}</span>
+            <span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatusLabel }}</span>
+            {% if order.saleType == 'credit_line' %}
             <small class="d-block text-secondary">Reserva {{ money_usd(order.creditReservedUsd) }}</small>
+            {% elif order.saleType == 'term_credit' %}
+            <small class="d-block text-secondary">Credito por plazo</small>
+            {% else %}
+            <small class="d-block text-secondary">No consume linea</small>
+            {% endif %}
           </td>
           <td>
             <span class="badge {{ order.stockStatus | badge_class }}">{{ order.stockStatus }}</span>
             <small class="d-block text-secondary">{{ order.inventoryStatus }}</small>
           </td>
           <td>
-            <span class="badge {{ order.status | badge_class }}">{{ order.status }}</span>
-            <small class="d-block text-secondary">{{ order.paymentStatus }}</small>
-            <small class="d-block text-secondary">{{ order.commissionStatus }}</small>
+            <span class="badge {{ order.status | badge_class }}">{{ order.statusLabel }}</span>
+            <small class="d-block text-secondary">{{ order.paymentStatusLabel }}</small>
+            <small class="d-block text-secondary">{{ order.commissionStatusLabel }}</small>
           </td>
           <td class="text-end">
             {% if can_manage_orders %}

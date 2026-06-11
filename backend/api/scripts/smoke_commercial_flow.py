@@ -329,6 +329,128 @@ def main() -> int:
     assert created_order["commissionUsd"] == 16.2
     assert created_order["inventoryStatus"] == "reserved"
 
+    cash_order_response = assert_status(
+        client.post(
+            "/api/mobile/orders",
+            headers={"Authorization": f"Bearer {customer_token}"},
+            json={
+                "saleType": "cash",
+                "paymentTermDays": 0,
+                "items": [
+                    {
+                        "productId": "prod-flow-motosierra",
+                        "sku": "WUL-FLOW-45CC",
+                        "quantity": 1,
+                    }
+                ],
+                "preview": {
+                    "exchangeRateUsdVes": 38.5,
+                },
+            },
+        ),
+        201,
+        "orden ferretero contado",
+    )
+    cash_order = next(item for item in state["orders"] if item["orderId"] == cash_order_response["orderId"])
+    assert cash_order_response["saleType"] == "cash"
+    assert cash_order["saleType"] == "cash"
+    assert cash_order["status"] == "payment_under_review"
+    assert cash_order["creditStatus"] == "without_credit"
+    assert cash_order["paymentTermDays"] == 0
+    assert cash_order["balanceUsd"] == 162
+
+    assert_status(
+        client.post(
+            f"/orders/{cash_order['orderId']}/status",
+            data={
+                "_csrf_token": "csrf-flow",
+                "status": "preparing",
+                "note": "Validacion de contado para despacho.",
+            },
+            follow_redirects=False,
+        ),
+        302,
+        "contado a preparacion",
+    )
+    cash_order = next(item for item in state["orders"] if item["orderId"] == cash_order_response["orderId"])
+    assert cash_order["status"] == "preparing"
+    assert cash_order["creditStatus"] == "without_credit"
+    assert cash_order["inventoryStatus"] == "reserved"
+
+    assert_status(
+        client.post(
+            f"/orders/{cash_order['orderId']}/payments",
+            data={
+                "_csrf_token": "csrf-flow",
+                "amountUsd": str(cash_order["balanceUsd"]),
+                "method": "cash",
+                "reference": "EFECTIVO-FLOW",
+                "exchangeRateUsdVes": "38.5",
+            },
+            follow_redirects=False,
+        ),
+        302,
+        "pago contado",
+    )
+    cash_order = next(item for item in state["orders"] if item["orderId"] == cash_order_response["orderId"])
+    assert cash_order["paymentStatus"] == "paid"
+    assert cash_order["status"] == "paid"
+    assert cash_order["creditStatus"] == "without_credit"
+    assert any(
+        movement["movementType"] == "payment"
+        and movement["orderId"] == cash_order["orderId"]
+        and movement["method"] == "cash"
+        for movement in state["credit_movements"]
+    )
+
+    term_order_response = assert_status(
+        client.post(
+            "/api/mobile/orders",
+            headers={"Authorization": f"Bearer {customer_token}"},
+            json={
+                "saleType": "term_credit",
+                "paymentTermDays": 15,
+                "items": [
+                    {
+                        "productId": "prod-flow-motosierra",
+                        "sku": "WUL-FLOW-45CC",
+                        "quantity": 1,
+                    }
+                ],
+                "preview": {
+                    "exchangeRateUsdVes": 38.5,
+                },
+            },
+        ),
+        201,
+        "orden ferretero credito por dias",
+    )
+    term_order = next(item for item in state["orders"] if item["orderId"] == term_order_response["orderId"])
+    assert term_order_response["saleType"] == "term_credit"
+    assert term_order["saleType"] == "term_credit"
+    assert term_order["paymentTermDays"] == 15
+    assert term_order["dueDate"]
+    assert term_order["status"] == "credit_review"
+    assert term_order["creditStatus"] == "manual_review"
+
+    assert_status(
+        client.post(
+            f"/orders/{term_order['orderId']}/status",
+            data={
+                "_csrf_token": "csrf-flow",
+                "status": "preparing",
+                "note": "Credito por dias validado.",
+            },
+            follow_redirects=False,
+        ),
+        302,
+        "credito por dias a preparacion",
+    )
+    term_order = next(item for item in state["orders"] if item["orderId"] == term_order_response["orderId"])
+    assert term_order["status"] == "preparing"
+    assert term_order["creditStatus"] == "approved"
+    assert term_order["inventoryStatus"] == "reserved"
+
     audit_events = state["audit_events"]
     assert any(event["action"] == "bulk_import" and event["entityType"] == "product" for event in audit_events)
     assert any(event["action"] == "credit_decision" for event in audit_events)
@@ -344,6 +466,9 @@ def main() -> int:
     print("OK ferretero cambia clave temporal")
     print("OK ferretero crea orden con linea de credito")
     print("OK orden registra vendedor, comision, stock reservado y credito restante")
+    print("OK ferretero crea orden contado y admin ve pago externo por validar")
+    print("OK orden contado registra abono efectivo sin consumir linea de credito")
+    print("OK ferretero crea credito por dias y admin puede validarlo sin linea")
     return 0
 
 

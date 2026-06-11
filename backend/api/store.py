@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -365,4 +366,5 @@ def slugify(value: str) -> str:
 
 
 def next_id(prefix: str, seed: str) -> str:
-    return f"{prefix}-{slugify(seed)}-{int(datetime.now(timezone.utc).timestamp())}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    return f"{prefix}-{slugify(seed)}-{timestamp}-{secrets.token_hex(3)}"

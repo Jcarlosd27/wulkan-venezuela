@@ -71,6 +71,7 @@ def add_security_headers(response):
 
 ORDER_STATUS_OPTIONS = [
     ("credit_review", "En revision"),
+    ("payment_under_review", "Pago por validar"),
     ("approved_with_credit", "Aprobada con credito"),
     ("preparing", "Preparando"),
     ("delivered", "Entregada"),
@@ -414,6 +415,31 @@ def current_seller_assignment(store: dict) -> tuple[str, str]:
 
 def sale_type_label(value: str) -> str:
     return dict(SALE_TYPE_OPTIONS).get(value, value or "Sin definir")
+
+
+def order_status_label(value: str) -> str:
+    return dict(ORDER_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
+def credit_status_label(value: str) -> str:
+    labels = {
+        "approved": "Aprobado",
+        "manual_review": "Revision manual",
+        "without_credit": "Sin linea",
+        "client_not_active": "Cliente inactivo",
+        "cancelled": "Cancelado",
+        "released": "Liberado",
+    }
+    return labels.get(value, value or "Sin credito")
+
+
+def payment_status_label(value: str) -> str:
+    labels = {
+        "pending": "Pendiente",
+        "partial": "Pago parcial",
+        "paid": "Pagado",
+    }
+    return labels.get(value, value or "Sin pago")
 
 
 def commission_status_label(value: str) -> str:
@@ -2238,7 +2264,13 @@ def build_commercial_order(
         for term in client.get("allowedPaymentTermsDays", [0])
         if str(term).isdigit()
     ] or [0]
-    payment_term_days = int(payload.get("paymentTermDays") or client.get("paymentTermsDays") or 0)
+    raw_payment_term_days = payload.get("paymentTermDays")
+    if raw_payment_term_days in (None, ""):
+        payment_term_days = int(client.get("paymentTermsDays") or 0)
+    else:
+        payment_term_days = int(raw_payment_term_days or 0)
+    if sale_type == "cash":
+        payment_term_days = 0
     if sale_type == "term_credit" and payment_term_days not in allowed_terms:
         return None, "El plazo solicitado no esta autorizado para este cliente."
     if sale_type == "credit_line" and payment_term_days == 0:
@@ -2265,7 +2297,12 @@ def build_commercial_order(
         credit_status = "without_credit"
 
     order_id = next_id("ord-mobile" if default_channel == "mobile" else "ord-assisted", client.get("businessName", "orden"))
-    status = "approved_with_credit" if can_use_credit and not requires_operator_review else "credit_review"
+    if can_use_credit and not requires_operator_review:
+        status = "approved_with_credit"
+    elif sale_type == "cash" and not requires_operator_review:
+        status = "payment_under_review"
+    else:
+        status = "credit_review"
     order = {
         "id": order_id,
         "orderId": order_id,
@@ -2444,6 +2481,7 @@ def client_order_credit_used(
             order_balance_usd(order, movements)
             for order in orders
             if order.get("customerId") == client_id
+            and order.get("saleType") == "credit_line"
             and order.get("status") in ORDER_CREDIT_RESERVING_STATUSES
             and order.get("id") != exclude_order_id
             and order.get("orderId") != exclude_order_id
@@ -2511,13 +2549,21 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["paidUsd"] = paid
     enriched["balanceUsd"] = balance
     enriched["paymentStatus"] = "paid" if balance <= 0 else ("partial" if paid > 0 else "pending")
-    enriched["creditReservedUsd"] = balance if enriched.get("status") in ORDER_CREDIT_RESERVING_STATUSES else 0.0
+    enriched["creditReservedUsd"] = (
+        balance
+        if enriched.get("saleType") == "credit_line"
+        and enriched.get("status") in ORDER_CREDIT_RESERVING_STATUSES
+        else 0.0
+    )
     enriched["payments"] = order_payments(movements, order_id)
     enriched["inventoryStatus"] = enriched.get("inventoryStatus", "pending")
     enriched["stockStatus"] = enriched.get("stockStatus", "pending")
     enriched["saleType"] = enriched.get("saleType", "cash")
     enriched["saleTypeLabel"] = sale_type_label(enriched["saleType"])
     enriched["paymentTermDays"] = int(enriched.get("paymentTermDays") or 0)
+    enriched["statusLabel"] = order_status_label(enriched.get("status", ""))
+    enriched["creditStatusLabel"] = credit_status_label(enriched.get("creditStatus", ""))
+    enriched["paymentStatusLabel"] = payment_status_label(enriched.get("paymentStatus", ""))
     if not enriched.get("dueDate") and enriched["paymentTermDays"] > 0:
         enriched["dueDate"] = add_days_iso(enriched.get("createdAt"), enriched["paymentTermDays"])
     due_status, due_days = order_due_status(enriched)
@@ -4278,7 +4324,8 @@ def order_status_update(order_id: str):
     balance = order_balance_usd(order, movements)
     note = request.form.get("note", "").strip()
 
-    if target_status in ORDER_CREDIT_RESERVING_STATUSES:
+    sale_type = order.get("saleType", "cash")
+    if target_status in ORDER_CREDIT_RESERVING_STATUSES and sale_type == "credit_line":
         available = credit_available(
             client,
             store["orders"],
@@ -4291,10 +4338,13 @@ def order_status_update(order_id: str):
             note = note or "Credito insuficiente o cliente no habilitado para aprobacion automatica."
         else:
             order["creditStatus"] = "approved"
+    elif target_status in ORDER_CREDIT_RESERVING_STATUSES:
+        order["creditStatus"] = "approved" if sale_type == "term_credit" else "without_credit"
 
     if target_status != "credit_review" and not apply_inventory_transition(store, order, target_status):
         target_status = "credit_review"
-        order["creditStatus"] = "manual_review"
+        if sale_type == "credit_line":
+            order["creditStatus"] = "manual_review"
         note = note or "Stock insuficiente para reservar o entregar esta orden."
 
     if target_status == "cancelled":
@@ -4365,7 +4415,10 @@ def order_payment_create(order_id: str):
     order["balanceUsd"] = balance_after
     order["paymentStatus"] = "paid" if balance_after <= 0 else "partial"
     order["status"] = "paid" if balance_after <= 0 else "partial_paid"
-    order["creditStatus"] = "released" if balance_after <= 0 else order.get("creditStatus", "approved")
+    if balance_after <= 0:
+        order["creditStatus"] = "without_credit" if order.get("saleType") == "cash" else "released"
+    else:
+        order["creditStatus"] = order.get("creditStatus", "approved")
     if balance_after <= 0 and float(order.get("commissionUsd") or 0) > 0:
         order["commissionStatus"] = "commission_approved"
     apply_inventory_transition(store, order, order["status"])
