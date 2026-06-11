@@ -1,57 +1,215 @@
 {% extends "base.html" %}
-{% set heading = "Dashboard B2B" %}
-{% set description = "Operacion Wulkan para ferreteros, credito comercial, stock y ordenes moviles." %}
+{% set heading = "Dashboard ejecutivo" %}
+{% set description = "Metricas comerciales, credito, inventario, cobranza y comisiones con filtros operativos." %}
+
+{% macro metric_card(icon, label, value, tag, tone="") -%}
+<div class="col-6 col-lg-4 col-xl-2">
+  <article class="metric-card {{ tone }}">
+    <div class="metric-icon"><i class="bi {{ icon }}"></i></div>
+    <span>{{ label }}</span>
+    <strong>{{ value }}</strong>
+    <em>{{ tag }}</em>
+  </article>
+</div>
+{%- endmacro %}
+
+{% macro graph_panel(title, chart, col="col-12 col-xl-6") -%}
+<div class="{{ col }}">
+  <article class="panel dashboard-chart">
+    <div class="panel-header">
+      <h2>{{ title }}</h2>
+      <span>Graphify</span>
+    </div>
+    {% if chart.values %}
+    <div
+      class="graphify-bars"
+      data-labels='{{ chart["labels"] | tojson }}'
+      data-values='{{ chart["values"] | tojson }}'
+    ></div>
+    {% else %}
+    <div class="empty-state compact">
+      <div class="empty-icon"><i class="bi bi-bar-chart"></i></div>
+      <strong>Sin datos filtrados</strong>
+      <span>Cuando existan ordenes, este grafico se actualizara automaticamente.</span>
+    </div>
+    {% endif %}
+  </article>
+</div>
+{%- endmacro %}
 
 {% block content %}
-<section class="row g-3 dashboard-metrics">
-  <div class="col-6 col-lg-4 col-xl-2">
-    <article class="metric-card metric-products">
-      <div class="metric-icon"><i class="bi bi-box-seam"></i></div>
-      <span>Productos</span>
-      <strong>{{ metrics.products }}</strong>
-      <em>Catalogo</em>
-    </article>
+<form class="panel dashboard-filters" method="get">
+  <div class="dashboard-filter-head">
+    <div>
+      <h2>Filtros ejecutivos</h2>
+      <span>Aplica sobre ventas, ordenes, credito, cobranza y rankings.</span>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-light btn-sm" href="{{ url_for('dashboard') }}">Limpiar</a>
+      <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-funnel"></i> Aplicar</button>
+    </div>
   </div>
-  <div class="col-6 col-lg-4 col-xl-2">
-    <article class="metric-card metric-active">
-      <div class="metric-icon"><i class="bi bi-shop"></i></div>
-      <span>Clientes</span>
-      <strong>{{ metrics.clients }}</strong>
-      <em>B2B</em>
-    </article>
+  <div class="dashboard-filter-grid">
+    <label>
+      <span>Desde</span>
+      <input class="form-control" type="date" name="date_from" value="{{ filters.date_from }}">
+    </label>
+    <label>
+      <span>Hasta</span>
+      <input class="form-control" type="date" name="date_to" value="{{ filters.date_to }}">
+    </label>
+    <label>
+      <span>Vendedor</span>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in filter_options.sellers %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Cliente</span>
+      <select class="form-select" name="client">
+        <option value="">Todos</option>
+        {% for client in filter_options.clients %}
+        <option value="{{ client.id }}" {% if filters.client == client.id %}selected{% endif %}>{{ client.businessName }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Categoria</span>
+      <select class="form-select" name="category">
+        <option value="">Todas</option>
+        {% for category in filter_options.categories %}
+        <option value="{{ category.id }}" {% if filters.category == category.id %}selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Producto</span>
+      <select class="form-select" name="product">
+        <option value="">Todos</option>
+        {% for product in filter_options.products %}
+        <option value="{{ product.id }}" {% if filters.product == product.id %}selected{% endif %}>{{ product.sku }} - {{ product.title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Estado orden</span>
+      <select class="form-select" name="order_status">
+        <option value="">Todos</option>
+        {% for value, label in filter_options.order_statuses %}
+        <option value="{{ value }}" {% if filters.order_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Tipo venta</span>
+      <select class="form-select" name="sale_type">
+        <option value="">Todos</option>
+        {% for value, label in sale_type_options %}
+        <option value="{{ value }}" {% if filters.sale_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Estado credito</span>
+      <select class="form-select" name="credit_status">
+        <option value="">Todos</option>
+        {% for value, label in filter_options.credit_statuses %}
+        <option value="{{ value }}" {% if filters.credit_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Estado cobranza</span>
+      <select class="form-select" name="collection_status">
+        <option value="">Todos</option>
+        {% for value, label in filter_options.collection_statuses %}
+        <option value="{{ value }}" {% if filters.collection_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if filter_options.dispatch_statuses %}
+    <label>
+      <span>Estado logistico</span>
+      <select class="form-select" name="dispatch_status">
+        <option value="">Todos</option>
+        {% for value in filter_options.dispatch_statuses %}
+        <option value="{{ value }}" {% if filters.dispatch_status == value %}selected{% endif %}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    {% if filter_options.branches %}
+    <label>
+      <span>Sucursal</span>
+      <select class="form-select" name="branch">
+        <option value="">Todas</option>
+        {% for value in filter_options.branches %}
+        <option value="{{ value }}" {% if filters.branch == value %}selected{% endif %}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
   </div>
-  <div class="col-6 col-lg-4 col-xl-2">
-    <article class="metric-card metric-stock">
-      <div class="metric-icon"><i class="bi bi-person-badge"></i></div>
-      <span>Vendedores</span>
-      <strong>{{ metrics.sellers }}</strong>
-      <em>Cartera</em>
-    </article>
+</form>
+
+<section class="dashboard-section">
+  <div class="section-label">Ventas y ordenes</div>
+  <div class="row g-3 dashboard-metrics">
+    {{ metric_card("bi-calendar2-day", "Ventas dia", money_usd(metrics.sales_today), "Hoy", "metric-sales") }}
+    {{ metric_card("bi-calendar3", "Ventas mes", money_usd(metrics.sales_month), "Mes", "metric-sales") }}
+    {{ metric_card("bi-currency-dollar", "Ventas acum.", money_usd(metrics.sales_total), "USD", "metric-sales") }}
+    {{ metric_card("bi-receipt", "Ordenes nuevas", metrics.orders_new, "Hoy", "metric-orders") }}
+    {{ metric_card("bi-hourglass-split", "Pendientes", metrics.orders_pending, "Revision", "metric-orders") }}
+    {{ metric_card("bi-check2-circle", "Aprobadas", metrics.orders_approved, "Operacion", "metric-active") }}
+    {{ metric_card("bi-x-octagon", "Rechazadas", metrics.orders_rejected, "Riesgo", "metric-danger") }}
+    {{ metric_card("bi-slash-circle", "Anuladas", metrics.orders_cancelled, "Control", "metric-danger") }}
+    {{ metric_card("bi-truck", "Entregadas", metrics.orders_delivered, "Despacho", "metric-active") }}
   </div>
-  <div class="col-6 col-lg-4 col-xl-2">
-    <article class="metric-card metric-orders">
-      <div class="metric-icon"><i class="bi bi-receipt"></i></div>
-      <span>Ordenes</span>
-      <strong>{{ metrics.orders }}</strong>
-      <em>Movil</em>
-    </article>
+</section>
+
+<section class="dashboard-section">
+  <div class="section-label">Clientes, credito y cobranza</div>
+  <div class="row g-3 dashboard-metrics">
+    {{ metric_card("bi-shop", "Clientes activos", metrics.clients_active, "B2B", "metric-active") }}
+    {{ metric_card("bi-shop-window", "Clientes inactivos", metrics.clients_inactive, "Cartera") }}
+    {{ metric_card("bi-person-plus", "Clientes nuevos", metrics.clients_new, "Hoy") }}
+    {{ metric_card("bi-lock", "Bloqueados", metrics.clients_blocked, "Riesgo", "metric-danger") }}
+    {{ metric_card("bi-exclamation-diamond", "Con deuda vencida", metrics.clients_overdue, "Cobranza", "metric-danger") }}
+    {{ metric_card("bi-credit-card-2-front", "Credito aprobado", money_usd(metrics.credit_approved), "Cupo") }}
+    {{ metric_card("bi-wallet2", "Credito usado", money_usd(metrics.credit_used), "Exposicion") }}
+    {{ metric_card("bi-wallet", "Credito disponible", money_usd(metrics.credit_available), "Disponible", "metric-active") }}
+    {{ metric_card("bi-cash-coin", "Por cobrar", money_usd(metrics.accounts_receivable), "Saldo") }}
+    {{ metric_card("bi-alarm", "Deuda vencida", money_usd(metrics.overdue_debt), "Mora", "metric-danger") }}
   </div>
-  <div class="col-6 col-lg-4 col-xl-2">
-    <article class="metric-card metric-sales">
-      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
-      <span>Ventas</span>
-      <strong>{{ money_usd(metrics.gross_revenue) }}</strong>
-      <em>USD</em>
-    </article>
+</section>
+
+<section class="dashboard-section">
+  <div class="section-label">Inventario y comisiones</div>
+  <div class="row g-3 dashboard-metrics">
+    {{ metric_card("bi-box-seam", "Productos", metrics.products, "Catalogo") }}
+    {{ metric_card("bi-box2-heart", "Productos activos", metrics.active_products, "App", "metric-active") }}
+    {{ metric_card("bi-exclamation-triangle", "Stock critico", metrics.stock_critical, "Reposicion", "metric-warning") }}
+    {{ metric_card("bi-box2", "Sin stock", metrics.products_out, "Agotado", "metric-danger") }}
+    {{ metric_card("bi-bar-chart", "Productos vendidos", metrics.top_products, "Ranking") }}
+    {{ metric_card("bi-person-badge", "Vendedores activos", metrics.sellers_active, "Equipo", "metric-active") }}
+    {{ metric_card("bi-cash-stack", "Comision pend.", money_usd(metrics.commission_pending), "Liquidar") }}
+    {{ metric_card("bi-patch-check", "Comision aprob.", money_usd(metrics.commission_approved), "Validada", "metric-active") }}
+    {{ metric_card("bi-receipt-cutoff", "Comision pagada", money_usd(metrics.commission_paid), "Cerrada") }}
   </div>
-  <div class="col-6 col-lg-4 col-xl-2">
-    <article class="metric-card metric-ads">
-      <div class="metric-icon"><i class="bi bi-cash-stack"></i></div>
-      <span>Comision pend.</span>
-      <strong>{{ money_usd(metrics.commission_pending) }}</strong>
-      <em>Ventas</em>
-    </article>
-  </div>
+</section>
+
+<section class="row g-3 mt-0">
+  {{ graph_panel("Ventas por dia", dashboard_charts.sales_by_day) }}
+  {{ graph_panel("Ventas por mes", dashboard_charts.sales_by_month) }}
+  {{ graph_panel("Ventas por vendedor", dashboard_charts.sales_by_seller) }}
+  {{ graph_panel("Ventas por categoria", dashboard_charts.sales_by_category) }}
+  {{ graph_panel("Productos mas vendidos", dashboard_charts.products_sold) }}
+  {{ graph_panel("Clientes con mayor compra", dashboard_charts.clients_purchase) }}
+  {{ graph_panel("Morosidad por cliente", dashboard_charts.overdue_by_client) }}
+  {{ graph_panel("Comisiones por vendedor", dashboard_charts.commissions_by_seller) }}
 </section>
 
 <section class="row g-3 mt-0">
@@ -84,7 +242,10 @@
 
 <section class="panel mt-2">
   <div class="panel-header">
-    <h2>Ordenes recientes de ferreteros</h2>
+    <div>
+      <h2>Ordenes recientes</h2>
+      <span>Ultimas compras segun filtros aplicados.</span>
+    </div>
     <span>{{ recent_orders | length }} registros</span>
   </div>
   <div class="table-responsive">
@@ -94,25 +255,33 @@
           <th>Orden</th>
           <th>Cliente</th>
           <th>Vendedor</th>
+          <th>Tipo</th>
           <th>Total USD</th>
           <th>Saldo</th>
-          <th>Total VES</th>
+          <th>Credito</th>
           <th>Estado</th>
         </tr>
       </thead>
       <tbody>
         {% for order in recent_orders %}
         <tr>
-          <td>{{ order.orderId }}</td>
+          <td>
+            <strong>{{ order.orderId }}</strong>
+            <small class="d-block text-secondary">{{ order.createdAt }}</small>
+          </td>
           <td>{{ order.customerName }}</td>
           <td>{{ order.sellerName }}</td>
+          <td>
+            <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
+            <small class="d-block text-secondary">{{ order.paymentTermDays }} dias</small>
+          </td>
           <td>{{ money_usd(order["totalUsd"]) }}</td>
           <td>{{ money_usd(order.balanceUsd) }}</td>
-          <td>{{ order["totalVes"] }}</td>
-          <td><span class="badge {{ order["status"] | badge_class }}">{{ order["status"] }}</span></td>
+          <td><span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatusLabel }}</span></td>
+          <td><span class="badge {{ order["status"] | badge_class }}">{{ order.statusLabel }}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="text-secondary">Sin ordenes moviles todavia.</td></tr>
+        <tr><td colspan="8" class="text-secondary">Sin ordenes para los filtros seleccionados.</td></tr>
         {% endfor %}
       </tbody>
     </table>

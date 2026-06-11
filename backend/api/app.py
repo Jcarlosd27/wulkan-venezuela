@@ -484,6 +484,213 @@ def order_due_status(order: dict) -> tuple[str, int]:
     return "current", delta
 
 
+def parse_filter_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def safe_int(value, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def date_value_is_today(value: str | None) -> bool:
+    if not value:
+        return False
+    return parse_utc_datetime(value).date() == datetime.now(timezone.utc).date()
+
+
+def dashboard_filters_from_request() -> dict[str, str]:
+    return {
+        "date_from": request.args.get("date_from", "").strip(),
+        "date_to": request.args.get("date_to", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "client": request.args.get("client", "").strip(),
+        "category": request.args.get("category", "").strip(),
+        "product": request.args.get("product", "").strip(),
+        "order_status": request.args.get("order_status", "").strip(),
+        "credit_status": request.args.get("credit_status", "").strip(),
+        "collection_status": request.args.get("collection_status", "").strip(),
+        "dispatch_status": request.args.get("dispatch_status", "").strip(),
+        "sale_type": request.args.get("sale_type", "").strip(),
+        "branch": request.args.get("branch", "").strip(),
+    }
+
+
+def product_lookup_maps(products: list[dict]) -> tuple[dict[str, dict], dict[str, dict]]:
+    by_id = {product.get("id", ""): product for product in products if product.get("id")}
+    by_sku = {product.get("sku", ""): product for product in products if product.get("sku")}
+    return by_id, by_sku
+
+
+def order_products(order: dict, products_by_id: dict[str, dict], products_by_sku: dict[str, dict]) -> list[dict]:
+    products: list[dict] = []
+    for item in order.get("items") or []:
+        product = products_by_id.get(item.get("productId", "")) or products_by_sku.get(item.get("sku", ""))
+        if product:
+            products.append(product)
+    return products
+
+
+def order_matches_dashboard_filters(
+    order: dict,
+    filters: dict[str, str],
+    products_by_id: dict[str, dict],
+    products_by_sku: dict[str, dict],
+) -> bool:
+    created_at = parse_utc_datetime(order.get("createdAt", ""))
+    date_from = parse_filter_date(filters.get("date_from"))
+    date_to = parse_filter_date(filters.get("date_to"))
+    if date_from and created_at < date_from:
+        return False
+    if date_to and created_at >= date_to + timedelta(days=1):
+        return False
+    if filters.get("seller") and order.get("sellerId", "") != filters["seller"]:
+        return False
+    if filters.get("client") and order.get("customerId", "") != filters["client"]:
+        return False
+    if filters.get("order_status") and order.get("status", "") != filters["order_status"]:
+        return False
+    if filters.get("credit_status") and order.get("creditStatus", "") != filters["credit_status"]:
+        return False
+    if filters.get("collection_status") and order.get("dueStatus", "") != filters["collection_status"]:
+        return False
+    if filters.get("dispatch_status") and order.get("dispatchStatus", "") != filters["dispatch_status"]:
+        return False
+    if filters.get("sale_type") and order.get("saleType", "") != filters["sale_type"]:
+        return False
+    if filters.get("branch") and order.get("branch", "") != filters["branch"]:
+        return False
+
+    if not filters.get("category") and not filters.get("product"):
+        return True
+
+    products = order_products(order, products_by_id, products_by_sku)
+    if filters.get("product"):
+        return any(product.get("id", "") == filters["product"] for product in products)
+    return any(product.get("categoryId", "") == filters["category"] for product in products)
+
+
+def graphify_from_pairs(pairs: list[tuple[str, float]], limit: int = 6) -> dict:
+    sorted_pairs = sorted(pairs, key=lambda item: item[1], reverse=True)[:limit]
+    return {
+        "labels": [label for label, _value in sorted_pairs],
+        "values": [round(float(value), 2) for _label, value in sorted_pairs],
+    }
+
+
+def dashboard_order_metrics(
+    orders: list[dict],
+    clients: list[dict],
+    products: list[dict],
+    sellers: list[dict],
+) -> dict:
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    pending_statuses = {"credit_review", "payment_under_review"}
+    approved_statuses = {"approved_with_credit", "preparing", "delivered", "partial_paid", "paid"}
+    rejected_statuses = {"rejected"}
+    open_balances = [float(order.get("balanceUsd") or 0) for order in orders if order.get("status") != "cancelled"]
+    overdue_orders = [
+        order
+        for order in orders
+        if order.get("dueStatus") == "overdue" and float(order.get("balanceUsd") or 0) > 0
+    ]
+    client_ids_with_overdue = {order.get("customerId", "") for order in overdue_orders}
+    return {
+        "sales_today": round(sum(float(order.get("totalUsd") or 0) for order in orders if date_value_is_today(order.get("createdAt", ""))), 2),
+        "sales_month": round(
+            sum(float(order.get("totalUsd") or 0) for order in orders if parse_utc_datetime(order.get("createdAt", "")) >= month_start),
+            2,
+        ),
+        "sales_total": round(sum(float(order.get("totalUsd") or 0) for order in orders), 2),
+        "orders_new": sum(1 for order in orders if date_value_is_today(order.get("createdAt", ""))),
+        "orders_pending": sum(1 for order in orders if order.get("status") in pending_statuses),
+        "orders_approved": sum(1 for order in orders if order.get("status") in approved_statuses),
+        "orders_rejected": sum(1 for order in orders if order.get("status") in rejected_statuses),
+        "orders_cancelled": sum(1 for order in orders if order.get("status") == "cancelled"),
+        "orders_delivered": sum(1 for order in orders if order.get("status") == "delivered"),
+        "clients_active": sum(1 for client in clients if client.get("status") == "active"),
+        "clients_inactive": sum(1 for client in clients if client.get("status") == "inactive"),
+        "clients_new": sum(1 for client in clients if date_value_is_today(client.get("createdAt", ""))),
+        "clients_blocked": sum(1 for client in clients if "blocked" in str(client.get("status", "")).lower()),
+        "clients_overdue": len(client_ids_with_overdue),
+        "credit_approved": round(sum(float(client.get("creditLimitUsd") or 0) for client in clients if client.get("creditEnabled")), 2),
+        "credit_used": round(sum(float(client.get("creditExposureUsd") or 0) for client in clients), 2),
+        "credit_available": round(sum(float(client.get("creditAvailableUsd") or 0) for client in clients), 2),
+        "accounts_receivable": round(sum(open_balances), 2),
+        "overdue_debt": round(sum(float(order.get("balanceUsd") or 0) for order in overdue_orders), 2),
+        "stock_critical": sum(
+            1
+            for product in products
+            if safe_int(product.get("availableStock")) > 0
+            and safe_int(product.get("availableStock")) <= safe_int(product.get("minimumStock") or product.get("stockMin") or product.get("minStock"), 5)
+        ),
+        "products_out": sum(1 for product in products if safe_int(product.get("availableStock")) <= 0),
+        "top_products": len({item.get("productId", "") or item.get("sku", "") for order in orders for item in order.get("items") or []}),
+        "sellers_active": sum(1 for seller in sellers if seller.get("status") == "active"),
+        "commission_pending": round(sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_pending"), 2),
+        "commission_approved": round(sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_approved"), 2),
+        "commission_paid": round(sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_paid"), 2),
+    }
+
+
+def dashboard_charts(
+    orders: list[dict],
+    clients: list[dict],
+    products_by_id: dict[str, dict],
+    products_by_sku: dict[str, dict],
+) -> dict:
+    sales_by_day: dict[str, float] = {}
+    sales_by_month: dict[str, float] = {}
+    sales_by_seller: dict[str, float] = {}
+    sales_by_category: dict[str, float] = {}
+    products_sold: dict[str, int] = {}
+    clients_purchase: dict[str, float] = {}
+    overdue_by_client: dict[str, float] = {}
+    commissions_by_seller: dict[str, float] = {}
+    client_names = {client.get("id", ""): client.get("businessName", "Cliente Wulkan") for client in clients}
+
+    for order in orders:
+        created_at = parse_utc_datetime(order.get("createdAt", ""))
+        day_key = created_at.strftime("%d/%m")
+        month_key = created_at.strftime("%Y-%m")
+        total = float(order.get("totalUsd") or 0)
+        sales_by_day[day_key] = sales_by_day.get(day_key, 0) + total
+        sales_by_month[month_key] = sales_by_month.get(month_key, 0) + total
+        seller_name = order.get("sellerName") or "Sin vendedor"
+        sales_by_seller[seller_name] = sales_by_seller.get(seller_name, 0) + total
+        commissions_by_seller[seller_name] = commissions_by_seller.get(seller_name, 0) + float(order.get("commissionUsd") or 0)
+        client_name = client_names.get(order.get("customerId", ""), order.get("customer", {}).get("name", "Cliente Wulkan"))
+        clients_purchase[client_name] = clients_purchase.get(client_name, 0) + total
+        if order.get("dueStatus") == "overdue":
+            overdue_by_client[client_name] = overdue_by_client.get(client_name, 0) + float(order.get("balanceUsd") or 0)
+        for item in order.get("items") or []:
+            quantity = int(item.get("quantity") or 0)
+            product = products_by_id.get(item.get("productId", "")) or products_by_sku.get(item.get("sku", ""))
+            product_label = (product or {}).get("sku") or item.get("sku") or item.get("title", "Producto")
+            products_sold[product_label] = products_sold.get(product_label, 0) + quantity
+            category_label = (product or {}).get("categoryName") or "Sin categoria"
+            sales_by_category[category_label] = sales_by_category.get(category_label, 0) + float(item.get("lineTotalUsd") or 0)
+
+    return {
+        "sales_by_day": graphify_from_pairs(list(sales_by_day.items()), 8),
+        "sales_by_month": graphify_from_pairs(list(sales_by_month.items()), 6),
+        "sales_by_seller": graphify_from_pairs(list(sales_by_seller.items()), 6),
+        "sales_by_category": graphify_from_pairs(list(sales_by_category.items()), 6),
+        "products_sold": graphify_from_pairs(list(products_sold.items()), 6),
+        "clients_purchase": graphify_from_pairs(list(clients_purchase.items()), 6),
+        "overdue_by_client": graphify_from_pairs(list(overdue_by_client.items()), 6),
+        "commissions_by_seller": graphify_from_pairs(list(commissions_by_seller.items()), 6),
+    }
+
+
 def seller_commission_rate(store: dict, seller_id: str) -> float:
     seller = find_by_id(store.get("admin_users", []), seller_id)
     return float((seller or {}).get("commissionRatePercent") or 0)
@@ -3234,34 +3441,70 @@ def dashboard():
     store = load_store()
     orders = store["orders"]
     products = [enrich_inventory_product(product, orders) for product in store["products"]]
+    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
     movements = store.get("credit_movements", [])
     enriched_orders = [enrich_order(order, movements) for order in orders]
     clients_list = [enrich_client(client, orders, movements) for client in store.get("clients", [])]
-    gross_revenue = sum(float(order.get("totalUsd") or 0) for order in orders)
-    metrics = {
-        "products": len(products),
-        "active_products": sum(1 for product in products if product.get("status") == "active"),
-        "clients": len(clients_list),
-        "sellers": len(sales_users(store)),
-        "credit_requested": sum(1 for client in clients_list if client.get("creditRequestStatus") == "pending"),
-        "credit_available": sum(float(client.get("creditAvailableUsd") or 0) for client in clients_list),
-        "credit_exposure": sum(float(client.get("creditExposureUsd") or 0) for client in clients_list),
-        "low_stock": sum(1 for product in products if int(product.get("availableStock") or 0) <= 5),
-        "orders": len(orders),
-        "gross_revenue": gross_revenue,
-        "commission_pending": sum(
-            float(order.get("commissionUsd") or 0)
-            for order in enriched_orders
-            if order.get("commissionStatus") == "commission_pending"
+    filters = dashboard_filters_from_request()
+    filtered_orders = [
+        order
+        for order in enriched_orders
+        if order_matches_dashboard_filters(order, filters, products_by_id, products_by_sku)
+    ]
+    sellers = sales_users(store)
+    metrics = dashboard_order_metrics(filtered_orders, clients_list, products, sellers)
+    metrics.update(
+        {
+            "products": len(products),
+            "active_products": sum(1 for product in products if product.get("status") == "active"),
+            "clients": len(clients_list),
+            "sellers": len(sellers),
+            "credit_requested": sum(1 for client in clients_list if client.get("creditRequestStatus") == "pending"),
+            "low_stock": metrics["stock_critical"],
+            "orders": len(filtered_orders),
+            "announcements": len(store["announcements"]),
+        }
+    )
+    filter_options = {
+        "sellers": sellers,
+        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "categories": sorted(store.get("categories", []), key=lambda item: item.get("name", "")),
+        "products": sorted(store.get("products", []), key=lambda item: item.get("title", "")),
+        "order_statuses": ORDER_STATUS_OPTIONS + [("rejected", "Rechazada")],
+        "credit_statuses": [
+            ("approved", "Aprobado"),
+            ("manual_review", "Revision manual"),
+            ("without_credit", "Sin linea"),
+            ("client_not_active", "Cliente inactivo"),
+            ("released", "Liberado"),
+            ("cancelled", "Cancelado"),
+        ],
+        "collection_statuses": [
+            ("current", "Al dia"),
+            ("due_soon", "Por vencer"),
+            ("overdue", "Vencido"),
+            ("paid", "Pagado"),
+            ("without_due_date", "Sin plazo"),
+        ],
+        "dispatch_statuses": sorted(
+            {
+                order.get("dispatchStatus", "")
+                for order in enriched_orders
+                if order.get("dispatchStatus", "")
+            }
         ),
-        "announcements": len(store["announcements"]),
+        "branches": sorted({order.get("branch", "") for order in enriched_orders if order.get("branch", "")}),
     }
     return render_template(
         "dashboard.html",
         metrics=metrics,
+        filters=filters,
+        filter_options=filter_options,
+        sale_type_options=SALE_TYPE_OPTIONS,
         stock_health=stock_health(products),
         rotation_chart=rotation_chart(products),
-        recent_orders=sorted(enriched_orders, key=lambda item: item.get("createdAt", ""), reverse=True)[:6],
+        dashboard_charts=dashboard_charts(filtered_orders, clients_list, products_by_id, products_by_sku),
+        recent_orders=sorted(filtered_orders, key=lambda item: item.get("createdAt", ""), reverse=True)[:8],
     )
 
 
