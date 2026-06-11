@@ -307,6 +307,40 @@ REPORT_TYPE_OPTIONS = [
     ("inventory", "Inventario"),
     ("sellers", "Vendedores"),
 ]
+DOCUMENT_SCOPE_OPTIONS = [
+    ("client", "Cliente"),
+    ("product", "Producto"),
+    ("order", "Orden"),
+    ("admin", "Administrativo"),
+]
+DOCUMENT_TYPE_OPTIONS = [
+    ("rif", "RIF / documento fiscal"),
+    ("contract", "Contrato"),
+    ("credit", "Documento de credito"),
+    ("account_statement", "Estado de cuenta"),
+    ("technical_sheet", "Ficha tecnica"),
+    ("manual", "Manual"),
+    ("warranty", "Garantia"),
+    ("certificate", "Certificado"),
+    ("quote", "Cotizacion"),
+    ("payment_proof", "Comprobante"),
+    ("dispatch_guide", "Guia de despacho"),
+    ("delivery_evidence", "Evidencia de entrega"),
+    ("invoice", "Factura manual"),
+    ("administrative", "Administrativo"),
+]
+DOCUMENT_STATUS_OPTIONS = [
+    ("active", "Activo"),
+    ("pending_review", "Pendiente revision"),
+    ("expired", "Vencido"),
+    ("archived", "Archivado"),
+]
+DOCUMENT_VISIBILITY_OPTIONS = [
+    ("internal", "Solo admin"),
+    ("seller", "Visible vendedor"),
+    ("client", "Visible cliente"),
+    ("public", "Publico"),
+]
 AUDIT_WRITE_ACTIONS = {
     "create",
     "update",
@@ -562,6 +596,7 @@ ADMIN_MENU_GROUPS = [
         "icon": "bi-shield-lock",
         "items": [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
+            {"module": "documents", "endpoint": "documents", "label": "Documentos", "icon": "bi-folder2", "active": ["documents", "documents_import", "documents_export", "document_delete"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit", "audit_export"]},
             {"module": "settings", "endpoint": "settings", "label": "Configuracion", "icon": "bi-gear", "active": ["settings"]},
             {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
@@ -736,6 +771,24 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "titulo", "required": False, "example": "Ficha tecnica motosierra", "help": "Nombre interno."},
                     {"name": "tipo", "required": True, "example": "pdf", "help": "image o pdf."},
                     {"name": "url", "required": True, "example": "https://cdn.wulkan/ficha.pdf", "help": "URL publica del recurso."},
+                ],
+            },
+            {
+                "key": "documentos",
+                "module": "documents",
+                "endpoint": "documents",
+                "title": "Documentos",
+                "description": "Contratos, RIF, garantias, evidencias y documentos por cliente, producto u orden.",
+                "columns": [
+                    {"name": "titulo", "required": True, "example": "RIF Ferreteria Principal", "help": "Nombre interno del documento."},
+                    {"name": "tipo_documento", "required": True, "example": "rif", "help": "rif, contract, credit, account_statement, technical_sheet, manual, warranty, certificate, quote, payment_proof, dispatch_guide, delivery_evidence, invoice o administrative."},
+                    {"name": "ambito", "required": True, "example": "cliente", "help": "cliente, producto, orden o administrativo."},
+                    {"name": "referencia", "required": False, "example": "compras@ferreteriaprincipal.com", "help": "Email/RIF/nombre cliente, SKU producto u orden segun ambito."},
+                    {"name": "url", "required": True, "example": "https://cdn.wulkan/documentos/rif.pdf", "help": "URL publica o privada del archivo."},
+                    {"name": "visibilidad", "required": False, "example": "internal", "help": "internal, seller, client o public."},
+                    {"name": "vence", "required": False, "example": "2027-06-10", "help": "Fecha de vencimiento si aplica."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active, pending_review, expired o archived."},
+                    {"name": "nota", "required": False, "example": "Documento validado por administracion.", "help": "Observacion interna."},
                 ],
             },
         ],
@@ -1002,6 +1055,22 @@ def commission_rule_label(value: str) -> str:
 
 def report_type_label(value: str) -> str:
     return dict(REPORT_TYPE_OPTIONS).get(value, "Comercial")
+
+
+def document_scope_label(value: str) -> str:
+    return dict(DOCUMENT_SCOPE_OPTIONS).get(value, value or "Sin ambito")
+
+
+def document_type_label(value: str) -> str:
+    return dict(DOCUMENT_TYPE_OPTIONS).get(value, value or "Documento")
+
+
+def document_status_label(value: str) -> str:
+    return dict(DOCUMENT_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
+def document_visibility_label(value: str) -> str:
+    return dict(DOCUMENT_VISIBILITY_OPTIONS).get(value, value or "Interno")
 
 
 def quote_status_label(value: str) -> str:
@@ -1664,6 +1733,10 @@ def security_context():
         "commission_status_label": commission_status_label,
         "commission_rule_label": commission_rule_label,
         "report_type_label": report_type_label,
+        "document_scope_label": document_scope_label,
+        "document_type_label": document_type_label,
+        "document_status_label": document_status_label,
+        "document_visibility_label": document_visibility_label,
         "quote_status_label": quote_status_label,
         "crm_record_type_label": crm_record_type_label,
         "crm_stage_label": crm_stage_label,
@@ -3415,6 +3488,287 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
                 if not product.get("imageUrl"):
                     product["imageUrl"] = asset_url
             product["updatedAt"] = utc_now()
+    return result
+
+
+DOCUMENT_SCOPE_ALIASES = {
+    "cliente": "client",
+    "clientes": "client",
+    "client": "client",
+    "producto": "product",
+    "productos": "product",
+    "product": "product",
+    "orden": "order",
+    "pedido": "order",
+    "order": "order",
+    "administrativo": "admin",
+    "admin": "admin",
+}
+DOCUMENT_TYPE_ALIASES = {
+    "rif": "rif",
+    "documento_fiscal": "rif",
+    "contrato": "contract",
+    "contract": "contract",
+    "credito": "credit",
+    "credit": "credit",
+    "estado_cuenta": "account_statement",
+    "account_statement": "account_statement",
+    "ficha_tecnica": "technical_sheet",
+    "technical_sheet": "technical_sheet",
+    "manual": "manual",
+    "garantia": "warranty",
+    "warranty": "warranty",
+    "certificado": "certificate",
+    "certificate": "certificate",
+    "cotizacion": "quote",
+    "quote": "quote",
+    "comprobante": "payment_proof",
+    "payment_proof": "payment_proof",
+    "guia_despacho": "dispatch_guide",
+    "dispatch_guide": "dispatch_guide",
+    "evidencia_entrega": "delivery_evidence",
+    "delivery_evidence": "delivery_evidence",
+    "factura": "invoice",
+    "invoice": "invoice",
+    "administrativo": "administrative",
+    "administrative": "administrative",
+}
+DOCUMENT_VISIBILITY_ALIASES = {
+    "interno": "internal",
+    "internal": "internal",
+    "admin": "internal",
+    "vendedor": "seller",
+    "seller": "seller",
+    "cliente": "client",
+    "client": "client",
+    "publico": "public",
+    "public": "public",
+}
+
+
+def normalize_document_scope(value: str) -> str:
+    key = normalize_import_key(value or "admin")
+    return DOCUMENT_SCOPE_ALIASES.get(key, key if key in dict(DOCUMENT_SCOPE_OPTIONS) else "admin")
+
+
+def normalize_document_type(value: str) -> str:
+    key = normalize_import_key(value or "administrative")
+    return DOCUMENT_TYPE_ALIASES.get(key, key if key in dict(DOCUMENT_TYPE_OPTIONS) else "administrative")
+
+
+def normalize_document_visibility(value: str) -> str:
+    key = normalize_import_key(value or "internal")
+    return DOCUMENT_VISIBILITY_ALIASES.get(key, key if key in dict(DOCUMENT_VISIBILITY_OPTIONS) else "internal")
+
+
+def document_is_asset(asset: dict) -> bool:
+    return asset.get("assetType") == "document" or asset.get("type") == "document" or bool(asset.get("documentType"))
+
+
+def resolve_document_subject(store: dict, scope: str, reference: str) -> tuple[str, str]:
+    reference = (reference or "").strip()
+    if scope == "admin":
+        return "", "Administrativo general"
+
+    if scope == "client":
+        normalized = normalize_import_key(reference)
+        client = next(
+            (
+                item
+                for item in store.get("clients", [])
+                if item.get("id") == reference
+                or item.get("email", "").lower() == reference.lower()
+                or normalize_import_key(item.get("taxId", "")) == normalized
+                or normalize_import_key(item.get("businessName", "")) == normalized
+            ),
+            None,
+        )
+        if client:
+            return client.get("id", ""), client.get("businessName", "Cliente")
+
+    if scope == "product":
+        product = find_by_id(store.get("products", []), reference) or find_product_by_sku(store, reference)
+        if not product and reference:
+            normalized = normalize_import_key(reference)
+            product = next((item for item in store.get("products", []) if normalize_import_key(item.get("title", "")) == normalized), None)
+        if product:
+            return product.get("id", ""), f"{product.get('sku', '')} - {product.get('title', 'Producto')}".strip(" -")
+
+    if scope == "order":
+        normalized = normalize_import_key(reference)
+        order = next(
+            (
+                item
+                for item in store.get("orders", [])
+                if item.get("id") == reference
+                or item.get("orderId") == reference
+                or item.get("orderNumber") == reference
+                or normalize_import_key(item.get("id", "")) == normalized
+                or normalize_import_key(item.get("orderId", "")) == normalized
+            ),
+            None,
+        )
+        if order:
+            return order.get("id", ""), order.get("orderId") or order.get("id", "Orden")
+
+    return "", ""
+
+
+def document_subject_options(store: dict) -> list[dict]:
+    return [
+        {
+            "label": "Clientes",
+            "items": [
+                {"value": f"client:{client.get('id', '')}", "label": f"{client.get('businessName', 'Cliente')} - {client.get('email', '')}"}
+                for client in store.get("clients", [])
+            ],
+        },
+        {
+            "label": "Productos",
+            "items": [
+                {"value": f"product:{product.get('id', '')}", "label": f"{product.get('sku', '')} - {product.get('title', 'Producto')}"}
+                for product in store.get("products", [])
+            ],
+        },
+        {
+            "label": "Ordenes",
+            "items": [
+                {"value": f"order:{order.get('id', '')}", "label": f"{order.get('orderId') or order.get('id', 'Orden')} - {order.get('customer', {}).get('name', '')}"}
+                for order in store.get("orders", [])
+            ],
+        },
+    ]
+
+
+def parse_document_subject_ref(value: str) -> tuple[str, str]:
+    if ":" not in (value or ""):
+        return "admin", ""
+    scope, subject_id = value.split(":", 1)
+    return normalize_document_scope(scope), subject_id
+
+
+def document_assets(store: dict) -> list[dict]:
+    products = {product.get("id"): product for product in store.get("products", [])}
+    clients = {client.get("id"): client for client in store.get("clients", [])}
+    orders = {order.get("id"): order for order in store.get("orders", [])}
+    now = datetime.now(timezone.utc)
+    assets = []
+    for asset in reversed(store.get("media_assets", [])):
+        if not document_is_asset(asset) or asset.get("status") == "deleted":
+            continue
+        item = dict(asset)
+        scope = normalize_document_scope(item.get("subjectType") or ("product" if item.get("productId") else "admin"))
+        subject_id = item.get("subjectId") or item.get("productId", "")
+        label = item.get("subjectLabel", "")
+        if scope == "client" and subject_id in clients:
+            label = clients[subject_id].get("businessName", label)
+        elif scope == "product" and subject_id in products:
+            product = products[subject_id]
+            label = f"{product.get('sku', '')} - {product.get('title', 'Producto')}".strip(" -")
+        elif scope == "order" and subject_id in orders:
+            label = orders[subject_id].get("orderId") or orders[subject_id].get("id", label)
+        item["subjectType"] = scope
+        item["subjectId"] = subject_id
+        item["subjectLabel"] = label or "Administrativo general"
+        item["documentType"] = normalize_document_type(item.get("documentType", "administrative"))
+        item["visibility"] = normalize_document_visibility(item.get("visibility", "internal"))
+        item["effectiveStatus"] = item.get("status", "active")
+        if item.get("expiresAt") and parse_utc_datetime(item.get("expiresAt")) < now and item["effectiveStatus"] == "active":
+            item["effectiveStatus"] = "expired"
+        assets.append(item)
+    return assets
+
+
+def document_metrics(assets: list[dict]) -> dict:
+    return {
+        "total": len(assets),
+        "active": sum(1 for item in assets if item.get("effectiveStatus") == "active"),
+        "review": sum(1 for item in assets if item.get("effectiveStatus") == "pending_review"),
+        "expired": sum(1 for item in assets if item.get("effectiveStatus") == "expired"),
+    }
+
+
+def document_graph(assets: list[dict]) -> dict:
+    counts: dict[str, int] = {}
+    for asset in assets:
+        label = document_type_label(asset.get("documentType", "administrative"))
+        counts[label] = counts.get(label, 0) + 1
+    rows = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:6]
+    return {"labels": [label for label, _count in rows], "values": [count for _label, count in rows]}
+
+
+def import_documents_rows(store: dict, rows: list[dict]) -> dict:
+    result = blank_bulk_result()
+    seen_documents: dict[str, int] = {}
+    for row_number, row in enumerate(rows, start=2):
+        title = row_value(row, "title", "titulo", "documento")
+        document_url = row_value(row, "url", "documentUrl", "archivo_url", "documento_url")
+        document_type = normalize_document_type(row_value(row, "documentType", "tipo_documento", "tipo", default="administrative"))
+        scope = normalize_document_scope(row_value(row, "subjectType", "ambito", "scope", default="admin"))
+        reference = row_value(row, "subjectId", "referencia", "cliente", "sku", "orden", default="")
+        if not title or not document_url:
+            bulk_error(result, row_number, "documento requiere titulo y URL.")
+            continue
+        if document_type not in dict(DOCUMENT_TYPE_OPTIONS):
+            bulk_error(result, row_number, f"documento {title}: tipo no valido.")
+            continue
+        if scope not in dict(DOCUMENT_SCOPE_OPTIONS):
+            bulk_error(result, row_number, f"documento {title}: ambito no valido.")
+            continue
+        subject_id, subject_label = resolve_document_subject(store, scope, reference)
+        if scope != "admin" and not subject_id:
+            bulk_error(result, row_number, f"documento {title}: referencia no encontrada para {document_scope_label(scope).lower()}.")
+            continue
+        duplicate_key = f"{scope}|{subject_id}|{document_type}|{document_url}"
+        duplicate_message = duplicate_in_upload(seen_documents, duplicate_key, row_number)
+        if duplicate_message:
+            bulk_error(result, row_number, f"documento {title}: {duplicate_message}")
+            continue
+        warn_invalid_urls(result, row_number, f"documento {title}", [document_url])
+        status = row_value(row, "status", "estado", default="active") or "active"
+        if status not in dict(DOCUMENT_STATUS_OPTIONS):
+            bulk_error(result, row_number, f"documento {title}: estado no valido.")
+            continue
+        visibility = normalize_document_visibility(row_value(row, "visibility", "visibilidad", default="internal"))
+        existing = next(
+            (
+                item
+                for item in store.get("media_assets", [])
+                if document_is_asset(item)
+                and item.get("subjectType") == scope
+                and item.get("subjectId", "") == subject_id
+                and item.get("documentType") == document_type
+                and item.get("url") == document_url
+            ),
+            None,
+        )
+        payload = {
+            "title": title,
+            "assetType": "document",
+            "type": "document",
+            "productId": subject_id if scope == "product" else "",
+            "url": document_url,
+            "documentType": document_type,
+            "subjectType": scope,
+            "subjectId": subject_id,
+            "subjectLabel": subject_label,
+            "visibility": visibility,
+            "expiresAt": row_value(row, "expiresAt", "vence", "vencimiento", default=(existing or {}).get("expiresAt", "")),
+            "status": status,
+            "notes": row_value(row, "notes", "nota", "observacion", default=(existing or {}).get("notes", "")),
+            "updatedAt": utc_now(),
+        }
+        if existing:
+            existing.update(payload)
+            result["updated"] += 1
+            bulk_row(result, "updated", row_number, title)
+        else:
+            payload["id"] = next_id("doc", title)
+            payload["createdByName"] = "Carga masiva"
+            payload["createdAt"] = utc_now()
+            store.setdefault("media_assets", []).append(payload)
+            result["created"] += 1
+            bulk_row(result, "created", row_number, title)
     return result
 
 
@@ -7821,6 +8175,8 @@ def media_library():
     product_lookup = {product["id"]: product for product in products}
     assets = []
     for asset in reversed(store.get("media_assets", [])):
+        if document_is_asset(asset) or asset.get("status") == "deleted":
+            continue
         enriched_asset = dict(asset)
         product = product_lookup.get(enriched_asset.get("productId"))
         enriched_asset["productTitle"] = product["title"] if product else "Sin asociar"
@@ -7870,6 +8226,143 @@ def media_asset_delete(asset_id: str):
         )
         save_store(store)
     return redirect(url_for("media_library"))
+
+
+@app.route("/documents", methods=["GET", "POST"])
+@require_roles(*roles_for_action("documents", "view"))
+def documents():
+    store = load_store()
+    if request.method == "POST":
+        if not can_module_action("documents", "create"):
+            return forbidden_response()
+        title = request.form.get("title", "").strip()
+        document_url = request.form.get("documentUrl", "").strip() or save_upload(request.files.get("documentFile"), "documents")
+        document_type = normalize_document_type(request.form.get("documentType", "administrative"))
+        subject_type, subject_id = parse_document_subject_ref(request.form.get("subjectRef", "admin:"))
+        subject_label = "Administrativo general"
+        if subject_id:
+            resolved_id, resolved_label = resolve_document_subject(store, subject_type, subject_id)
+            subject_id = resolved_id or subject_id
+            subject_label = resolved_label or subject_label
+        if title and document_url:
+            asset = {
+                "id": next_id("doc", title),
+                "title": title,
+                "assetType": "document",
+                "type": "document",
+                "productId": subject_id if subject_type == "product" else "",
+                "url": document_url,
+                "filePath": "",
+                "documentType": document_type,
+                "subjectType": subject_type,
+                "subjectId": subject_id,
+                "subjectLabel": subject_label,
+                "visibility": normalize_document_visibility(request.form.get("visibility", "internal")),
+                "expiresAt": request.form.get("expiresAt", ""),
+                "status": request.form.get("status", "active") if request.form.get("status", "active") in dict(DOCUMENT_STATUS_OPTIONS) else "active",
+                "notes": request.form.get("notes", "").strip(),
+                "createdById": session.get("admin_user_id", ""),
+                "createdByName": session.get("admin_name", "Admin Wulkan"),
+                "createdAt": utc_now(),
+                "updatedAt": utc_now(),
+            }
+            store.setdefault("media_assets", []).append(asset)
+            record_change_event(
+                store,
+                "create",
+                "document",
+                asset["id"],
+                f"Documento creado: {title}.",
+                None,
+                asset,
+            )
+            save_store(store)
+        return redirect(url_for("documents"))
+
+    assets = document_assets(store)
+    graph = document_graph(assets)
+    return render_template(
+        "documents.html",
+        documents=assets,
+        metrics=document_metrics(assets),
+        graph=graph,
+        subject_options=document_subject_options(store),
+        document_type_options=DOCUMENT_TYPE_OPTIONS,
+        document_status_options=DOCUMENT_STATUS_OPTIONS,
+        document_visibility_options=DOCUMENT_VISIBILITY_OPTIONS,
+        bulk_result=consume_bulk_result("documents"),
+    )
+
+
+@app.post("/documents/import")
+@require_roles(*roles_for_action("documents", "import"))
+def documents_import():
+    return handle_bulk_import("documents", "document", import_documents_rows, "documents")
+
+
+@app.get("/documents/export")
+@require_roles(*roles_for_action("documents", "export"))
+def documents_export():
+    store = load_store()
+    output = io.StringIO()
+    fieldnames = [
+        "titulo",
+        "tipo_documento",
+        "ambito",
+        "asociado",
+        "url",
+        "visibilidad",
+        "estado",
+        "vence",
+        "creado_por",
+        "fecha",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for asset in document_assets(store):
+        writer.writerow(
+            {
+                "titulo": asset.get("title", ""),
+                "tipo_documento": document_type_label(asset.get("documentType", "")),
+                "ambito": document_scope_label(asset.get("subjectType", "")),
+                "asociado": asset.get("subjectLabel", ""),
+                "url": asset.get("url", ""),
+                "visibilidad": document_visibility_label(asset.get("visibility", "")),
+                "estado": document_status_label(asset.get("effectiveStatus", asset.get("status", ""))),
+                "vence": asset.get("expiresAt", ""),
+                "creado_por": asset.get("createdByName", ""),
+                "fecha": asset.get("createdAt", ""),
+            }
+        )
+    record_audit_event(store, "export", "documents", "documents", "Exportacion CSV de documentos.")
+    save_store(store)
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=documentos_wulkan.csv"},
+    )
+
+
+@app.post("/documents/<asset_id>/delete")
+@require_roles(*roles_for_action("documents", "delete"))
+def document_delete(asset_id: str):
+    store = load_store()
+    asset = find_by_id(store.get("media_assets", []), asset_id)
+    if asset and document_is_asset(asset):
+        before = copy.deepcopy(asset)
+        asset["status"] = "deleted"
+        asset["updatedAt"] = utc_now()
+        record_change_event(
+            store,
+            "delete",
+            "document",
+            asset_id,
+            f"Documento eliminado: {asset.get('title', asset_id)}.",
+            before,
+            asset,
+        )
+        save_store(store)
+    return redirect(url_for("documents"))
 
 
 @app.route("/service-technicians", methods=["GET", "POST"])

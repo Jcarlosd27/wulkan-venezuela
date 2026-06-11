@@ -23,7 +23,7 @@
 - [x] Fase 1.17 - Auditoria: filtros por fecha, accion, modulo, actor y criticidad; clasificacion seguridad/cambio/exportacion/lectura; Graphify por criticidad, accion, modulo y actor; export CSV auditado; detalle before/after protegido.
 - [x] Fase 1.18 - Configuracion General: modulo editable y persistente en SQL/JSON para datos empresa, logo, moneda, tasa USD/VES, plazos de credito, umbral de aprobacion, mora, regla/porcentaje de comision, stock minimo, politicas de archivos, textos comerciales y correos; auditoria before/after.
 - [x] Fase 1.19 - Importaciones Masivas: plantillas oficiales, preview antes de guardar, confirmacion/descartar, deteccion de creados/actualizados/omitidos, errores y advertencias por fila, historial reciente y descarga CSV de incidencias por carga.
-- [ ] Fase 1.20 - Documentos.
+- [x] Fase 1.20 - Documentos: repositorio documental por cliente, producto, orden o administracion; RIF, contratos, credito, estados de cuenta, fichas, manuales, garantias, certificados, cotizaciones, comprobantes, guias, evidencias y facturas; carga manual, importacion Excel/CSV con preview, export CSV, visibilidad por rol/app, vencimiento, Graphify y auditoria before/after.
 - [ ] Fase 2 - App Movil Cliente y Vendedor.
 - [ ] Fase 3 - Backend API versionada y endpoints faltantes.
 - [ ] Fase 4 - Seguridad avanzada.

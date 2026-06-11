@@ -96,6 +96,12 @@ STATUS_BADGES = {
     "preview": "text-bg-info",
     "confirmed": "text-bg-success",
     "discarded": "text-bg-secondary",
+    "pending_review": "text-bg-warning",
+    "archived": "text-bg-secondary",
+    "internal": "text-bg-dark",
+    "seller": "text-bg-primary",
+    "client": "text-bg-info",
+    "public": "text-bg-success",
 }
 
 

@@ -204,6 +204,7 @@ def media_asset_to_dict(row: MediaAsset) -> dict[str, Any]:
             "title": row.title,
             "productId": row.product_id or "",
             "type": row.asset_type,
+            "assetType": row.asset_type,
             "url": row.url,
             "filePath": row.file_path,
             "status": row.status,
