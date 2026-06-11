@@ -49,6 +49,24 @@ def base_store() -> dict:
             }
         ],
         "announcements": [],
+        "media_assets": [
+            {
+                "id": "doc-sec",
+                "title": "Contrato Seguridad",
+                "assetType": "document",
+                "type": "document",
+                "documentType": "contract",
+                "subjectType": "client",
+                "subjectId": "client-sec",
+                "subjectLabel": "Ferreteria Seguridad",
+                "visibility": "internal",
+                "url": "/static/uploads/documents/security.pdf",
+                "status": "active",
+                "createdByName": "Admin Seguridad",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
         "orders": [],
         "credit_movements": [],
         "stock_movements": [],
@@ -128,6 +146,8 @@ def main() -> int:
     app.config.update(
         TESTING=True,
         SECRET_KEY="security-smoke-secret",
+        STORAGE_BACKEND="local",
+        DOCUMENT_SIGNED_URL_MAX_AGE_SECONDS=120,
         REQUIRE_MOBILE_TOKEN=True,
         REJECT_LEGACY_MOBILE_TOKENS=True,
         WTF_CSRF_ENABLED=False,
@@ -190,6 +210,35 @@ def main() -> int:
             400,
             "archivo con firma invalida rechazado",
         )
+        signed_document = assert_status(
+            client.get("/documents/doc-sec/open"),
+            302,
+            "documento privado genera enlace temporal",
+        )
+        assert "/documents/private/" in signed_document.headers.get("Location", ""), "documento privado debe usar enlace firmado local"
+        assert any(event.get("action") == "document_open" for event in state["audit_events"]), "apertura de documento debe quedar auditada"
+
+        assert_status(
+            client.post(
+                "/announcements",
+                data={
+                    "_csrf_token": csrf,
+                    "title": "<b>Oferta seguridad</b>",
+                    "body": "<script>alert(1)</script>Compra segura",
+                    "ctaLabel": "<i>Ver</i>",
+                    "ctaUrl": "javascript:alert(1)",
+                    "imageUrl": "javascript:bad",
+                },
+            ),
+            302,
+            "anuncio con HTML se limpia",
+        )
+        announcement = state["announcements"][-1]
+        assert announcement["title"] == "Oferta seguridad", "titulo de anuncio debe limpiarse"
+        assert announcement["body"] == "Compra segura", "body de anuncio debe remover scripts"
+        assert announcement["ctaLabel"] == "Ver", "cta label debe limpiarse"
+        assert announcement["ctaUrl"] == "", "cta URL insegura no debe persistir"
+        assert announcement["imageUrl"] == "", "imagen insegura no debe persistir"
 
         mobile_login = assert_status(
             client.post(
@@ -229,6 +278,8 @@ def main() -> int:
     print("OK sesiones activas con dispositivo")
     print("OK permisos backend por endpoint")
     print("OK validacion de firma de archivos")
+    print("OK URLs firmadas para documentos privados")
+    print("OK sanitizacion avanzada de inputs y URLs")
     print("OK tokens moviles versionados")
     return 0
 

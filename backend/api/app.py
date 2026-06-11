@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import Markup
 from werkzeug.exceptions import BadRequest, HTTPException
@@ -21,7 +21,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import get_config
 from graphify import rotation_chart, stock_health
-from storage import save_uploaded_file, stream_size
+from storage import generate_s3_signed_url, key_from_public_url, save_uploaded_file, stream_size
 from store import (
     INSECURE_PRODUCTION_ADMIN_EMAILS,
     INSECURE_PRODUCTION_CLIENT_EMAILS,
@@ -654,6 +654,8 @@ ENDPOINT_MODULE_MAP.update({
     "credit_history_export": "credit",
     "import_issues_export": "import_templates",
     "admin_search": "dashboard",
+    "document_open": "documents",
+    "document_private_file": "documents",
 })
 
 MODULE_NAV_INDEX = {
@@ -683,6 +685,7 @@ ENDPOINT_UI_LABELS = {
     "quote_new": "Nueva cotizacion",
     "quote_edit": "Editar cotizacion",
     "documents_import": "Importar documentos",
+    "document_open": "Abrir documento",
     "audit_export": "Exportar auditoria",
 }
 
@@ -775,6 +778,8 @@ ENDPOINT_ACTION_OVERRIDES = {
     "documents": {"GET": "view", "POST": "create"},
     "documents_import": "import",
     "documents_export": "export",
+    "document_open": "view",
+    "document_private_file": "view",
     "document_delete": "delete",
     "audit": "view",
     "audit_export": "export",
@@ -2510,6 +2515,10 @@ def mobile_token_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="wulkan-mobile-client")
 
 
+def document_token_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="wulkan-document-download")
+
+
 def mobile_device_id() -> str:
     payload = request.get_json(silent=True) if request.method in {"POST", "PUT", "PATCH"} else {}
     payload = payload or {}
@@ -3479,7 +3488,7 @@ def enrich_product(product: dict) -> dict:
 
 
 def split_lines(value: str) -> list[str]:
-    return [line.strip() for line in value.replace(",", "\n").splitlines() if line.strip()]
+    return [sanitize_text(line, max_length=500) for line in str(value or "").replace(",", "\n").splitlines() if sanitize_text(line, max_length=500)]
 
 
 def parse_specs(value: str) -> dict[str, str]:
@@ -3487,8 +3496,45 @@ def parse_specs(value: str) -> dict[str, str]:
     for line in split_lines(value):
         if ":" in line:
             key, spec_value = line.split(":", 1)
-            specs[key.strip()] = spec_value.strip()
+            specs[sanitize_text(key, max_length=80)] = sanitize_text(spec_value, max_length=500)
     return specs
+
+
+def sanitize_text(value, max_length: int = 2000, allow_newlines: bool = True) -> str:
+    text = str(value or "")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = re.sub(r"(?is)<\s*(script|style).*?>.*?<\s*/\s*\1\s*>", "", text)
+    text = re.sub(r"(?s)<[^>]*>", "", text)
+    if not allow_newlines:
+        text = re.sub(r"\s+", " ", text)
+    else:
+        text = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines())
+        text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()[:max_length]
+
+
+def sanitize_url(value: str, *, allow_deeplink: bool = False, allow_local: bool = True) -> str:
+    url = sanitize_text(value, max_length=1200, allow_newlines=False)
+    if not url:
+        return ""
+    if allow_local and url.startswith("/static/uploads/"):
+        return url
+    if allow_deeplink and re.match(r"^wulkan://[a-zA-Z0-9/_?=&.%#:-]+$", url):
+        return url
+    if re.match(r"^https://[^\s<>'\"]+$", url, flags=re.IGNORECASE):
+        return url
+    if app.config.get("ENV") != "production" and re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?(/[^\s<>'\"]*)?$", url, flags=re.IGNORECASE):
+        return url
+    return ""
+
+
+def sanitize_url_list(urls: list[str], *, allow_deeplink: bool = False) -> list[str]:
+    cleaned: list[str] = []
+    for url in urls:
+        safe_url = sanitize_url(url, allow_deeplink=allow_deeplink)
+        if safe_url and safe_url not in cleaned:
+            cleaned.append(safe_url)
+    return cleaned
 
 
 def find_by_id(items: list[dict], item_id: str) -> dict | None:
@@ -3516,8 +3562,8 @@ def row_value(row: dict, *keys: str, default: str = "") -> str:
     for key in keys:
         value = row.get(normalize_import_key(key))
         if value is not None and str(value).strip() != "":
-            return str(value).strip()
-    return default
+            return sanitize_text(value)
+    return sanitize_text(default)
 
 
 def parse_import_float(value, default: float = 0.0) -> float:
@@ -3555,11 +3601,12 @@ def parse_import_bool(value, default: bool = False) -> bool:
 def parse_import_list(value) -> list[str]:
     if value is None:
         return []
-    return [
-        item.strip()
-        for item in re.split(r"[\n\r|;,]+", str(value))
-        if item and item.strip()
-    ]
+    items: list[str] = []
+    for item in re.split(r"[\n\r|;,]+", str(value)):
+        cleaned = sanitize_text(item, max_length=500)
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
 def parse_import_specs(value) -> dict[str, str]:
@@ -3567,7 +3614,7 @@ def parse_import_specs(value) -> dict[str, str]:
     for item in parse_import_list(value):
         if ":" in item:
             key, spec_value = item.split(":", 1)
-            specs[key.strip()] = spec_value.strip()
+            specs[sanitize_text(key, max_length=80)] = sanitize_text(spec_value, max_length=500)
     return specs
 
 
@@ -3681,13 +3728,12 @@ def bulk_row(result: dict, action: str, row_number: int, label: str) -> None:
         result.setdefault(bucket, []).append({"row": row_number, "label": label})
 
 
-def is_public_url(value: str) -> bool:
-    normalized = str(value or "").strip().lower()
-    return normalized.startswith("https://") or normalized.startswith("http://")
+def is_public_url(value: str, *, allow_deeplink: bool = False) -> bool:
+    return bool(sanitize_url(value, allow_deeplink=allow_deeplink))
 
 
-def warn_invalid_urls(result: dict, row_number: int, label: str, urls: list[str]) -> None:
-    invalid_urls = [url for url in urls if url and not is_public_url(url)]
+def warn_invalid_urls(result: dict, row_number: int, label: str, urls: list[str], *, allow_deeplink: bool = False) -> None:
+    invalid_urls = [url for url in urls if url and not is_public_url(url, allow_deeplink=allow_deeplink)]
     if invalid_urls:
         bulk_warning(result, row_number, f"{label} con URL no publica o invalida: {', '.join(invalid_urls[:3])}.")
 
@@ -3985,11 +4031,12 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
         visible_in_app = parse_import_bool(row_value(row, "visibleInApp", "visible_app", "publicar_app"), visible_default)
         if status != "active":
             visible_in_app = False
+        raw_image_url = row_value(row, "imageUrl", "imagen", "imagen_url", "url_imagen", default=(category or {}).get("imageUrl", ""))
         payload = {
             "name": name,
             "slug": slug,
             "description": row_value(row, "description", "descripcion", default=(category or {}).get("description", "")),
-            "imageUrl": row_value(row, "imageUrl", "imagen", "imagen_url", "url_imagen", default=(category or {}).get("imageUrl", "")),
+            "imageUrl": sanitize_url(raw_image_url),
             "icon": row_value(row, "icon", "icono", default=(category or {}).get("icon", "bi-tags")) or "bi-tags",
             "sortOrder": sort_order,
             "status": status,
@@ -4012,7 +4059,7 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
             store.setdefault("categories", []).append(payload)
             result["created"] += 1
             bulk_row(result, "created", row_number, name)
-        warn_invalid_urls(result, row_number, "imagen de categoria", [payload.get("imageUrl", "")])
+        warn_invalid_urls(result, row_number, "imagen de categoria", [raw_image_url])
     return result
 
 
@@ -4068,7 +4115,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             row_value(row, "categoryId", "categoria_id", "id_categoria"),
             row_value(row, "categoryName", "category", "categoria", "familia"),
         )
-        primary_image = row_value(
+        raw_primary_image = row_value(
             row,
             "imageUrl",
             "imagen_principal",
@@ -4076,23 +4123,24 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             "url_imagen",
             default=current.get("imageUrl", ""),
         )
-        gallery_images = parse_import_list(
-            row_value(row, "imageUrls", "imagenes", "galeria", "galeria_imagenes")
-        )
+        primary_image = sanitize_url(raw_primary_image)
+        raw_gallery_images = parse_import_list(row_value(row, "imageUrls", "imagenes", "galeria", "galeria_imagenes"))
+        gallery_images = sanitize_url_list(raw_gallery_images)
         if primary_image and primary_image not in gallery_images:
             gallery_images.insert(0, primary_image)
         if not gallery_images:
             gallery_images = list(current.get("imageUrls") or [])
         if not primary_image and gallery_images:
             primary_image = gallery_images[0]
-        pdf_urls = parse_import_list(row_value(row, "pdfUrls", "pdfs", "fichas_pdf", "pdf_tecnicos"))
+        raw_pdf_urls = parse_import_list(row_value(row, "pdfUrls", "pdfs", "fichas_pdf", "pdf_tecnicos"))
+        pdf_urls = sanitize_url_list(raw_pdf_urls)
         if not pdf_urls:
             pdf_urls = list(current.get("pdfUrls") or [])
         if not primary_image and not gallery_images:
             bulk_warning(result, row_number, f"SKU {sku} no tiene imagen principal ni galeria.")
-        warn_invalid_urls(result, row_number, f"SKU {sku} imagen principal", [primary_image])
-        warn_invalid_urls(result, row_number, f"SKU {sku} galeria", gallery_images)
-        warn_invalid_urls(result, row_number, f"SKU {sku} PDF tecnico", pdf_urls)
+        warn_invalid_urls(result, row_number, f"SKU {sku} imagen principal", [raw_primary_image])
+        warn_invalid_urls(result, row_number, f"SKU {sku} galeria", raw_gallery_images)
+        warn_invalid_urls(result, row_number, f"SKU {sku} PDF tecnico", raw_pdf_urls)
 
         stock_quantity = parse_import_int(row_value(row, "stock", "stock_inicial", "cantidad"), int(current.get("stock") or 0))
         minimum_stock = parse_import_int(
@@ -4526,14 +4574,16 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
             ),
             None,
         )
+        raw_cta_url = row_value(row, "ctaUrl", "accion", "url_accion", default=(announcement or {}).get("ctaUrl", ""))
+        raw_image_url = row_value(row, "imageUrl", "imagen", "imagen_url", default=(announcement or {}).get("imageUrl", ""))
         payload = {
             "title": title,
             "body": row_value(row, "body", "mensaje", "descripcion", default=(announcement or {}).get("body", "")),
             "placement": row_value(row, "placement", "ubicacion", default=(announcement or {}).get("placement", "home")) or "home",
             "priority": parse_import_int(row_value(row, "priority", "prioridad"), int((announcement or {}).get("priority") or 50)),
             "ctaLabel": row_value(row, "ctaLabel", "boton", "texto_boton", default=(announcement or {}).get("ctaLabel", "")),
-            "ctaUrl": row_value(row, "ctaUrl", "accion", "url_accion", default=(announcement or {}).get("ctaUrl", "")),
-            "imageUrl": row_value(row, "imageUrl", "imagen", "imagen_url", default=(announcement or {}).get("imageUrl", "")),
+            "ctaUrl": sanitize_url(raw_cta_url, allow_deeplink=True),
+            "imageUrl": sanitize_url(raw_image_url),
             "startsAt": row_value(row, "startsAt", "inicio", default=(announcement or {}).get("startsAt", utc_now())) or utc_now(),
             "endsAt": row_value(row, "endsAt", "cierre", "fin", default=(announcement or {}).get("endsAt", "")),
             "status": row_value(row, "status", "estado", default=(announcement or {}).get("status", "active")) or "active",
@@ -4541,7 +4591,8 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
         }
         if not payload.get("imageUrl"):
             bulk_warning(result, row_number, f"banner {title} no tiene imagen de carrusel.")
-        warn_invalid_urls(result, row_number, f"banner {title}", [payload.get("imageUrl", "")])
+        warn_invalid_urls(result, row_number, f"banner {title}", [raw_image_url])
+        warn_invalid_urls(result, row_number, f"accion {title}", [raw_cta_url], allow_deeplink=True)
         if announcement:
             payload["id"] = announcement["id"]
             store["announcements"] = [payload if item["id"] == announcement["id"] else item for item in store.get("announcements", [])]
@@ -4560,7 +4611,8 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
     seen_assets: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         title = row_value(row, "title", "titulo", "recurso", default="Activo Wulkan")
-        asset_url = row_value(row, "url", "assetUrl", "archivo_url", "imagen_url", "pdf_url")
+        raw_asset_url = row_value(row, "url", "assetUrl", "archivo_url", "imagen_url", "pdf_url")
+        asset_url = sanitize_url(raw_asset_url)
         if not asset_url:
             bulk_error(result, row_number, "recurso requiere URL de imagen o PDF.")
             continue
@@ -4569,7 +4621,7 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
         if duplicate_message:
             bulk_error(result, row_number, f"recurso {title}: {duplicate_message}")
             continue
-        warn_invalid_urls(result, row_number, f"recurso {title}", [asset_url])
+        warn_invalid_urls(result, row_number, f"recurso {title}", [raw_asset_url])
         product_id = row_value(row, "productId", "producto_id", "id_producto")
         product = find_by_id(store.get("products", []), product_id) if product_id else find_product_by_sku(
             store,
@@ -4686,6 +4738,67 @@ def document_is_asset(asset: dict) -> bool:
     return asset.get("assetType") == "document" or asset.get("type") == "document" or bool(asset.get("documentType"))
 
 
+def document_is_private(asset: dict) -> bool:
+    return normalize_document_visibility(asset.get("visibility", "internal")) != "public"
+
+
+def document_storage_key(url: str) -> str:
+    return key_from_public_url(
+        url,
+        public_base_url=app.config.get("STORAGE_PUBLIC_BASE_URL", ""),
+        bucket=app.config.get("S3_BUCKET", ""),
+        endpoint_url=app.config.get("S3_ENDPOINT_URL", ""),
+    )
+
+
+def document_signed_url(asset: dict) -> str:
+    raw_url = sanitize_url(asset.get("url", ""))
+    if not raw_url:
+        return ""
+    if not document_is_private(asset):
+        return raw_url
+
+    key = document_storage_key(raw_url)
+    if not key:
+        return ""
+
+    expires_in = int(app.config.get("DOCUMENT_SIGNED_URL_MAX_AGE_SECONDS", 300))
+    if app.config.get("STORAGE_BACKEND") == "s3":
+        return generate_s3_signed_url(
+            key,
+            bucket=app.config.get("S3_BUCKET", ""),
+            region=app.config.get("S3_REGION", "us-east-1"),
+            endpoint_url=app.config.get("S3_ENDPOINT_URL", ""),
+            expires_in=expires_in,
+        )
+
+    token = document_token_serializer().dumps(
+        {
+            "assetId": asset.get("id", ""),
+            "key": key,
+            "urlHash": hashlib.sha256(raw_url.encode("utf-8")).hexdigest(),
+        }
+    )
+    return url_for("document_private_file", token=token)
+
+
+def can_open_document(asset: dict | None, store: dict) -> bool:
+    if not asset or not document_is_asset(asset) or asset.get("status") == "deleted":
+        return False
+    if not can_module_action("documents", "view"):
+        return False
+    if current_admin_role() != "sales":
+        return True
+
+    scope = normalize_document_scope(asset.get("subjectType") or ("product" if asset.get("productId") else "admin"))
+    subject_id = asset.get("subjectId") or asset.get("productId", "")
+    if scope == "client":
+        return can_access_client_record(find_by_id(store.get("clients", []), subject_id))
+    if scope == "order":
+        return can_access_order_record(find_order(store.get("orders", []), subject_id), store)
+    return scope in {"admin", "product"}
+
+
 def resolve_document_subject(store: dict, scope: str, reference: str) -> tuple[str, str]:
     reference = (reference or "").strip()
     if scope == "admin":
@@ -4793,6 +4906,8 @@ def document_assets(store: dict) -> list[dict]:
         item["subjectLabel"] = label or "Administrativo general"
         item["documentType"] = normalize_document_type(item.get("documentType", "administrative"))
         item["visibility"] = normalize_document_visibility(item.get("visibility", "internal"))
+        item["isPrivate"] = document_is_private(item)
+        item["displayUrl"] = "Documento protegido" if item["isPrivate"] else sanitize_url(item.get("url", ""))
         item["effectiveStatus"] = item.get("status", "active")
         if item.get("expiresAt") and parse_utc_datetime(item.get("expiresAt")) < now and item["effectiveStatus"] == "active":
             item["effectiveStatus"] = "expired"
@@ -4823,7 +4938,8 @@ def import_documents_rows(store: dict, rows: list[dict]) -> dict:
     seen_documents: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         title = row_value(row, "title", "titulo", "documento")
-        document_url = row_value(row, "url", "documentUrl", "archivo_url", "documento_url")
+        raw_document_url = row_value(row, "url", "documentUrl", "archivo_url", "documento_url")
+        document_url = sanitize_url(raw_document_url)
         document_type = normalize_document_type(row_value(row, "documentType", "tipo_documento", "tipo", default="administrative"))
         scope = normalize_document_scope(row_value(row, "subjectType", "ambito", "scope", default="admin"))
         reference = row_value(row, "subjectId", "referencia", "cliente", "sku", "orden", default="")
@@ -4845,7 +4961,7 @@ def import_documents_rows(store: dict, rows: list[dict]) -> dict:
         if duplicate_message:
             bulk_error(result, row_number, f"documento {title}: {duplicate_message}")
             continue
-        warn_invalid_urls(result, row_number, f"documento {title}", [document_url])
+        warn_invalid_urls(result, row_number, f"documento {title}", [raw_document_url])
         status = row_value(row, "status", "estado", default="active") or "active"
         if status not in dict(DOCUMENT_STATUS_OPTIONS):
             bulk_error(result, row_number, f"documento {title}: estado no valido.")
@@ -5905,11 +6021,11 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
     category_id = request.form.get("categoryId", "machinery-garden")
     categories = product_category_options(store) or [{"id": "uncategorized", "name": "Sin categoria"}]
     category = find_by_id(categories, category_id) or categories[0]
-    sku = request.form.get("sku", "").strip().upper()
-    title = request.form.get("title", "").strip()
-    primary_image = request.form.get("imageUrl", "").strip()
-    image_urls = split_lines(request.form.get("imageUrls", ""))
-    pdf_urls = split_lines(request.form.get("pdfUrls", ""))
+    sku = sanitize_text(request.form.get("sku", ""), max_length=80, allow_newlines=False).upper()
+    title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False)
+    primary_image = sanitize_url(request.form.get("imageUrl", ""))
+    image_urls = sanitize_url_list(split_lines(request.form.get("imageUrls", "")))
+    pdf_urls = sanitize_url_list(split_lines(request.form.get("pdfUrls", "")))
     uploaded_image = save_upload(request.files.get("imageFile"), "products")
     uploaded_pdf = save_upload(request.files.get("pdfFile"), "products")
     uploaded_gallery = [
@@ -5930,18 +6046,18 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
     visible_values = request.form.getlist("visibleInApp")
     payload = {
         "sku": sku,
-        "internalCode": request.form.get("internalCode", "").strip().upper(),
+        "internalCode": sanitize_text(request.form.get("internalCode", ""), max_length=80, allow_newlines=False).upper(),
         "title": title,
-        "brand": request.form.get("brand", "Wulkan").strip() or "Wulkan",
-        "model": request.form.get("model", "").strip(),
-        "unitOfSale": request.form.get("unitOfSale", "unidad").strip() or "unidad",
-        "shortDescription": request.form.get("shortDescription", "").strip(),
-        "longDescription": request.form.get("longDescription", "").strip(),
-        "description": request.form.get("description", "").strip(),
+        "brand": sanitize_text(request.form.get("brand", "Wulkan"), max_length=120, allow_newlines=False) or "Wulkan",
+        "model": sanitize_text(request.form.get("model", ""), max_length=120, allow_newlines=False),
+        "unitOfSale": sanitize_text(request.form.get("unitOfSale", "unidad"), max_length=80, allow_newlines=False) or "unidad",
+        "shortDescription": sanitize_text(request.form.get("shortDescription", ""), max_length=240, allow_newlines=False),
+        "longDescription": sanitize_text(request.form.get("longDescription", ""), max_length=2000),
+        "description": sanitize_text(request.form.get("description", ""), max_length=2000),
         "productType": request.form.get("productType", "machine"),
         "categoryId": category["id"],
         "categoryName": category["name"],
-        "subCategory": request.form.get("subCategory", "").strip(),
+        "subCategory": sanitize_text(request.form.get("subCategory", ""), max_length=120, allow_newlines=False),
         "publicPriceUsd": safe_float(request.form.get("publicPriceUsd"), 0),
         "originalPriceUsd": safe_float(
             request.form.get("originalPriceUsd") or request.form.get("publicPriceUsd"),
@@ -5986,18 +6102,18 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
 
 def product_form_snapshot() -> dict:
     return {
-        "sku": request.form.get("sku", "").strip().upper(),
-        "internalCode": request.form.get("internalCode", "").strip().upper(),
-        "title": request.form.get("title", "").strip(),
-        "brand": request.form.get("brand", "Wulkan").strip(),
-        "model": request.form.get("model", "").strip(),
-        "unitOfSale": request.form.get("unitOfSale", "unidad").strip(),
-        "shortDescription": request.form.get("shortDescription", "").strip(),
-        "longDescription": request.form.get("longDescription", "").strip(),
-        "description": request.form.get("description", "").strip(),
+        "sku": sanitize_text(request.form.get("sku", ""), max_length=80, allow_newlines=False).upper(),
+        "internalCode": sanitize_text(request.form.get("internalCode", ""), max_length=80, allow_newlines=False).upper(),
+        "title": sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False),
+        "brand": sanitize_text(request.form.get("brand", "Wulkan"), max_length=120, allow_newlines=False),
+        "model": sanitize_text(request.form.get("model", ""), max_length=120, allow_newlines=False),
+        "unitOfSale": sanitize_text(request.form.get("unitOfSale", "unidad"), max_length=80, allow_newlines=False),
+        "shortDescription": sanitize_text(request.form.get("shortDescription", ""), max_length=240, allow_newlines=False),
+        "longDescription": sanitize_text(request.form.get("longDescription", ""), max_length=2000),
+        "description": sanitize_text(request.form.get("description", ""), max_length=2000),
         "productType": request.form.get("productType", "machine"),
         "categoryId": request.form.get("categoryId", "machinery-garden"),
-        "subCategory": request.form.get("subCategory", "").strip(),
+        "subCategory": sanitize_text(request.form.get("subCategory", ""), max_length=120, allow_newlines=False),
         "status": request.form.get("status", "active"),
         "publicPriceUsd": request.form.get("publicPriceUsd", ""),
         "originalPriceUsd": request.form.get("originalPriceUsd", ""),
@@ -6009,9 +6125,9 @@ def product_form_snapshot() -> dict:
         "stock": request.form.get("stock", 0),
         "minimumStock": request.form.get("minimumStock", 0),
         "maximumStock": request.form.get("maximumStock", 0),
-        "imageUrl": request.form.get("imageUrl", "").strip(),
-        "imageUrls": split_lines(request.form.get("imageUrls", "")),
-        "pdfUrls": split_lines(request.form.get("pdfUrls", "")),
+        "imageUrl": sanitize_url(request.form.get("imageUrl", "")),
+        "imageUrls": sanitize_url_list(split_lines(request.form.get("imageUrls", ""))),
+        "pdfUrls": sanitize_url_list(split_lines(request.form.get("pdfUrls", ""))),
         "variants": split_lines(request.form.get("variants", "")),
         "specifications": parse_specs(request.form.get("specifications", "")),
         "relatedSkus": split_lines(request.form.get("relatedSkus", "")),
@@ -6112,9 +6228,9 @@ def enrich_category(category: dict, store: dict) -> dict:
 
 
 def category_payload(store: dict, existing: dict | None = None) -> dict:
-    name = request.form.get("name", "").strip()
+    name = sanitize_text(request.form.get("name", ""), max_length=140, allow_newlines=False)
     uploaded_image = save_upload(request.files.get("imageFile"), "categories")
-    image_url = uploaded_image or request.form.get("imageUrl", "").strip() or (existing or {}).get("imageUrl", "")
+    image_url = uploaded_image or sanitize_url(request.form.get("imageUrl", "")) or (existing or {}).get("imageUrl", "")
     status = request.form.get("status", "active")
     visible_in_app = request.form.get("visibleInApp") == "on"
     if status != "active":
@@ -6126,9 +6242,9 @@ def category_payload(store: dict, existing: dict | None = None) -> dict:
     payload = {
         "name": name,
         "slug": category_slug(request.form.get("slug", "").strip() or name),
-        "description": request.form.get("description", "").strip(),
+        "description": sanitize_text(request.form.get("description", ""), max_length=500),
         "imageUrl": image_url,
-        "icon": request.form.get("icon", "bi-tags").strip() or "bi-tags",
+        "icon": sanitize_text(request.form.get("icon", "bi-tags"), max_length=80, allow_newlines=False) or "bi-tags",
         "sortOrder": max(0, safe_int(request.form.get("sortOrder"), 0)),
         "status": status,
         "visibleInApp": visible_in_app,
@@ -6145,14 +6261,14 @@ def category_payload(store: dict, existing: dict | None = None) -> dict:
 
 
 def category_form_snapshot() -> dict:
-    name = request.form.get("name", "").strip()
+    name = sanitize_text(request.form.get("name", ""), max_length=140, allow_newlines=False)
     status = request.form.get("status", "active")
     return {
         "name": name,
         "slug": category_slug(request.form.get("slug", "").strip() or name),
-        "description": request.form.get("description", "").strip(),
-        "imageUrl": request.form.get("imageUrl", "").strip(),
-        "icon": request.form.get("icon", "bi-tags").strip() or "bi-tags",
+        "description": sanitize_text(request.form.get("description", ""), max_length=500),
+        "imageUrl": sanitize_url(request.form.get("imageUrl", "")),
+        "icon": sanitize_text(request.form.get("icon", "bi-tags"), max_length=80, allow_newlines=False) or "bi-tags",
         "sortOrder": request.form.get("sortOrder", "0"),
         "status": status,
         "visibleInApp": request.form.get("visibleInApp") == "on" and status == "active",
@@ -6387,9 +6503,9 @@ def admin_user_payload(existing: dict | None = None) -> dict:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     now = utc_now()
-    first_name = request.form.get("firstName", "").strip()
-    last_name = request.form.get("lastName", "").strip()
-    display_name = request.form.get("name", "").strip()
+    first_name = sanitize_text(request.form.get("firstName", ""), max_length=80, allow_newlines=False)
+    last_name = sanitize_text(request.form.get("lastName", ""), max_length=80, allow_newlines=False)
+    display_name = sanitize_text(request.form.get("name", ""), max_length=160, allow_newlines=False)
     if first_name or last_name:
         display_name = f"{first_name} {last_name}".strip()
     mobile_access_values = request.form.getlist("mobileAccessEnabled")
@@ -6400,14 +6516,14 @@ def admin_user_payload(existing: dict | None = None) -> dict:
         "email": email,
         "role": request.form.get("role", "operator"),
         "status": request.form.get("status", "active"),
-        "sellerCode": request.form.get("sellerCode", "").strip().upper(),
-        "sellerZone": request.form.get("sellerZone", "").strip(),
-        "sellerTerritory": request.form.get("sellerTerritory", "").strip(),
-        "sellerSupervisor": request.form.get("sellerSupervisor", "").strip(),
-        "phone": request.form.get("phone", "").strip(),
-        "hiredAt": request.form.get("hiredAt", "").strip(),
+        "sellerCode": sanitize_text(request.form.get("sellerCode", ""), max_length=80, allow_newlines=False).upper(),
+        "sellerZone": sanitize_text(request.form.get("sellerZone", ""), max_length=120, allow_newlines=False),
+        "sellerTerritory": sanitize_text(request.form.get("sellerTerritory", ""), max_length=120, allow_newlines=False),
+        "sellerSupervisor": sanitize_text(request.form.get("sellerSupervisor", ""), max_length=160, allow_newlines=False),
+        "phone": sanitize_text(request.form.get("phone", ""), max_length=60, allow_newlines=False),
+        "hiredAt": sanitize_text(request.form.get("hiredAt", ""), max_length=32, allow_newlines=False),
         "mobileAccessEnabled": "on" in mobile_access_values if mobile_access_values else bool((existing or {}).get("mobileAccessEnabled", True)),
-        "internalNotes": request.form.get("internalNotes", "").strip(),
+        "internalNotes": sanitize_text(request.form.get("internalNotes", ""), max_length=1000),
         "commissionRatePercent": safe_float(
             request.form.get("commissionRatePercent"),
             safe_float((existing or {}).get("commissionRatePercent"), 0),
@@ -6510,28 +6626,28 @@ def client_payload(existing: dict | None = None) -> dict:
             requested_credit_status = existing_credit_status
 
     payload = {
-        "legalName": request.form.get("legalName", "").strip(),
-        "commercialName": request.form.get("commercialName", "").strip(),
-        "businessName": request.form.get("businessName", "").strip(),
-        "taxId": request.form.get("taxId", "").strip(),
-        "contactName": request.form.get("contactName", "").strip(),
-        "administrativeContact": request.form.get("administrativeContact", "").strip(),
-        "receivingContact": request.form.get("receivingContact", "").strip(),
-        "phone": request.form.get("phone", "").strip(),
-        "whatsapp": request.form.get("whatsapp", "").strip(),
+        "legalName": sanitize_text(request.form.get("legalName", ""), max_length=180, allow_newlines=False),
+        "commercialName": sanitize_text(request.form.get("commercialName", ""), max_length=180, allow_newlines=False),
+        "businessName": sanitize_text(request.form.get("businessName", ""), max_length=180, allow_newlines=False),
+        "taxId": sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False),
+        "contactName": sanitize_text(request.form.get("contactName", ""), max_length=160, allow_newlines=False),
+        "administrativeContact": sanitize_text(request.form.get("administrativeContact", ""), max_length=160, allow_newlines=False),
+        "receivingContact": sanitize_text(request.form.get("receivingContact", ""), max_length=160, allow_newlines=False),
+        "phone": sanitize_text(request.form.get("phone", ""), max_length=60, allow_newlines=False),
+        "whatsapp": sanitize_text(request.form.get("whatsapp", ""), max_length=60, allow_newlines=False),
         "email": email,
         "clientType": request.form.get("clientType", "ferretero"),
         "clientCategory": request.form.get("clientCategory", "standard"),
         "priceList": request.form.get("priceList", "b2b"),
         "authorizedDiscountPercent": float(request.form.get("authorizedDiscountPercent") or 0),
         "status": request.form.get("status", "active"),
-        "address": request.form.get("address", "").strip(),
-        "fiscalAddress": request.form.get("fiscalAddress", "").strip(),
-        "shippingAddress": request.form.get("shippingAddress", "").strip(),
-        "country": request.form.get("country", "VE").strip() or "VE",
-        "state": request.form.get("state", "").strip(),
-        "city": request.form.get("city", "").strip(),
-        "deliveryZone": request.form.get("deliveryZone", "").strip(),
+        "address": sanitize_text(request.form.get("address", ""), max_length=400),
+        "fiscalAddress": sanitize_text(request.form.get("fiscalAddress", ""), max_length=400),
+        "shippingAddress": sanitize_text(request.form.get("shippingAddress", ""), max_length=400),
+        "country": sanitize_text(request.form.get("country", "VE"), max_length=4, allow_newlines=False) or "VE",
+        "state": sanitize_text(request.form.get("state", ""), max_length=120, allow_newlines=False),
+        "city": sanitize_text(request.form.get("city", ""), max_length=120, allow_newlines=False),
+        "deliveryZone": sanitize_text(request.form.get("deliveryZone", ""), max_length=120, allow_newlines=False),
         "assignedSellerId": seller_id,
         "assignedSellerName": seller_name,
         "defaultSaleType": request.form.get("defaultSaleType", "cash"),
@@ -6539,7 +6655,7 @@ def client_payload(existing: dict | None = None) -> dict:
         "collectionStatus": request.form.get("collectionStatus", "without_debt"),
         "creditRiskLevel": request.form.get("creditRiskLevel", "low"),
         "creditScore": int(float(request.form.get("creditScore") or (existing or {}).get("creditScore") or 0)),
-        "creditManagerNote": request.form.get("creditManagerNote", (existing or {}).get("creditManagerNote", "")).strip(),
+        "creditManagerNote": sanitize_text(request.form.get("creditManagerNote", (existing or {}).get("creditManagerNote", "")), max_length=1200),
         "creditReviewedBy": (existing or {}).get("creditReviewedBy", ""),
         "creditReviewedAt": (existing or {}).get("creditReviewedAt", ""),
         "creditRequestStatus": requested_credit_status,
@@ -6548,7 +6664,7 @@ def client_payload(existing: dict | None = None) -> dict:
         "creditLimitUsd": credit_limit,
         "creditUsedUsd": float(request.form.get("creditUsedUsd") or (existing or {}).get("creditUsedUsd") or 0),
         "paymentTermsDays": payment_terms_days,
-        "notes": request.form.get("notes", "").strip(),
+        "notes": sanitize_text(request.form.get("notes", ""), max_length=1500),
         "updatedAt": now,
     }
     payload["businessName"] = payload["businessName"] or payload["commercialName"] or payload["legalName"]
@@ -8074,23 +8190,23 @@ def report_response_xlsx(context: dict):
 
 
 def service_technician_payload(existing: dict | None = None) -> dict:
-    name = request.form.get("name", "").strip()
+    name = sanitize_text(request.form.get("name", ""), max_length=180, allow_newlines=False)
     now = utc_now()
     payload = {
         "name": name,
-        "companyName": request.form.get("companyName", "").strip(),
-        "contactName": request.form.get("contactName", "").strip(),
-        "phone": request.form.get("phone", "").strip(),
-        "whatsapp": request.form.get("whatsapp", "").strip(),
+        "companyName": sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False),
+        "contactName": sanitize_text(request.form.get("contactName", ""), max_length=160, allow_newlines=False),
+        "phone": sanitize_text(request.form.get("phone", ""), max_length=60, allow_newlines=False),
+        "whatsapp": sanitize_text(request.form.get("whatsapp", ""), max_length=60, allow_newlines=False),
         "email": request.form.get("email", "").strip().lower(),
-        "state": request.form.get("state", "").strip(),
-        "city": request.form.get("city", "").strip(),
-        "address": request.form.get("address", "").strip(),
+        "state": sanitize_text(request.form.get("state", ""), max_length=120, allow_newlines=False),
+        "city": sanitize_text(request.form.get("city", ""), max_length=120, allow_newlines=False),
+        "address": sanitize_text(request.form.get("address", ""), max_length=400),
         "specialties": split_lines(request.form.get("specialties", "")),
-        "coverage": request.form.get("coverage", "").strip(),
+        "coverage": sanitize_text(request.form.get("coverage", ""), max_length=160, allow_newlines=False),
         "status": request.form.get("status", "active"),
         "visibleInApp": request.form.get("visibleInApp") == "on",
-        "notes": request.form.get("notes", "").strip(),
+        "notes": sanitize_text(request.form.get("notes", ""), max_length=1200),
         "updatedAt": now,
     }
     if existing is None:
@@ -9307,9 +9423,10 @@ def media_library():
         if not can_module_action("media_library", "create"):
             return forbidden_response()
         product_id = request.form.get("productId", "")
-        asset_url = request.form.get("assetUrl", "").strip() or save_upload(request.files.get("assetFile"), "library")
+        uploaded_asset = save_upload(request.files.get("assetFile"), "library")
+        asset_url = uploaded_asset or sanitize_url(request.form.get("assetUrl", ""))
         asset_type = request.form.get("assetType", "image")
-        title = request.form.get("title", "").strip() or "Activo Wulkan"
+        title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False) or "Activo Wulkan"
         if asset_url:
             asset = {
                 "id": next_id("asset", title),
@@ -9397,8 +9514,9 @@ def documents():
     if request.method == "POST":
         if not can_module_action("documents", "create"):
             return forbidden_response()
-        title = request.form.get("title", "").strip()
-        document_url = request.form.get("documentUrl", "").strip() or save_upload(request.files.get("documentFile"), "documents")
+        title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False)
+        uploaded_document = save_upload(request.files.get("documentFile"), "documents")
+        document_url = uploaded_document or sanitize_url(request.form.get("documentUrl", ""))
         document_type = normalize_document_type(request.form.get("documentType", "administrative"))
         subject_type, subject_id = parse_document_subject_ref(request.form.get("subjectRef", "admin:"))
         subject_label = "Administrativo general"
@@ -9420,9 +9538,9 @@ def documents():
                 "subjectId": subject_id,
                 "subjectLabel": subject_label,
                 "visibility": normalize_document_visibility(request.form.get("visibility", "internal")),
-                "expiresAt": request.form.get("expiresAt", ""),
+                "expiresAt": sanitize_text(request.form.get("expiresAt", ""), max_length=32, allow_newlines=False),
                 "status": request.form.get("status", "active") if request.form.get("status", "active") in dict(DOCUMENT_STATUS_OPTIONS) else "active",
-                "notes": request.form.get("notes", "").strip(),
+                "notes": sanitize_text(request.form.get("notes", ""), max_length=1200),
                 "createdById": session.get("admin_user_id", ""),
                 "createdByName": session.get("admin_name", "Admin Wulkan"),
                 "createdAt": utc_now(),
@@ -9462,6 +9580,61 @@ def documents_import():
     return handle_bulk_import("documents", "document", import_documents_rows, "documents")
 
 
+@app.get("/documents/<asset_id>/open")
+@require_roles(*roles_for_action("documents", "view"))
+def document_open(asset_id: str):
+    store = load_store()
+    asset = find_by_id(store.get("media_assets", []), asset_id)
+    if not can_open_document(asset, store):
+        abort(403)
+    signed_url = document_signed_url(asset)
+    if not signed_url:
+        abort(404)
+    record_audit_event(
+        store,
+        "document_open",
+        "document",
+        asset_id,
+        f"Documento abierto: {asset.get('title', asset_id)}.",
+        metadata={"visibility": normalize_document_visibility(asset.get("visibility", "internal")), "private": document_is_private(asset)},
+    )
+    save_store(store)
+    return redirect(signed_url)
+
+
+@app.get("/documents/private/<token>")
+@require_roles(*roles_for_action("documents", "view"))
+def document_private_file(token: str):
+    try:
+        payload = document_token_serializer().loads(
+            token,
+            max_age=int(app.config.get("DOCUMENT_SIGNED_URL_MAX_AGE_SECONDS", 300)),
+        )
+    except (BadSignature, SignatureExpired):
+        abort(403)
+
+    store = load_store()
+    asset = find_by_id(store.get("media_assets", []), payload.get("assetId", ""))
+    if not can_open_document(asset, store):
+        abort(403)
+    raw_url = sanitize_url(asset.get("url", ""))
+    if hashlib.sha256(raw_url.encode("utf-8")).hexdigest() != payload.get("urlHash"):
+        abort(403)
+
+    key = str(payload.get("key", "")).lstrip("/\\")
+    if key != document_storage_key(raw_url):
+        abort(403)
+    upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
+    target = (upload_root / key).resolve()
+    try:
+        target.relative_to(upload_root)
+    except ValueError:
+        abort(403)
+    if not target.exists() or not target.is_file():
+        abort(404)
+    return send_file(target, as_attachment=False)
+
+
 @app.get("/documents/export")
 @require_roles(*roles_for_action("documents", "export"))
 def documents_export():
@@ -9488,7 +9661,7 @@ def documents_export():
                 "tipo_documento": document_type_label(asset.get("documentType", "")),
                 "ambito": document_scope_label(asset.get("subjectType", "")),
                 "asociado": asset.get("subjectLabel", ""),
-                "url": asset.get("url", ""),
+                "url": asset.get("displayUrl", ""),
                 "visibilidad": document_visibility_label(asset.get("visibility", "")),
                 "estado": document_status_label(asset.get("effectiveStatus", asset.get("status", ""))),
                 "vence": asset.get("expiresAt", ""),
@@ -10153,12 +10326,12 @@ def settings_payload_from_form(existing: dict) -> dict:
     payload = dict(existing or {})
     payload.update(
         {
-            "companyName": request.form.get("companyName", "").strip() or "Wulkan Venezuela",
-            "companyLegalName": request.form.get("companyLegalName", "").strip(),
-            "taxId": request.form.get("taxId", "").strip(),
+            "companyName": sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False) or "Wulkan Venezuela",
+            "companyLegalName": sanitize_text(request.form.get("companyLegalName", ""), max_length=180, allow_newlines=False),
+            "taxId": sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False),
             "supportEmail": request.form.get("supportEmail", "").strip().lower(),
-            "supportPhone": request.form.get("supportPhone", "").strip(),
-            "logoUrl": request.form.get("logoUrl", "").strip(),
+            "supportPhone": sanitize_text(request.form.get("supportPhone", ""), max_length=60, allow_newlines=False),
+            "logoUrl": sanitize_url(request.form.get("logoUrl", "")),
             "primaryCurrency": request.form.get("primaryCurrency", "USD").strip().upper() or "USD",
             "referenceCurrency": request.form.get("referenceCurrency", "VES").strip().upper() or "VES",
             "exchangeRateUsdVes": safe_float(request.form.get("exchangeRateUsdVes"), 38.5),
@@ -10169,8 +10342,8 @@ def settings_payload_from_form(existing: dict) -> dict:
             "defaultCommissionPercent": max(0.0, min(safe_float(request.form.get("defaultCommissionPercent"), 0), 100.0)),
             "stockMinDefault": max(0, safe_int(request.form.get("stockMinDefault"), 1)),
             "maxUploadMb": max(1, safe_int(request.form.get("maxUploadMb"), 10)),
-            "quoteFooterText": request.form.get("quoteFooterText", "").strip(),
-            "orderTermsText": request.form.get("orderTermsText", "").strip(),
+            "quoteFooterText": sanitize_text(request.form.get("quoteFooterText", ""), max_length=1500),
+            "orderTermsText": sanitize_text(request.form.get("orderTermsText", ""), max_length=1500),
             "notificationEmails": split_lines(request.form.get("notificationEmails", "")),
             "updatedAt": now,
         }
@@ -11341,7 +11514,8 @@ def dispatch_update(order_id: str):
     target_status = request.form.get("dispatchStatus", order.get("dispatchStatus", "pending"))
     if target_status not in DISPATCH_STATUS_LABELS:
         target_status = order.get("dispatchStatus", "pending")
-    evidence_url = request.form.get("deliveryEvidenceUrl", "").strip() or save_upload(request.files.get("deliveryEvidenceFile"), "library")
+    uploaded_evidence = save_upload(request.files.get("deliveryEvidenceFile"), "library")
+    evidence_url = uploaded_evidence or sanitize_url(request.form.get("deliveryEvidenceUrl", ""))
     now = utc_now()
     for field in (
         "receiverName",
@@ -11355,7 +11529,7 @@ def dispatch_update(order_id: str):
         "logisticsNote",
         "logisticsOwner",
     ):
-        incoming = request.form.get(field, "").strip()
+        incoming = sanitize_text(request.form.get(field, ""), max_length=500, allow_newlines=field == "logisticsNote")
         if incoming:
             order[field] = incoming
     if evidence_url:
@@ -11579,20 +11753,21 @@ def announcements():
     if request.method == "POST":
         if not can_module_action("announcements", "create"):
             return forbidden_response()
-        title = request.form.get("title", "").strip()
-        image_url = request.form.get("imageUrl", "").strip() or save_upload(request.files.get("imageFile"), "announcements")
+        title = sanitize_text(request.form.get("title", ""), max_length=160, allow_newlines=False)
+        uploaded_image = save_upload(request.files.get("imageFile"), "announcements")
+        image_url = uploaded_image or sanitize_url(request.form.get("imageUrl", ""))
         announcement = {
             "id": next_id("ann", title),
             "title": title,
-            "body": request.form.get("body", "").strip(),
-            "placement": request.form.get("placement", "home"),
+            "body": sanitize_text(request.form.get("body", ""), max_length=700),
+            "placement": sanitize_text(request.form.get("placement", "home"), max_length=50, allow_newlines=False),
             "priority": int(request.form.get("priority") or 50),
-            "ctaLabel": request.form.get("ctaLabel", "").strip(),
-            "ctaUrl": request.form.get("ctaUrl", "").strip(),
+            "ctaLabel": sanitize_text(request.form.get("ctaLabel", ""), max_length=80, allow_newlines=False),
+            "ctaUrl": sanitize_url(request.form.get("ctaUrl", ""), allow_deeplink=True),
             "imageUrl": image_url,
-            "startsAt": request.form.get("startsAt") or utc_now(),
-            "endsAt": request.form.get("endsAt", "").strip(),
-            "status": request.form.get("status", "active"),
+            "startsAt": sanitize_text(request.form.get("startsAt") or utc_now(), max_length=32, allow_newlines=False),
+            "endsAt": sanitize_text(request.form.get("endsAt", ""), max_length=32, allow_newlines=False),
+            "status": sanitize_text(request.form.get("status", "active"), max_length=50, allow_newlines=False),
             "updatedAt": utc_now(),
         }
         store["announcements"].append(announcement)
@@ -11620,22 +11795,22 @@ def announcement_edit(announcement_id: str):
     announcement = find_by_id(store["announcements"], announcement_id)
     if announcement:
         before = copy.deepcopy(announcement)
-        image_url = request.form.get("imageUrl", "").strip() or announcement.get("imageUrl", "")
+        image_url = sanitize_url(request.form.get("imageUrl", "")) or announcement.get("imageUrl", "")
         uploaded = save_upload(request.files.get("imageFile"), "announcements")
         if uploaded:
             image_url = uploaded
         announcement.update(
             {
-                "title": request.form.get("title", "").strip(),
-                "body": request.form.get("body", "").strip(),
-                "placement": request.form.get("placement", "home"),
+                "title": sanitize_text(request.form.get("title", ""), max_length=160, allow_newlines=False),
+                "body": sanitize_text(request.form.get("body", ""), max_length=700),
+                "placement": sanitize_text(request.form.get("placement", "home"), max_length=50, allow_newlines=False),
                 "priority": int(request.form.get("priority") or 50),
-                "ctaLabel": request.form.get("ctaLabel", "").strip(),
-                "ctaUrl": request.form.get("ctaUrl", "").strip(),
+                "ctaLabel": sanitize_text(request.form.get("ctaLabel", ""), max_length=80, allow_newlines=False),
+                "ctaUrl": sanitize_url(request.form.get("ctaUrl", ""), allow_deeplink=True),
                 "imageUrl": image_url,
-                "startsAt": request.form.get("startsAt", "").strip() or announcement.get("startsAt", ""),
-                "endsAt": request.form.get("endsAt", "").strip(),
-                "status": request.form.get("status", "active"),
+                "startsAt": sanitize_text(request.form.get("startsAt", ""), max_length=32, allow_newlines=False) or announcement.get("startsAt", ""),
+                "endsAt": sanitize_text(request.form.get("endsAt", ""), max_length=32, allow_newlines=False),
+                "status": sanitize_text(request.form.get("status", "active"), max_length=50, allow_newlines=False),
                 "updatedAt": utc_now(),
             }
         )

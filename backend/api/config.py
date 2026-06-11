@@ -66,6 +66,7 @@ class Config:
     SESSION_COOKIE_SECURE = False
     MAX_CONTENT_LENGTH = int(os.environ.get("WULKAN_MAX_UPLOAD_MB", "16")) * 1024 * 1024
     MAX_IMPORT_ROWS = int(os.environ.get("WULKAN_MAX_IMPORT_ROWS", "5000"))
+    DOCUMENT_SIGNED_URL_MAX_AGE_SECONDS = int(os.environ.get("WULKAN_DOCUMENT_SIGNED_URL_MAX_AGE_SECONDS", "300"))
 
 
 class DevelopmentConfig(Config):

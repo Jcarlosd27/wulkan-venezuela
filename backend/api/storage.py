@@ -3,7 +3,7 @@ from __future__ import annotations
 import mimetypes
 import time
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
@@ -86,6 +86,59 @@ def public_url(base_url: str, key: str) -> str:
     if not base_url:
         return ""
     return urljoin(base_url.rstrip("/") + "/", key)
+
+
+def key_from_public_url(
+    url: str,
+    *,
+    public_base_url: str = "",
+    bucket: str = "",
+    endpoint_url: str = "",
+    local_upload_prefix: str = "/static/uploads/",
+) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    if value.startswith(local_upload_prefix):
+        return value[len(local_upload_prefix):].lstrip("/")
+    if public_base_url and value.startswith(public_base_url.rstrip("/") + "/"):
+        return value[len(public_base_url.rstrip("/") + "/"):].lstrip("/")
+
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    path = parsed.path.lstrip("/")
+    if endpoint_url:
+        endpoint = urlparse(endpoint_url.rstrip("/"))
+        if parsed.netloc == endpoint.netloc and bucket and path.startswith(bucket.strip("/") + "/"):
+            return path[len(bucket.strip("/") + "/"):].lstrip("/")
+    if bucket and parsed.netloc.startswith(f"{bucket}."):
+        return path
+    return ""
+
+
+def generate_s3_signed_url(
+    key: str,
+    *,
+    bucket: str,
+    region: str,
+    endpoint_url: str = "",
+    expires_in: int = 300,
+) -> str:
+    if not key or not bucket:
+        return ""
+
+    import boto3
+
+    client_kwargs = {"region_name": region}
+    if endpoint_url:
+        client_kwargs["endpoint_url"] = endpoint_url
+    client = boto3.client("s3", **client_kwargs)
+    return client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=max(60, int(expires_in or 300)),
+    )
 
 
 def save_local(file_storage: FileStorage, folder: str, upload_folder: Path, filename: str) -> str:

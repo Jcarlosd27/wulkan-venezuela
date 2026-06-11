@@ -26,7 +26,7 @@
 - [x] Fase 1.20 - Documentos: repositorio documental por cliente, producto, orden o administracion; RIF, contratos, credito, estados de cuenta, fichas, manuales, garantias, certificados, cotizaciones, comprobantes, guias, evidencias y facturas; carga manual, importacion Excel/CSV con preview, export CSV, visibilidad por rol/app, vencimiento, Graphify y auditoria before/after.
 - [x] Fase 2 - App Movil Cliente y Vendedor: login por rol, clave temporal obligatoria, sesion validada con backend, catalogo real, galeria/carrusel de productos, carrito persistente, checkout ferretero/vendedor, ordenes, credito, cartera, comisiones, servicios tecnicos y bloqueo de pantallas/datos demo.
 - [x] Fase 3 - Backend API versionada y endpoints faltantes.
-- [ ] Fase 4 - Seguridad avanzada.
+- [x] Fase 4 - Seguridad avanzada.
 - [x] Fase 5 - UI/UX Admin Panel.
 - [ ] Fase 6 - UI/UX App Movil.
 - [ ] Fase 7 - Notificaciones.
@@ -1520,8 +1520,8 @@ La seguridad debe validarse en backend, no solo en frontend.
 * [x] Permisos por endpoint en backend.
 * [x] Validacion de archivos por extension, MIME y firma.
 * [x] Limite tamano archivos y maximo de filas importadas.
-* [ ] URLs firmadas para documentos privados.
-* [ ] Sanitizacion avanzada de inputs rich text/URLs.
+* [x] URLs firmadas para documentos privados.
+* [x] Sanitizacion avanzada de inputs rich text/URLs.
 * [x] Proteccion contra acciones no autorizadas.
 
 ---

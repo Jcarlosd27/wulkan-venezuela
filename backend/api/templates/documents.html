@@ -88,7 +88,7 @@
                   <div class="media-preview"><i class="bi bi-file-earmark-text"></i></div>
                   <div>
                     <strong>{{ document.title }}</strong>
-                    <small>{{ document_type_label(document.documentType) }} - {{ document.url }}</small>
+                    <small>{{ document_type_label(document.documentType) }} - {{ document.displayUrl or "Sin URL" }}</small>
                   </div>
                 </div>
               </td>
@@ -102,7 +102,7 @@
               <td class="text-end">
                 <div class="d-flex justify-content-end gap-2">
                   {% if document.url %}
-                  <a class="btn btn-sm btn-light" href="{{ document.url }}" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Abrir</a>
+                  <a class="btn btn-sm btn-light" href="{{ url_for('document_open', asset_id=document.id) }}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Abrir</a>
                   {% endif %}
                   {% if can_module_action("documents", "delete") %}
                   <form method="post" action="{{ url_for('document_delete', asset_id=document.id) }}">
