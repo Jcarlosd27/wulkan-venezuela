@@ -2,38 +2,180 @@
 {% set heading = "Comisiones" %}
 {% set description = "Controla comisiones por vendedor, orden, estado de venta y liquidacion comercial." %}
 
+{% block actions %}
+{% if can_export_commissions %}
+<a class="btn btn-light" href="{{ url_for('commissions_export') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">
+  <i class="bi bi-download"></i> Exportar CSV
+</a>
+{% endif %}
+{% endblock %}
+
 {% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 shadow-sm" role="alert">
+  <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+</div>
+{% endif %}
+
 <section class="row g-3 mb-3">
-  <div class="col-12 col-md-3">
+  <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
-      <span>Pendientes</span>
-      <strong>{{ money_usd(metrics.pending) }}</strong>
-      <em>Por validar</em>
+      <span>Pendiente / revision</span>
+      <strong>{{ money_usd(metrics.pending + metrics.review) }}</strong>
+      <em>{{ metrics.blocked_count }} bloqueadas</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
       <span>Aprobadas</span>
       <strong>{{ money_usd(metrics.approved) }}</strong>
-      <em>Liquidables</em>
+      <em>{{ metrics.payable_count }} liquidables</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
       <span>Pagadas</span>
       <strong>{{ money_usd(metrics.paid) }}</strong>
-      <em>Historial</em>
+      <em>Historial liquidado</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-x-circle"></i></div>
-      <span>Anuladas</span>
-      <strong>{{ money_usd(metrics.cancelled) }}</strong>
-      <em>No paga</em>
+      <div class="metric-icon"><i class="bi bi-pause-circle"></i></div>
+      <span>Retenidas / anuladas</span>
+      <strong>{{ money_usd(metrics.withheld + metrics.cancelled) }}</strong>
+      <em>Fuera de pago</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-lg-3">
+      <label class="form-label small text-secondary fw-semibold">Buscar</label>
+      <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Orden, vendedor o cliente">
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label small text-secondary fw-semibold">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label small text-secondary fw-semibold">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in seller_options %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label small text-secondary fw-semibold">Regla</label>
+      <select class="form-select" name="rule">
+        <option value="">Todas</option>
+        {% for value, label in rule_options %}
+        <option value="{{ value }}" {% if filters.rule == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label small text-secondary fw-semibold">Pago</label>
+      <select class="form-select" name="release">
+        <option value="">Todos</option>
+        <option value="payable" {% if filters.release == 'payable' %}selected{% endif %}>Liquidables</option>
+        <option value="blocked" {% if filters.release == 'blocked' %}selected{% endif %}>Bloqueadas</option>
+      </select>
+    </div>
+    <div class="col-12 col-lg-1 d-grid">
+      <button class="btn btn-primary" type="submit"><i class="bi bi-funnel"></i></button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Estados</h2>
+          <span>Graphify</span>
+        </div>
+      </div>
+      {% set status_max = commission_charts.status["values"]|max if commission_charts.status["values"] else 0 %}
+      <div class="graphify-bars">
+      {% for label in commission_charts.status["labels"] %}
+      {% set value = commission_charts.status["values"][loop.index0] %}
+      <div class="graphify-row">
+        <span class="graphify-label">{{ label }}</span>
+        <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if status_max == 0 else (value / status_max * 100) }}%"></span></span>
+        <strong>{{ money_usd(value) }}</strong>
+      </div>
+      {% else %}
+      <div class="empty-state compact">
+        <div class="empty-icon"><i class="bi bi-percent"></i></div>
+        <strong>Sin datos</strong>
+      </div>
+      {% endfor %}
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Vendedores</h2>
+          <span>Comision generada</span>
+        </div>
+      </div>
+      {% set seller_max = commission_charts.seller["values"]|max if commission_charts.seller["values"] else 0 %}
+      <div class="graphify-bars">
+      {% for label in commission_charts.seller["labels"] %}
+      {% set value = commission_charts.seller["values"][loop.index0] %}
+      <div class="graphify-row">
+        <span class="graphify-label">{{ label }}</span>
+        <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if seller_max == 0 else (value / seller_max * 100) }}%"></span></span>
+        <strong>{{ money_usd(value) }}</strong>
+      </div>
+      {% else %}
+      <div class="empty-state compact">
+        <div class="empty-icon"><i class="bi bi-person-badge"></i></div>
+        <strong>Sin vendedores</strong>
+      </div>
+      {% endfor %}
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Reglas</h2>
+          <span>Politica comercial</span>
+        </div>
+      </div>
+      {% set rule_max = commission_charts.rule["values"]|max if commission_charts.rule["values"] else 0 %}
+      <div class="graphify-bars">
+      {% for label in commission_charts.rule["labels"] %}
+      {% set value = commission_charts.rule["values"][loop.index0] %}
+      <div class="graphify-row">
+        <span class="graphify-label">{{ label }}</span>
+        <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if rule_max == 0 else (value / rule_max * 100) }}%"></span></span>
+        <strong>{{ money_usd(value) }}</strong>
+      </div>
+      {% else %}
+      <div class="empty-state compact">
+        <div class="empty-icon"><i class="bi bi-diagram-3"></i></div>
+        <strong>Sin reglas</strong>
+      </div>
+      {% endfor %}
+      </div>
     </article>
   </div>
 </section>
@@ -42,7 +184,7 @@
   <div class="panel-header">
     <div>
       <h2>Liquidacion por orden</h2>
-      <span>La comision se aprueba al entregar o pagar; se liquida manualmente cuando Wulkan la pague.</span>
+      <span>La comision se paga solo si la venta esta validada, sin saldo y sin bloqueo operativo.</span>
     </div>
     <span>{{ orders | length }} registros</span>
   </div>
@@ -55,8 +197,9 @@
           <th>Cliente</th>
           <th>Venta</th>
           <th>Comision</th>
+          <th>Regla</th>
           <th>Estado</th>
-          <th>Liquidacion</th>
+          <th>Bloqueo</th>
           {% if can_manage_commissions %}<th class="text-end">Accion</th>{% endif %}
         </tr>
       </thead>
@@ -77,22 +220,29 @@
           </td>
           <td>
             <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
-            <small class="d-block text-secondary">{{ money_usd(order.totalUsd) }}</small>
-          </td>
-          <td>
-            <strong>{{ money_usd(order.commissionUsd) }}</strong>
+            <small class="d-block text-secondary">Total {{ money_usd(order.totalUsd) }}</small>
             <small class="d-block text-secondary">Saldo {{ money_usd(order.balanceUsd) }}</small>
           </td>
           <td>
-            <span class="badge {{ order.commissionStatus | badge_class }}">{{ order.commissionStatusLabel }}</span>
-            <small class="d-block text-secondary">{{ order.status }}</small>
+            <strong>{{ money_usd(order.commissionUsd) }}</strong>
+            <small class="d-block text-secondary">Base {{ money_usd(order.commissionBaseUsd) }}</small>
           </td>
           <td>
-            {% if order.commissionPaidAt %}
-            <strong class="d-block">{{ order.commissionPaidBy }}</strong>
-            <small class="text-secondary">{{ order.commissionPaidAt }}</small>
+            <strong class="d-block">{{ order.commissionRuleLabel }}</strong>
+            <small class="text-secondary">{{ order.commissionGeneratedAt }}</small>
+          </td>
+          <td>
+            <span class="badge {{ order.commissionStatus | badge_class }}">{{ order.commissionStatusLabel }}</span>
+            <small class="d-block text-secondary">{{ order.statusLabel }}</small>
+          </td>
+          <td>
+            {% if order.commissionReleaseBlockers %}
+            <span class="badge text-bg-warning">Bloqueada</span>
+            <small class="d-block text-secondary">{{ order.commissionReleaseBlockers | join(', ') }}</small>
+            {% elif order.commissionCanBePaid %}
+            <span class="badge text-bg-success">Liquidable</span>
             {% else %}
-            <span class="text-secondary">Sin liquidar</span>
+            <span class="badge text-bg-secondary">Sin bloqueo</span>
             {% endif %}
           </td>
           {% if can_manage_commissions %}
@@ -105,7 +255,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="{{ 8 if can_manage_commissions else 7 }}">
+          <td colspan="{{ 9 if can_manage_commissions else 8 }}">
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-percent"></i></div>
               <strong>Sin comisiones registradas</strong>
@@ -133,14 +283,34 @@
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
-        <label class="form-label fw-semibold">Estado de comision</label>
-        <select class="form-select" name="commissionStatus">
-          <option value="commission_pending" {% if order.commissionStatus == 'commission_pending' %}selected{% endif %}>Pendiente</option>
-          <option value="commission_approved" {% if order.commissionStatus == 'commission_approved' %}selected{% endif %}>Aprobada</option>
-          <option value="commission_paid" {% if order.commissionStatus == 'commission_paid' %}selected{% endif %}>Pagada</option>
-          <option value="commission_cancelled" {% if order.commissionStatus == 'commission_cancelled' %}selected{% endif %}>Anulada</option>
-        </select>
-        <div class="form-text">Marcar como pagada registra usuario y fecha de liquidacion.</div>
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label fw-semibold">Estado de comision</label>
+            <select class="form-select" name="commissionStatus">
+              {% for value, label in status_options %}
+              <option value="{{ value }}" {% if order.commissionStatus == value %}selected{% endif %} {% if value == 'commission_paid' and not order.commissionCanBePaid %}disabled{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">
+              Pagada se habilita cuando la orden no tiene saldo, devolucion ni bloqueo de cobranza.
+            </div>
+          </div>
+          {% if order.commissionReleaseBlockers %}
+          <div class="col-12">
+            <div class="alert alert-warning mb-0">
+              <strong>No liquidable:</strong> {{ order.commissionReleaseBlockers | join(', ') }}
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-12">
+            <label class="form-label fw-semibold">Motivo de retencion</label>
+            <input class="form-control" name="commissionHoldReason" value="{{ order.commissionHoldReason }}" placeholder="Mora, devolucion, reclamo o excepcion comercial">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Observacion interna</label>
+            <textarea class="form-control" name="commissionObservation" rows="3" placeholder="Detalle para auditoria">{{ order.commissionObservation }}</textarea>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>

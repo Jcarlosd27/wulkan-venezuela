@@ -286,6 +286,21 @@ SELLER_STATUS_OPTIONS = [
     ("blocked", "Bloqueado"),
     ("suspended", "Suspendido"),
 ]
+COMMISSION_STATUS_OPTIONS = [
+    ("commission_pending", "Pendiente"),
+    ("commission_review", "En revision"),
+    ("commission_approved", "Aprobada"),
+    ("commission_paid", "Pagada"),
+    ("commission_withheld", "Retenida"),
+    ("commission_cancelled", "Anulada"),
+]
+COMMISSION_RULE_OPTIONS = [
+    ("sale_generated", "Venta generada"),
+    ("sale_paid", "Venta pagada"),
+    ("sale_delivered", "Venta entregada"),
+    ("new_client", "Cliente nuevo"),
+    ("manager_override", "Regla especial"),
+]
 ROLE_LABELS = {
     "super_admin": "Super admin",
     "general_manager": "Gerente general",
@@ -946,12 +961,11 @@ def payment_status_label(value: str) -> str:
 
 
 def commission_status_label(value: str) -> str:
-    return {
-        "commission_pending": "Pendiente",
-        "commission_approved": "Aprobada",
-        "commission_paid": "Pagada",
-        "commission_cancelled": "Anulada",
-    }.get(value, value or "Sin definir")
+    return dict(COMMISSION_STATUS_OPTIONS).get(value, value or "Sin definir")
+
+
+def commission_rule_label(value: str) -> str:
+    return dict(COMMISSION_RULE_OPTIONS).get(value, value or "Regla general")
 
 
 def quote_status_label(value: str) -> str:
@@ -1611,6 +1625,7 @@ def security_context():
         "seller_status_label": seller_status_label,
         "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
+        "commission_rule_label": commission_rule_label,
         "quote_status_label": quote_status_label,
         "crm_record_type_label": crm_record_type_label,
         "crm_stage_label": crm_stage_label,
@@ -3599,10 +3614,17 @@ def build_commercial_order(
         "createdByName": actor.get("name", "Sistema"),
         "createdByRole": actor.get("role", "system"),
         "commissionRatePercent": commission_rate,
+        "commissionBaseUsd": total_usd,
         "commissionUsd": commission_usd,
         "commissionStatus": "commission_pending" if commission_usd else "commission_cancelled",
+        "commissionRule": "sale_generated",
+        "commissionGeneratedAt": utc_now(),
+        "commissionApprovedAt": "",
+        "commissionApprovedBy": "",
         "commissionPaidAt": "",
         "commissionPaidBy": "",
+        "commissionObservation": "",
+        "commissionHoldReason": "",
         "creditBeforeUsd": credit_before,
         "creditAfterUsd": credit_after,
         "creditStatus": credit_status,
@@ -3986,9 +4008,19 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["collectionComment"] = enriched.get("collectionComment", "")
     enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
     enriched["commissionRatePercent"] = float(enriched.get("commissionRatePercent") or 0)
+    enriched["commissionBaseUsd"] = float(enriched.get("commissionBaseUsd") or enriched.get("netUsd") or enriched.get("totalUsd") or 0)
     enriched["commissionUsd"] = float(enriched.get("commissionUsd") or 0)
     enriched["commissionStatus"] = enriched.get("commissionStatus") or "commission_pending"
     enriched["commissionStatusLabel"] = commission_status_label(enriched["commissionStatus"])
+    enriched["commissionRule"] = enriched.get("commissionRule") or "sale_generated"
+    enriched["commissionRuleLabel"] = commission_rule_label(enriched["commissionRule"])
+    enriched["commissionGeneratedAt"] = enriched.get("commissionGeneratedAt") or enriched.get("createdAt", "")
+    enriched["commissionApprovedAt"] = enriched.get("commissionApprovedAt", "")
+    enriched["commissionApprovedBy"] = enriched.get("commissionApprovedBy", "")
+    enriched["commissionPaidAt"] = enriched.get("commissionPaidAt", "")
+    enriched["commissionPaidBy"] = enriched.get("commissionPaidBy", "")
+    enriched["commissionObservation"] = enriched.get("commissionObservation", "")
+    enriched["commissionHoldReason"] = enriched.get("commissionHoldReason", "")
     customer = enriched.get("customer") or {}
     enriched["customerName"] = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
     enriched["itemsCount"] = len(enriched.get("items") or [])
@@ -6024,23 +6056,115 @@ def orders_page_context(store: dict, error: str = "") -> dict:
     }
 
 
-def commissions_page_context(store: dict) -> dict:
+def commission_release_blockers(order: dict, client: dict | None = None) -> list[str]:
+    blockers: list[str] = []
+    if order.get("status") in {"cancelled", "rejected"}:
+        blockers.append("Orden anulada o rechazada")
+    if float(order.get("balanceUsd") or 0) > 0:
+        blockers.append("Venta con saldo pendiente")
+    if order.get("dispatchStatus") in {"failed", "returned"}:
+        blockers.append("Despacho fallido o producto devuelto")
+    if client:
+        collection_status = client.get("collectionStatus", "")
+        overdue_balance = float(client.get("overdueBalanceUsd") or 0)
+        if collection_status in {"blocked", "critical", "uncollectible"} or overdue_balance > 0:
+            blockers.append("Cliente con mora o cobranza critica")
+    return blockers
+
+
+def enrich_commission_order(order: dict, client_lookup: dict[str, dict]) -> dict:
+    enriched = dict(order)
+    client = client_lookup.get(enriched.get("customerId", ""))
+    blockers = commission_release_blockers(enriched, client)
+    enriched["commissionReleaseBlockers"] = blockers
+    enriched["commissionCanBePaid"] = not blockers and enriched.get("commissionStatus") == "commission_approved"
+    enriched["commissionBlocked"] = bool(blockers)
+    return enriched
+
+
+def commissions_page_context(store: dict, error: str = "") -> dict:
     movements = store.get("credit_movements", [])
-    orders = [
-        enrich_order(order, movements)
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "rule": request.args.get("rule", "").strip(),
+        "release": request.args.get("release", "").strip(),
+    }
+    client_lookup = {
+        client.get("id", ""): enrich_client(client, store.get("orders", []), movements)
+        for client in store.get("clients", [])
+    }
+    all_orders = [
+        enrich_commission_order(enrich_order(order, movements), client_lookup)
         for order in sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
         if float(order.get("commissionUsd") or 0) > 0
     ]
+
+    def matches(order: dict) -> bool:
+        query = filters["q"].lower()
+        if query:
+            haystack = " ".join(
+                [
+                    str(order.get("orderId", "")),
+                    str(order.get("sellerName", "")),
+                    str(order.get("customerName", "")),
+                    str(order.get("customerId", "")),
+                ]
+            ).lower()
+            if query not in haystack:
+                return False
+        if filters["status"] and order.get("commissionStatus") != filters["status"]:
+            return False
+        if filters["seller"] and order.get("sellerId") != filters["seller"]:
+            return False
+        if filters["rule"] and order.get("commissionRule") != filters["rule"]:
+            return False
+        if filters["release"] == "blocked" and not order.get("commissionBlocked"):
+            return False
+        if filters["release"] == "payable" and not order.get("commissionCanBePaid"):
+            return False
+        return True
+
+    orders = [order for order in all_orders if matches(order)]
+    status_totals = {
+        key: round(sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == key), 2)
+        for key, _label in COMMISSION_STATUS_OPTIONS
+    }
+    seller_totals: dict[str, float] = {}
+    rule_totals: dict[str, float] = {}
+    for order in orders:
+        seller = order.get("sellerName") or "Sin vendedor"
+        rule = order.get("commissionRuleLabel") or "Regla general"
+        value = float(order.get("commissionUsd") or 0)
+        seller_totals[seller] = seller_totals.get(seller, 0.0) + value
+        rule_totals[rule] = rule_totals.get(rule, 0.0) + value
     metrics = {
-        "pending": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_pending"),
-        "approved": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_approved"),
-        "paid": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_paid"),
-        "cancelled": sum(float(order.get("commissionUsd") or 0) for order in orders if order.get("commissionStatus") == "commission_cancelled"),
+        "pending": status_totals.get("commission_pending", 0),
+        "review": status_totals.get("commission_review", 0),
+        "approved": status_totals.get("commission_approved", 0),
+        "paid": status_totals.get("commission_paid", 0),
+        "withheld": status_totals.get("commission_withheld", 0),
+        "cancelled": status_totals.get("commission_cancelled", 0),
+        "blocked_count": sum(1 for order in orders if order.get("commissionBlocked")),
+        "payable_count": sum(1 for order in orders if order.get("commissionCanBePaid")),
     }
     return {
         "orders": orders,
+        "all_orders": all_orders,
         "metrics": metrics,
+        "filters": filters,
+        "status_options": COMMISSION_STATUS_OPTIONS,
+        "rule_options": COMMISSION_RULE_OPTIONS,
+        "seller_options": sorted(store.get("sellers", []), key=lambda item: item.get("name", "")),
+        "commission_charts": {
+            "status": graphify_from_pairs([(commission_status_label(key), value) for key, value in status_totals.items()], 8),
+            "seller": graphify_from_pairs(list(seller_totals.items()), 8),
+            "rule": graphify_from_pairs(list(rule_totals.items()), 8),
+        },
         "can_manage_commissions": role_allowed(COMMISSION_MANAGEMENT_ROLES),
+        "can_export_commissions": can_module_action("commissions", "export"),
+        "error": error,
     }
 
 
@@ -8980,6 +9104,62 @@ def commissions():
     return render_template("commissions.html", **commissions_page_context(store))
 
 
+@app.get("/commissions/export")
+@require_roles(*roles_for_action("commissions", "export"))
+def commissions_export():
+    store = load_store()
+    context = commissions_page_context(store)
+    output = io.StringIO()
+    fieldnames = [
+        "orden",
+        "fecha_generacion",
+        "vendedor",
+        "cliente",
+        "total_venta_usd",
+        "base_comisionable_usd",
+        "porcentaje",
+        "comision_usd",
+        "regla",
+        "estado_comision",
+        "fecha_aprobacion",
+        "aprobado_por",
+        "fecha_pago",
+        "pagado_por",
+        "saldo_orden_usd",
+        "bloqueos",
+        "observacion",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for order in context["orders"]:
+        writer.writerow(
+            {
+                "orden": order.get("orderId", ""),
+                "fecha_generacion": order.get("commissionGeneratedAt", ""),
+                "vendedor": order.get("sellerName", ""),
+                "cliente": order.get("customerName", ""),
+                "total_venta_usd": order.get("totalUsd", 0),
+                "base_comisionable_usd": order.get("commissionBaseUsd", 0),
+                "porcentaje": order.get("commissionRatePercent", 0),
+                "comision_usd": order.get("commissionUsd", 0),
+                "regla": order.get("commissionRuleLabel", ""),
+                "estado_comision": order.get("commissionStatusLabel", ""),
+                "fecha_aprobacion": order.get("commissionApprovedAt", ""),
+                "aprobado_por": order.get("commissionApprovedBy", ""),
+                "fecha_pago": order.get("commissionPaidAt", ""),
+                "pagado_por": order.get("commissionPaidBy", ""),
+                "saldo_orden_usd": order.get("balanceUsd", 0),
+                "bloqueos": " | ".join(order.get("commissionReleaseBlockers") or []),
+                "observacion": order.get("commissionObservation", ""),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=comisiones_wulkan.csv"},
+    )
+
+
 @app.post("/commissions/<order_id>/status")
 @require_roles(*roles_for_action("commissions", "approve"))
 def commission_status_update(order_id: str):
@@ -8989,17 +9169,47 @@ def commission_status_update(order_id: str):
         return redirect(url_for("commissions"))
     before = copy.deepcopy(order)
     status = request.form.get("commissionStatus", order.get("commissionStatus", "commission_pending"))
-    if status not in {"commission_pending", "commission_approved", "commission_paid", "commission_cancelled"}:
+    if status not in {key for key, _label in COMMISSION_STATUS_OPTIONS}:
         return redirect(url_for("commissions"))
+    note = request.form.get("commissionObservation", "").strip()
+    hold_reason = request.form.get("commissionHoldReason", "").strip()
+    movements = store.get("credit_movements", [])
+    client_lookup = {
+        client.get("id", ""): enrich_client(client, store.get("orders", []), movements)
+        for client in store.get("clients", [])
+    }
+    enriched = enrich_commission_order(enrich_order(order, movements), client_lookup)
+    if status == "commission_paid" and enriched.get("commissionReleaseBlockers"):
+        return render_template(
+            "commissions.html",
+            **commissions_page_context(store, "No se puede pagar la comision: " + ", ".join(enriched["commissionReleaseBlockers"])),
+        ), 400
+    if status in {"commission_withheld", "commission_cancelled"} and not note and not hold_reason:
+        return render_template(
+            "commissions.html",
+            **commissions_page_context(store, "Indica una observacion para retener o anular una comision."),
+        ), 400
     order["commissionStatus"] = status
     order["updatedAt"] = utc_now()
+    order["commissionObservation"] = note
+    order["commissionHoldReason"] = hold_reason
+    if status in {"commission_approved", "commission_paid"}:
+        order["commissionApprovedAt"] = order.get("commissionApprovedAt") or utc_now()
+        order["commissionApprovedBy"] = order.get("commissionApprovedBy") or session.get("admin_name", "Admin")
+    elif status not in {"commission_approved", "commission_paid"}:
+        order["commissionApprovedAt"] = ""
+        order["commissionApprovedBy"] = ""
     if status == "commission_paid":
-        order["commissionPaidAt"] = utc_now()
+        order["commissionPaidAt"] = order.get("commissionPaidAt") or utc_now()
         order["commissionPaidBy"] = session.get("admin_name", "Admin")
-    elif status != "commission_paid":
+    else:
         order["commissionPaidAt"] = ""
         order["commissionPaidBy"] = ""
-    append_order_history(order, order.get("status", "credit_review"), f"Comision marcada como {commission_status_label(status)}.")
+    append_order_history(
+        order,
+        order.get("status", "credit_review"),
+        f"Comision marcada como {commission_status_label(status)}. {note or hold_reason}".strip(),
+    )
     record_change_event(
         store,
         "commission_update",

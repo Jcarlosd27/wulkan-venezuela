@@ -18,7 +18,7 @@
 - [x] Fase 1.12 - Despacho / Logistica: modulo logistico conectado a ordenes, estados de despacho, transportista, guia, receptor, fechas, evidencia, historial, export CSV y auditoria before/after.
 - [x] Fase 1.13 - Cotizaciones: modulo comercial con creacion/edicion, descuentos por linea, vigencia, versiones, historial, estados, duplicado, export CSV, documento imprimible y conversion trazable a orden.
 - [x] Fase 1.14 - CRM Comercial: modulo de leads, prospectos, oportunidades, tareas y visitas con pipeline, actividades, proxima accion, valor ponderado, filtros, Graphify, export CSV, permisos y auditoria.
-- [ ] Fase 1.15 - Comisiones.
+- [x] Fase 1.15 - Comisiones: estados pendiente/revision/aprobada/pagada/retenida/anulada, base comisionable, regla, bloqueo de pago por saldo/mora/devolucion, filtros, Graphify, export CSV y auditoria before/after.
 - [ ] Fase 1.16 - Reportes.
 - [ ] Fase 1.17 - Auditoria.
 - [ ] Fase 1.18 - Configuracion General.
