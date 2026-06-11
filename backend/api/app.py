@@ -636,10 +636,42 @@ ENDPOINT_MODULE_MAP.update({
     "credit_due_export": "credit",
     "credit_history_export": "credit",
     "import_issues_export": "import_templates",
+    "admin_search": "dashboard",
 })
+
+MODULE_NAV_INDEX = {
+    item["module"]: item
+    for group in ADMIN_MENU_GROUPS
+    for item in group["items"]
+}
+
+ENDPOINT_UI_LABELS = {
+    "dashboard": "Dashboard",
+    "admin_search": "Busqueda",
+    "product_new": "Crear producto",
+    "product_edit": "Editar producto",
+    "products_import": "Importar productos",
+    "products_export": "Exportar productos",
+    "category_edit": "Editar categoria",
+    "categories_import": "Importar categorias",
+    "categories_export": "Exportar categorias",
+    "seller_edit": "Editar vendedor",
+    "sellers_import": "Importar vendedores",
+    "client_edit": "Editar cliente",
+    "clients_import": "Importar clientes",
+    "credit_due": "Vencimientos",
+    "credit_history": "Historial credito",
+    "order_new": "Nueva orden",
+    "orders_export": "Exportar ordenes",
+    "quote_new": "Nueva cotizacion",
+    "quote_edit": "Editar cotizacion",
+    "documents_import": "Importar documentos",
+    "audit_export": "Exportar auditoria",
+}
 
 ENDPOINT_ACTION_OVERRIDES = {
     "dashboard": "view",
+    "admin_search": "view",
     "download_import_template": "export",
     "import_issues_export": "export",
     "admin_users": {"GET": "view", "POST": "create"},
@@ -1907,6 +1939,185 @@ def admin_menu_groups() -> list[dict]:
     return groups
 
 
+def admin_breadcrumbs() -> list[dict]:
+    endpoint = request.endpoint or ""
+    if not endpoint or endpoint == "dashboard":
+        return []
+    module = ENDPOINT_MODULE_MAP.get(endpoint, "")
+    crumbs = [{"label": "Dashboard", "url": url_for("dashboard")}]
+    if endpoint == "admin_search":
+        crumbs.append({"label": "Busqueda", "url": ""})
+        return crumbs
+
+    item = MODULE_NAV_INDEX.get(module)
+    if item and can_access_module(module):
+        module_label = item["label"]
+        module_endpoint = item["endpoint"]
+        if endpoint != module_endpoint:
+            crumbs.append({"label": module_label, "url": url_for(module_endpoint)})
+        else:
+            crumbs.append({"label": module_label, "url": ""})
+
+    current_label = ENDPOINT_UI_LABELS.get(endpoint)
+    if current_label and (not crumbs or crumbs[-1]["label"] != current_label):
+        crumbs.append({"label": current_label, "url": ""})
+    return crumbs
+
+
+def push_admin_toast(message: str, level: str = "success", title: str = "Listo") -> None:
+    toasts = session.setdefault("admin_toasts", [])
+    toasts.append({"message": message, "level": level, "title": title})
+    session["admin_toasts"] = toasts[-4:]
+    session.modified = True
+
+
+def consume_admin_toasts() -> list[dict]:
+    return session.pop("admin_toasts", [])
+
+
+def normalize_search_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return re.sub(r"\s+", " ", normalized).strip().lower()
+
+
+def searchable_text(*values) -> str:
+    return normalize_search_text(" ".join(str(value or "") for value in values))
+
+
+def append_search_result(groups: dict[str, dict], group_key: str, item: dict) -> None:
+    groups.setdefault(
+        group_key,
+        {
+            "key": group_key,
+            "label": item.pop("group_label"),
+            "icon": item.pop("group_icon"),
+            "items": [],
+        },
+    )
+    if len(groups[group_key]["items"]) < 8:
+        groups[group_key]["items"].append(item)
+
+
+def admin_search_result_groups(store: dict, query: str) -> list[dict]:
+    normalized_query = normalize_search_text(query)
+    if not normalized_query:
+        return []
+
+    groups: dict[str, dict] = {}
+    orders = store.get("orders", [])
+    movements = store.get("credit_movements", [])
+    tokens = normalized_query.split()
+
+    def matches(*values) -> bool:
+        blob = searchable_text(*values)
+        return all(token in blob for token in tokens)
+
+    if can_access_module("products"):
+        for product in [enrich_inventory_product(item, orders, store.get("stock_movements", [])) for item in store.get("products", [])]:
+            if matches(product.get("sku"), product.get("title"), product.get("categoryName"), product.get("brand"), product.get("model"), product.get("description")):
+                href = url_for("product_edit", product_id=product["id"]) if can_module_action("products", "edit") else url_for("products", q=product.get("sku", ""))
+                append_search_result(groups, "products", {
+                    "group_label": "Productos",
+                    "group_icon": "bi-box-seam",
+                    "title": product.get("title") or product.get("sku"),
+                    "subtitle": f"{product.get('sku', '')} - {product.get('categoryName') or 'Sin categoria'}",
+                    "meta": f"{product.get('availableStock', 0)} disp. / {money_usd(product.get('publicPriceUsd', 0))}",
+                    "badge": product.get("statusLabel", product.get("status", "")),
+                    "href": href,
+                    "icon": "bi-box-seam",
+                })
+
+    if can_access_module("clients"):
+        for client in [enrich_client(item, orders, movements) for item in visible_clients_for_current_user(store) if item.get("status") != "deleted"]:
+            if matches(client.get("businessName"), client.get("legalName"), client.get("rif"), client.get("email"), client.get("phone"), client.get("assignedSellerName")):
+                append_search_result(groups, "clients", {
+                    "group_label": "Clientes",
+                    "group_icon": "bi-shop",
+                    "title": client.get("businessName") or client.get("email"),
+                    "subtitle": f"{client.get('rif') or 'Sin RIF'} - {client.get('assignedSellerName') or 'Sin vendedor'}",
+                    "meta": f"Credito {money_usd(client.get('creditAvailableUsd', 0))}",
+                    "badge": client.get("statusLabel", client.get("status", "")),
+                    "href": url_for("clients", q=client.get("businessName", "")),
+                    "icon": "bi-shop",
+                })
+
+    if can_access_module("sellers"):
+        for seller in [enrich_seller(store, item) for item in store.get("admin_users", []) if item.get("role") == "sales" and item.get("status") != "deleted"]:
+            if matches(seller.get("name"), seller.get("email"), seller.get("sellerCode"), seller.get("sellerZone"), seller.get("phone")):
+                append_search_result(groups, "sellers", {
+                    "group_label": "Vendedores",
+                    "group_icon": "bi-person-badge",
+                    "title": seller.get("name") or seller.get("email"),
+                    "subtitle": f"{seller.get('sellerCode') or 'Sin codigo'} - {seller.get('sellerZone') or 'Sin zona'}",
+                    "meta": f"Cartera {seller.get('clientsCount', 0)} clientes",
+                    "badge": seller_status_label(seller.get("status", "")),
+                    "href": url_for("sellers", q=seller.get("name", "")),
+                    "icon": "bi-person-badge",
+                })
+
+    if can_access_module("orders"):
+        for order in [enrich_order(item, movements) for item in visible_orders_for_current_user(store)]:
+            if matches(order.get("orderId"), order.get("customerName"), order.get("sellerName"), order.get("saleTypeLabel"), order.get("statusLabel")):
+                append_search_result(groups, "orders", {
+                    "group_label": "Ordenes",
+                    "group_icon": "bi-receipt",
+                    "title": order.get("orderId") or order.get("id"),
+                    "subtitle": f"{order.get('customerName')} - {order.get('sellerName')}",
+                    "meta": f"{money_usd(order.get('totalUsd', 0))} / saldo {money_usd(order.get('balanceUsd', 0))}",
+                    "badge": order.get("statusLabel", order.get("status", "")),
+                    "href": url_for("orders", q=order.get("orderId", "")),
+                    "icon": "bi-receipt",
+                })
+
+    if can_access_module("quotes"):
+        for quote in visible_quotes_for_current_user(store):
+            if matches(quote.get("quoteId"), quote.get("clientName"), quote.get("sellerName"), quote.get("status"), quote.get("title")):
+                href = url_for("quote_edit", quote_id=quote["id"]) if can_module_action("quotes", "edit") else url_for("quotes", q=quote.get("quoteId", ""))
+                append_search_result(groups, "quotes", {
+                    "group_label": "Cotizaciones",
+                    "group_icon": "bi-file-earmark-text",
+                    "title": quote.get("quoteId") or quote.get("title") or quote.get("id"),
+                    "subtitle": f"{quote.get('clientName') or 'Sin cliente'} - {quote.get('sellerName') or 'Sin vendedor'}",
+                    "meta": money_usd(quote.get("totalUsd", 0)),
+                    "badge": quote_status_label(quote.get("status", "")),
+                    "href": href,
+                    "icon": "bi-file-earmark-text",
+                })
+
+    if can_access_module("categories"):
+        for category in store.get("categories", []):
+            if category.get("status") == "deleted":
+                continue
+            if matches(category.get("name"), category.get("description"), category.get("slug"), category.get("status")):
+                append_search_result(groups, "categories", {
+                    "group_label": "Categorias",
+                    "group_icon": "bi-tags",
+                    "title": category.get("name") or category.get("slug"),
+                    "subtitle": category.get("description") or "Familia de catalogo",
+                    "meta": "Visible app" if category.get("visibleInApp") else "No visible app",
+                    "badge": category_status_label(category.get("status", "")),
+                    "href": url_for("categories", q=category.get("name", "")),
+                    "icon": "bi-tags",
+                })
+
+    if can_access_module("documents"):
+        for asset in document_assets(store):
+            if matches(asset.get("title"), asset.get("subjectLabel"), asset.get("documentType"), asset.get("url")):
+                append_search_result(groups, "documents", {
+                    "group_label": "Documentos",
+                    "group_icon": "bi-folder2",
+                    "title": asset.get("title") or "Documento",
+                    "subtitle": asset.get("subjectLabel") or document_scope_label(asset.get("subjectType", "")),
+                    "meta": document_type_label(asset.get("documentType", "")),
+                    "badge": document_status_label(asset.get("effectiveStatus", asset.get("status", ""))),
+                    "href": url_for("documents", q=asset.get("title", "")),
+                    "icon": "bi-folder2",
+                })
+
+    return [group for group in groups.values() if group["items"]]
+
+
 def forbidden_response():
     return render_template(
         "forbidden.html",
@@ -1946,6 +2157,8 @@ def security_context():
         "can_delete_data": can_delete_data,
         "current_admin_role": current_admin_role,
         "admin_menu_groups": admin_menu_groups,
+        "admin_breadcrumbs": admin_breadcrumbs,
+        "admin_toasts": consume_admin_toasts,
         "permission_actions": PERMISSION_ACTIONS,
         "role_labels": ROLE_LABELS,
         "sale_type_label": sale_type_label,
@@ -7567,6 +7780,22 @@ def dashboard():
     )
 
 
+@app.get("/search")
+@require_roles(*roles_for_action("dashboard", "view"))
+def admin_search():
+    query = request.args.get("q", "").strip()
+    store = load_store()
+    result_groups = admin_search_result_groups(store, query)
+    return render_template(
+        "admin_search.html",
+        heading="Busqueda global",
+        description="Consulta rapida sobre los modulos visibles para tu rol.",
+        query=query,
+        result_groups=result_groups,
+        total_results=sum(len(group["items"]) for group in result_groups),
+    )
+
+
 @app.get("/plantillas")
 @require_roles(*roles_for_action("import_templates", "view"))
 def import_templates():
@@ -7707,6 +7936,7 @@ def admin_user_delete(user_id: str):
         before,
         user,
     )
+    push_admin_toast("Usuario admin eliminado logicamente.", "warning", "Usuario actualizado")
     save_store(store)
     return redirect(url_for("admin_users"))
 
@@ -7889,6 +8119,11 @@ def seller_delete(seller_id: str):
         before,
         after,
     )
+    push_admin_toast(
+        f"Vendedor {'desactivado' if after else 'eliminado'} correctamente.",
+        "warning",
+        "Vendedor actualizado",
+    )
     save_store(store)
     return redirect(url_for("sellers"))
 
@@ -8001,6 +8236,11 @@ def client_delete(client_id: str):
         f"Cliente {'desactivado' if after else 'eliminado'}: {before.get('businessName', client_id)}.",
         before,
         after,
+    )
+    push_admin_toast(
+        f"Cliente {'desactivado por historial' if after else 'eliminado'} correctamente.",
+        "warning",
+        "Cliente actualizado",
     )
     save_store(store)
     return redirect(url_for("clients"))
@@ -8255,6 +8495,11 @@ def product_delete(product_id: str):
         f"Producto {'desactivado por historial comercial' if has_history else 'eliminado'}: {before.get('sku', product_id)}.",
         before,
         after,
+    )
+    push_admin_toast(
+        f"Producto {'desactivado por historial comercial' if has_history else 'eliminado'} correctamente.",
+        "warning",
+        "Producto actualizado",
     )
     save_store(store)
     return redirect(url_for("products"))
@@ -8613,6 +8858,7 @@ def category_delete(category_id: str):
             before,
             category,
         )
+        push_admin_toast("Categoria desactivada porque tiene referencias.", "warning", "Categoria actualizada")
     else:
         store["categories"] = [category for category in store["categories"] if category["id"] != category_id]
         record_change_event(
@@ -8624,6 +8870,7 @@ def category_delete(category_id: str):
             before,
             None,
         )
+        push_admin_toast("Categoria eliminada correctamente.", "warning", "Categoria eliminada")
     save_store(store)
     return redirect(url_for("categories"))
 
@@ -8714,6 +8961,7 @@ def media_asset_delete(asset_id: str):
             before,
             None,
         )
+        push_admin_toast("Recurso tecnico eliminado y desasociado del producto.", "warning", "Biblioteca actualizada")
         save_store(store)
     return redirect(url_for("media_library"))
 
@@ -8851,6 +9099,7 @@ def document_delete(asset_id: str):
             before,
             asset,
         )
+        push_admin_toast("Documento eliminado logicamente.", "warning", "Documento actualizado")
         save_store(store)
     return redirect(url_for("documents"))
 
@@ -8933,6 +9182,7 @@ def service_technician_delete(technician_id: str):
             before,
             technician,
         )
+        push_admin_toast("Servicio tecnico oculto de la app y eliminado logicamente.", "warning", "Servicio actualizado")
         save_store(store)
     return redirect(url_for("service_technicians"))
 
@@ -9767,6 +10017,7 @@ def crm_delete(record_id: str):
         before,
         record,
     )
+    push_admin_toast("Registro CRM eliminado logicamente.", "warning", "CRM actualizado")
     save_store(store)
     return redirect(url_for("crm"))
 
@@ -10994,6 +11245,7 @@ def announcement_delete(announcement_id: str):
         announcement,
         None,
     )
+    push_admin_toast("Banner eliminado del carrusel movil.", "warning", "Anuncio actualizado")
     save_store(store)
     return redirect(url_for("announcements"))
 

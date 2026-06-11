@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="search-page-panel panel">
+  <div class="search-page-head">
+    <div>
+      <span class="text-secondary fw-bold">Consulta operativa</span>
+      <h2 class="mb-1">Resultados para "{{ query or 'sin termino' }}"</h2>
+      <p class="mb-0 text-secondary">Solo aparecen modulos permitidos para tu rol administrativo.</p>
+    </div>
+    <span class="badge text-bg-light">{{ total_results }} resultados</span>
+  </div>
+
+  <form class="search-page-form" method="get" action="{{ url_for('admin_search') }}">
+    <div class="input-group">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input class="form-control" name="q" value="{{ query }}" placeholder="Busca por SKU, cliente, orden, vendedor o documento" autofocus>
+      <button class="btn btn-primary" type="submit">Buscar</button>
+    </div>
+  </form>
+
+  {% if query and result_groups %}
+  <div class="search-result-grid">
+    {% for group in result_groups %}
+    <article class="search-result-group">
+      <div class="search-result-title">
+        <div class="metric-icon"><i class="bi {{ group.icon }}"></i></div>
+        <div>
+          <h3>{{ group.label }}</h3>
+          <span>{{ group.items | length }} coincidencias principales</span>
+        </div>
+      </div>
+      <div class="search-result-list">
+        {% for item in group.items %}
+        <a class="search-result-item" href="{{ item.href }}">
+          <div class="search-result-icon"><i class="bi {{ item.icon }}"></i></div>
+          <div>
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.subtitle }}</span>
+          </div>
+          <div class="search-result-meta">
+            <em>{{ item.meta }}</em>
+            {% if item.badge %}<span class="badge text-bg-light">{{ item.badge }}</span>{% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% elif query %}
+  <div class="empty-state">
+    <div class="empty-icon"><i class="bi bi-search"></i></div>
+    <strong>Sin coincidencias</strong>
+    <span>Prueba con SKU, RIF, nombre comercial, numero de orden o correo.</span>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon"><i class="bi bi-command"></i></div>
+    <strong>Busca en el panel Wulkan</strong>
+    <span>El buscador respeta permisos por rol y no muestra informacion restringida.</span>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

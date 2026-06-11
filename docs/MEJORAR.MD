@@ -27,7 +27,7 @@
 - [ ] Fase 2 - App Movil Cliente y Vendedor.
 - [ ] Fase 3 - Backend API versionada y endpoints faltantes.
 - [ ] Fase 4 - Seguridad avanzada.
-- [ ] Fase 5 - UI/UX Admin Panel.
+- [x] Fase 5 - UI/UX Admin Panel.
 - [ ] Fase 6 - UI/UX App Movil.
 - [ ] Fase 7 - Notificaciones.
 - [ ] Fase 8 - Reglas de negocio criticas.
@@ -1548,6 +1548,17 @@ El panel debe verse moderno y ordenado.
 * Exportación visible.
 * Botones de acción claros.
 * Responsive para tablet.
+
+## Avance Fase 5
+
+* [x] Buscador global `/search` con resultados agrupados por productos, clientes, vendedores, ordenes, cotizaciones, categorias y documentos segun permisos del rol.
+* [x] Breadcrumbs automaticos por modulo y ruta activa.
+* [x] Bootstrap JS centralizado en `base.html` para modales y componentes interactivos.
+* [x] Toasts globales para feedback de acciones sensibles.
+* [x] Modal global de confirmacion para eliminaciones/desactivaciones con auditoria.
+* [x] Paginacion client-side progresiva para tablas largas.
+* [x] Indicador de carga/skeleton global para navegacion y envios de formularios.
+* [x] Ajustes responsive de header, buscador, resultados y acciones para tablet.
 
 ---
 

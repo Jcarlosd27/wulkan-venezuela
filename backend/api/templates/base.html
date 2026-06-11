@@ -43,10 +43,21 @@
       </aside>
       <main class="content">
         <header class="topbar app-topbar">
-          <div>
+          <div class="topbar-context">
             <span>Panel del negocio</span>
             <strong>Wulkan Venezuela</strong>
           </div>
+          <form class="global-search" method="get" action="{{ url_for('admin_search') }}" role="search">
+            <i class="bi bi-search"></i>
+            <input
+              name="q"
+              value="{{ request.args.get('q', '') if request.endpoint == 'admin_search' else '' }}"
+              placeholder="Buscar SKU, cliente, orden..."
+              autocomplete="off"
+              aria-label="Busqueda global"
+            >
+            <button class="btn btn-sm btn-primary" type="submit">Buscar</button>
+          </form>
           <div class="top-actions">
             {% if can_access_module('announcements') %}
             <a class="btn btn-light btn-sm" href="{{ url_for('announcements') }}"><i class="bi bi-megaphone"></i> Anuncios</a>
@@ -64,6 +75,18 @@
         </header>
         <div class="page-heading">
           <div>
+            {% set crumbs = admin_breadcrumbs() %}
+            {% if crumbs %}
+            <nav class="admin-breadcrumb" aria-label="Ruta del panel">
+              {% for crumb in crumbs %}
+              {% if crumb.url and not loop.last %}
+              <a href="{{ crumb.url }}">{{ crumb.label }}</a>
+              {% else %}
+              <span>{{ crumb.label }}</span>
+              {% endif %}
+              {% endfor %}
+            </nav>
+            {% endif %}
             <h1>{{ heading }}</h1>
             <p>{{ description }}</p>
           </div>
@@ -72,7 +95,50 @@
         {% block content %}{% endblock %}
       </main>
     </div>
-    <script src="{{ url_for('static', filename='js/graphify.js') }}"></script>
+    {% set toasts = admin_toasts() %}
+    {% if toasts %}
+    <div class="toast-stack" aria-live="polite" aria-atomic="true">
+      {% for toast in toasts %}
+      {% set toast_class = {"success": "text-bg-success", "danger": "text-bg-danger", "warning": "text-bg-warning", "info": "text-bg-info"}.get(toast.level, "text-bg-dark") %}
+      <div class="toast {{ toast_class }} border-0" role="status" aria-live="polite" aria-atomic="true" data-bs-delay="4200">
+        <div class="d-flex">
+          <div class="toast-body">
+            <strong class="d-block">{{ toast.title }}</strong>
+            <span>{{ toast.message }}</span>
+          </div>
+          <button class="btn-close btn-close-white me-2 m-auto" type="button" data-bs-dismiss="toast" aria-label="Cerrar"></button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="modal fade" id="confirmActionModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h2 class="modal-title h5">Confirmar accion</h2>
+              <p class="mb-0 text-secondary">Esta operacion quedara registrada en auditoria.</p>
+            </div>
+            <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <div class="modal-body">
+            <div class="confirm-action-copy">
+              <div class="empty-icon"><i class="bi bi-shield-exclamation"></i></div>
+              <div>
+                <strong>Revisa antes de continuar</strong>
+                <span id="confirmActionMessage">Se aplicara una accion sensible sobre este registro.</span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+            <button class="btn btn-danger" id="confirmActionButton" type="button">Confirmar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+        <script src="{{ url_for('static', filename='js/graphify.js') }}"></script>
     <script src="{{ url_for('static', filename='js/password-toggle.js') }}?v=20260610-admin-access"></script>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
@@ -82,6 +148,98 @@
           nav.scrollTop = active.offsetTop - (nav.clientHeight / 2) + (active.clientHeight / 2);
           nav.scrollLeft = 0;
         }
+
+        document.querySelectorAll(".toast").forEach((toastNode) => {
+          if (window.bootstrap) {
+            bootstrap.Toast.getOrCreateInstance(toastNode).show();
+          }
+        });
+
+        const enablePageLoading = () => document.body.classList.add("is-loading");
+        document.addEventListener("click", (event) => {
+          const link = event.target.closest("a[href]");
+          if (!link || link.target || link.hasAttribute("download") || link.dataset.bsToggle) {
+            return;
+          }
+          const url = new URL(link.href, window.location.href);
+          const samePageAnchor = url.pathname === window.location.pathname && url.hash;
+          if (url.origin === window.location.origin && !samePageAnchor) {
+            enablePageLoading();
+          }
+        });
+
+        const confirmModalNode = document.getElementById("confirmActionModal");
+        const confirmButton = document.getElementById("confirmActionButton");
+        const confirmMessage = document.getElementById("confirmActionMessage");
+        let pendingForm = null;
+        document.addEventListener("submit", (event) => {
+          const form = event.target;
+          const isSensitive = form.matches("form[data-confirm], form[action*='/delete']");
+          if (!isSensitive || form.dataset.confirmed === "1" || !window.bootstrap) {
+            if (form.dataset.confirmed === "1" || !isSensitive) {
+              enablePageLoading();
+            }
+            return;
+          }
+          event.preventDefault();
+          pendingForm = form;
+          confirmMessage.textContent = form.dataset.confirm || "Se eliminara o desactivara este registro segun su historial.";
+          bootstrap.Modal.getOrCreateInstance(confirmModalNode).show();
+        });
+        confirmButton?.addEventListener("click", () => {
+          if (!pendingForm) {
+            return;
+          }
+          pendingForm.dataset.confirmed = "1";
+          bootstrap.Modal.getOrCreateInstance(confirmModalNode).hide();
+          pendingForm.requestSubmit();
+        });
+
+        document.querySelectorAll(".table-responsive > table").forEach((table) => {
+          if (table.dataset.noPagination === "1" || table.dataset.adminPaginated === "1") {
+            return;
+          }
+          const body = table.tBodies[0];
+          const rows = body ? Array.from(body.rows).filter((row) => !row.querySelector(".empty-state")) : [];
+          const pageSize = Number(table.dataset.pageSize || 12);
+          if (!body || rows.length <= pageSize) {
+            return;
+          }
+          table.dataset.adminPaginated = "1";
+          let currentPage = 1;
+          const totalPages = Math.ceil(rows.length / pageSize);
+          const pager = document.createElement("div");
+          pager.className = "table-pagination";
+          pager.innerHTML = `
+            <span></span>
+            <div>
+              <button class="btn btn-light btn-sm" type="button" data-page-prev><i class="bi bi-chevron-left"></i></button>
+              <button class="btn btn-light btn-sm" type="button" data-page-next><i class="bi bi-chevron-right"></i></button>
+            </div>
+          `;
+          table.closest(".table-responsive").after(pager);
+          const label = pager.querySelector("span");
+          const previous = pager.querySelector("[data-page-prev]");
+          const next = pager.querySelector("[data-page-next]");
+          const renderPage = () => {
+            rows.forEach((row, index) => {
+              const rowPage = Math.floor(index / pageSize) + 1;
+              row.hidden = rowPage !== currentPage;
+            });
+            label.textContent = `Pagina ${currentPage} de ${totalPages} - ${rows.length} registros`;
+            previous.disabled = currentPage === 1;
+            next.disabled = currentPage === totalPages;
+          };
+          previous.addEventListener("click", () => {
+            currentPage = Math.max(1, currentPage - 1);
+            renderPage();
+          });
+          next.addEventListener("click", () => {
+            currentPage = Math.min(totalPages, currentPage + 1);
+            renderPage();
+          });
+          renderPage();
+        });
       });
     </script>
     {% block scripts %}{% endblock %}
