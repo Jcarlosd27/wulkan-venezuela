@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wulkan_mobile/src/cart/mobile_cart_service.dart';
 import 'package:wulkan_mobile/src/data/mobile_repository.dart';
@@ -92,6 +94,42 @@ void main() {
       controller.remove(product.id);
       expect(controller.value, isEmpty);
     });
+
+    test('controller restores and persists local cart securely', () async {
+      final storage = _MemoryCartStorage();
+      const seedItem = MobileCartItem(
+        productId: 'prod-motosierra-45cc',
+        sku: 'WUL-MOT-45CC',
+        title: 'Motosierra 45cc',
+        quantity: 2,
+        unitPriceUsd: 162,
+        requiresQuote: false,
+        requiresTechnicalValidation: false,
+        imageUrl: 'https://cdn.example.com/motosierra.jpg',
+      );
+      await storage.writeCart(jsonEncode([seedItem.toJson()]));
+
+      final service = MobileCartService(
+        repository: MockMobileRepository(),
+        storage: storage,
+      );
+      final restoredFromService = await service.loadLocalCart();
+      expect(restoredFromService, hasLength(1));
+      expect(restoredFromService.first.quantity, 2);
+
+      final controller = MobileCartController(storage: storage);
+      await controller.load();
+      expect(controller.itemCount, 2);
+
+      controller.increment(seedItem.productId);
+      await pumpEventQueue();
+      final updated = jsonDecode(storage.raw!) as List<dynamic>;
+      expect(updated.first["quantity"], 3);
+
+      controller.clear();
+      await pumpEventQueue();
+      expect(storage.raw, isNull);
+    });
   });
 
   test('MobileSecureOrderDraft builds callable payload', () {
@@ -169,4 +207,21 @@ void main() {
       ),
     );
   });
+}
+
+class _MemoryCartStorage implements MobileCartStorage {
+  String? raw;
+
+  @override
+  Future<void> clearCart() async {
+    raw = null;
+  }
+
+  @override
+  Future<String?> readCart() async => raw;
+
+  @override
+  Future<void> writeCart(String value) async {
+    raw = value;
+  }
 }

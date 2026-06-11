@@ -117,11 +117,19 @@ class MockMobileRepository implements MobileRepository {
       id: "loc-caracas-chacao",
       name: "Punto autorizado Caracas",
       subtitle: "Retiro, soporte tecnico y recepcion de casos - Chacao",
+      phone: "+58 212 000 0000",
+      whatsapp: "+58 412 000 0000",
+      address: "Chacao, Caracas",
+      specialties: ["Motosierras", "Garantia", "Retiro"],
     ),
     MobileLocation(
       id: "loc-valencia-service",
       name: "Servicio tecnico Valencia",
       subtitle: "Diagnostico, garantia y entrega asistida - Carabobo",
+      phone: "+58 241 000 0000",
+      whatsapp: "+58 414 000 0000",
+      address: "Valencia, Carabobo",
+      specialties: ["Motobombas", "Repuestos", "Diagnostico"],
     ),
   ];
 
@@ -329,6 +337,10 @@ class ApiMobileRepository implements MobileRepository {
             id: _asString(item["id"]),
             name: _asString(item["name"], fallback: "Punto Wulkan"),
             subtitle: _asString(item["subtitle"]),
+            phone: _asString(item["phone"]),
+            whatsapp: _asString(item["whatsapp"]),
+            address: _asString(item["address"]),
+            specialties: _asStringList(item["specialties"]),
           ),
         )
         .toList();

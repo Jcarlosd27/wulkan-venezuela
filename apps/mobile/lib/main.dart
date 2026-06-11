@@ -24,6 +24,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   mobileEnvironment.validateRuntime();
   await configureMobileRuntime();
+  await mobileCartController.load();
   runApp(const WulkanApp());
 }
 
@@ -165,6 +166,7 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isSigningIn = false;
+  bool _isRecovering = false;
   bool _showPassword = false;
   String _errorMessage = "";
 
@@ -202,6 +204,44 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
         _isSigningIn = false;
         _errorMessage = error.toString().replaceFirst("Bad state: ", "");
       });
+    }
+  }
+
+  Future<void> _recoverPassword() async {
+    if (_isRecovering) {
+      return;
+    }
+
+    setState(() {
+      _isRecovering = true;
+      _errorMessage = "";
+    });
+
+    try {
+      await mobileAuthRepository.recoverPassword(
+        email: _emailController.text.trim(),
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Solicitud recibida. Wulkan validara tu acceso movil.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = error.toString().replaceFirst("Bad state: ", "");
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRecovering = false;
+        });
+      }
     }
   }
 
@@ -256,6 +296,7 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
               passwordController: _passwordController,
               errorMessage: _errorMessage,
               isSigningIn: _isSigningIn,
+              isRecovering: _isRecovering,
               showPassword: _showPassword,
               onTogglePassword: () {
                 setState(() {
@@ -263,6 +304,7 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
                 });
               },
               onSubmit: _signIn,
+              onRecoverPassword: _recoverPassword,
             ),
             const SizedBox(height: 18),
             const _LoginTrustGrid(),
@@ -279,18 +321,22 @@ class _LoginAccessCard extends StatelessWidget {
     required this.passwordController,
     required this.errorMessage,
     required this.isSigningIn,
+    required this.isRecovering,
     required this.showPassword,
     required this.onTogglePassword,
     required this.onSubmit,
+    required this.onRecoverPassword,
   });
 
   final TextEditingController emailController;
   final TextEditingController passwordController;
   final String errorMessage;
   final bool isSigningIn;
+  final bool isRecovering;
   final bool showPassword;
   final VoidCallback onTogglePassword;
   final VoidCallback onSubmit;
+  final VoidCallback onRecoverPassword;
 
   @override
   Widget build(BuildContext context) {
@@ -374,6 +420,24 @@ class _LoginAccessCard extends StatelessWidget {
                     )
                   : const Icon(Icons.login_outlined),
               label: Text(isSigningIn ? 'Validando acceso' : 'Entrar'),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.center,
+              child: TextButton.icon(
+                onPressed:
+                    isSigningIn || isRecovering ? null : onRecoverPassword,
+                icon: isRecovering
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.help_outline),
+                label: Text(
+                  isRecovering ? 'Enviando solicitud' : 'Recuperar acceso',
+                ),
+              ),
             ),
           ],
         ),
@@ -5379,8 +5443,144 @@ class _LocationsList extends StatelessWidget {
   Widget build(BuildContext context) {
     return _AsyncList<MobileLocation>(
       future: mobileRepository.listLocations(),
-      itemBuilder: (location) =>
-          _ModuleTile(title: location.name, subtitle: location.subtitle),
+      itemBuilder: (location) => _ServiceLocationCard(location: location),
+    );
+  }
+}
+
+class _ServiceLocationCard extends StatelessWidget {
+  const _ServiceLocationCard({required this.location});
+
+  final MobileLocation location;
+
+  Future<void> _openPhone(BuildContext context) async {
+    final phone = location.phone.trim();
+    if (phone.isEmpty) {
+      return;
+    }
+    final uri = Uri(scheme: 'tel', path: phone.replaceAll(' ', ''));
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+      return;
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el telefono.')),
+      );
+    }
+  }
+
+  Future<void> _openWhatsApp(BuildContext context) async {
+    final digits = location.whatsapp.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) {
+      return;
+    }
+    final uri = Uri.parse('https://wa.me/$digits');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhone = location.phone.trim().isNotEmpty;
+    final hasWhatsApp = location.whatsapp.trim().isNotEmpty;
+    final hasAddress = location.address.trim().isNotEmpty;
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SoftIcon(icon: Icons.build_circle_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        location.name,
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                      ),
+                      if (location.subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          location.subtitle,
+                          style: const TextStyle(
+                            color: _wulkanMuted,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (hasAddress) ...[
+              const SizedBox(height: 12),
+              _AccountMetaLine(
+                icon: Icons.location_on_outlined,
+                label: 'Direccion',
+                value: location.address,
+              ),
+            ],
+            if (location.specialties.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final specialty in location.specialties)
+                    _StatusPill(
+                      label: specialty,
+                      color: _wulkanOrange,
+                    ),
+                ],
+              ),
+            ],
+            if (hasPhone || hasWhatsApp) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  if (hasPhone)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openPhone(context),
+                        icon: const Icon(Icons.call_outlined),
+                        label: const Text('Llamar'),
+                      ),
+                    ),
+                  if (hasPhone && hasWhatsApp) const SizedBox(width: 10),
+                  if (hasWhatsApp)
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => _openWhatsApp(context),
+                        icon: const Icon(Icons.chat_outlined),
+                        label: const Text('WhatsApp'),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

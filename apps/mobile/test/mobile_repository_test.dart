@@ -74,6 +74,8 @@ void main() {
 
       expect(locations, hasLength(2));
       expect(locations.first.name, contains('Caracas'));
+      expect(locations.first.whatsapp, isNotEmpty);
+      expect(locations.first.specialties, contains('Garantia'));
     });
 
     test('returns B2B credit and order summaries', () async {

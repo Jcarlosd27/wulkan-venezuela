@@ -171,11 +171,19 @@ class MobileLocation {
     required this.id,
     required this.name,
     required this.subtitle,
+    this.phone = "",
+    this.whatsapp = "",
+    this.address = "",
+    this.specialties = const [],
   });
 
   final String id;
   final String name;
   final String subtitle;
+  final String phone;
+  final String whatsapp;
+  final String address;
+  final List<String> specialties;
 }
 
 class MobileSellerSnapshot {
@@ -244,6 +252,19 @@ class MobileCartItem {
   final bool requiresTechnicalValidation;
   final String? imageUrl;
 
+  factory MobileCartItem.fromJson(Map<String, dynamic> json) {
+    return MobileCartItem(
+      productId: json["productId"]?.toString() ?? "",
+      sku: json["sku"]?.toString() ?? "",
+      title: json["title"]?.toString() ?? "",
+      quantity: _readInt(json["quantity"], fallback: 1),
+      unitPriceUsd: _readDouble(json["unitPriceUsd"]),
+      requiresQuote: json["requiresQuote"] == true,
+      requiresTechnicalValidation: json["requiresTechnicalValidation"] == true,
+      imageUrl: json["imageUrl"]?.toString(),
+    );
+  }
+
   MobileCartItem copyWith({
     int? quantity,
   }) {
@@ -257,6 +278,39 @@ class MobileCartItem {
       requiresTechnicalValidation: requiresTechnicalValidation,
       imageUrl: imageUrl,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      "productId": productId,
+      "sku": sku,
+      "title": title,
+      "quantity": quantity,
+      "unitPriceUsd": unitPriceUsd,
+      "requiresQuote": requiresQuote,
+      "requiresTechnicalValidation": requiresTechnicalValidation,
+      "imageUrl": imageUrl,
+    };
+  }
+
+  static int _readInt(dynamic value, {int fallback = 0}) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse(value?.toString() ?? "") ?? fallback;
+  }
+
+  static double _readDouble(dynamic value, {double fallback = 0}) {
+    if (value is double) {
+      return value;
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    return double.tryParse(value?.toString() ?? "") ?? fallback;
   }
 }
 

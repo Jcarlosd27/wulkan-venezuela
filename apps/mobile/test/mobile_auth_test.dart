@@ -21,5 +21,11 @@ void main() {
     expect(session.defaultSaleType, 'term_credit');
     expect(session.allowedPaymentTermsDays, contains(15));
     expect(session.assignedSeller.name, 'Vendedor Wulkan');
+
+    await repository.recoverPassword(email: 'ferreteria@wulkan.local');
+    expect(
+      repository.recoverPassword(email: ''),
+      throwsA(isA<StateError>()),
+    );
   });
 }

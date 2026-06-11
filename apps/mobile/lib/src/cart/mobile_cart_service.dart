@@ -1,16 +1,28 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/mobile_environment.dart';
 import '../data/mobile_repository.dart';
 import '../domain/mobile_models.dart';
 
 class MobileCartService {
-  const MobileCartService({required this.repository});
+  const MobileCartService({
+    required this.repository,
+    MobileCartStorage storage = const SecureMobileCartStorage(),
+  }) : _storage = storage;
 
   final MobileRepository repository;
+  final MobileCartStorage _storage;
 
   Future<List<MobileCartItem>> loadLocalCart() async {
-    return const [];
+    try {
+      return _decodeCartItems(await _storage.readCart());
+    } catch (_) {
+      return const [];
+    }
   }
 
   MobileCheckoutPreview calculatePreview(
@@ -43,11 +55,57 @@ class MobileCartService {
   double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
 }
 
+abstract class MobileCartStorage {
+  Future<String?> readCart();
+
+  Future<void> writeCart(String value);
+
+  Future<void> clearCart();
+}
+
+class SecureMobileCartStorage implements MobileCartStorage {
+  const SecureMobileCartStorage({
+    FlutterSecureStorage storage = const FlutterSecureStorage(),
+  }) : _storage = storage;
+
+  static const _cartKey = "wulkan_mobile_cart_v1";
+
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<String?> readCart() {
+    return _storage.read(key: _cartKey);
+  }
+
+  @override
+  Future<void> writeCart(String value) {
+    return _storage.write(key: _cartKey, value: value);
+  }
+
+  @override
+  Future<void> clearCart() {
+    return _storage.delete(key: _cartKey);
+  }
+}
+
 class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
-  MobileCartController() : super(const []);
+  MobileCartController({
+    MobileCartStorage storage = const SecureMobileCartStorage(),
+  })  : _storage = storage,
+        super(const []);
+
+  final MobileCartStorage _storage;
 
   int get itemCount =>
       value.fold<int>(0, (total, item) => total + item.quantity);
+
+  Future<void> load() async {
+    try {
+      value = _decodeCartItems(await _storage.readCart());
+    } catch (_) {
+      value = const [];
+    }
+  }
 
   bool contains(String productId) {
     return value.any((item) => item.productId == productId);
@@ -68,11 +126,11 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
       updated[existingIndex] = current.copyWith(
         quantity: current.quantity + normalizedQuantity,
       );
-      value = updated;
+      _setItems(updated);
       return;
     }
 
-    value = [
+    _setItems([
       ...value,
       MobileCartItem(
         productId: product.id,
@@ -84,16 +142,16 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
         requiresTechnicalValidation: product.requiresTechnicalValidation,
         imageUrl: product.primaryImageUrl,
       ),
-    ];
+    ]);
   }
 
   void increment(String productId) {
-    value = [
+    _setItems([
       for (final item in value)
         item.productId == productId
             ? item.copyWith(quantity: item.quantity + 1)
             : item,
-    ];
+    ]);
   }
 
   void decrement(String productId) {
@@ -110,16 +168,54 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
       }
     }
 
-    value = updated;
+    _setItems(updated);
   }
 
   void remove(String productId) {
-    value = value.where((item) => item.productId != productId).toList();
+    _setItems(value.where((item) => item.productId != productId).toList());
   }
 
   void clear() {
-    value = const [];
+    _setItems(const []);
   }
+
+  void _setItems(List<MobileCartItem> items) {
+    value = List.unmodifiable(items);
+    unawaited(_persist());
+  }
+
+  Future<void> _persist() async {
+    try {
+      if (value.isEmpty) {
+        await _storage.clearCart();
+        return;
+      }
+      await _storage.writeCart(jsonEncode([
+        for (final item in value) item.toJson(),
+      ]));
+    } catch (_) {
+      // The cart remains usable in memory even if secure storage is unavailable.
+    }
+  }
+}
+
+List<MobileCartItem> _decodeCartItems(String? rawCart) {
+  if (rawCart == null || rawCart.trim().isEmpty) {
+    return const [];
+  }
+  final decoded = jsonDecode(rawCart);
+  if (decoded is! List) {
+    return const [];
+  }
+  return decoded
+      .whereType<Map<String, dynamic>>()
+      .map(MobileCartItem.fromJson)
+      .where((item) =>
+          item.productId.isNotEmpty &&
+          item.sku.isNotEmpty &&
+          item.quantity > 0 &&
+          item.unitPriceUsd > 0)
+      .toList();
 }
 
 final mobileCartService = MobileCartService(repository: mobileRepository);

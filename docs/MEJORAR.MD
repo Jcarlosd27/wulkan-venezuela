@@ -1134,7 +1134,7 @@ Ambos roles pueden usar la misma app, pero con pantallas y permisos diferentes s
 * Login con email y contraseña.
 * Detección automática de rol.
 * Cambio obligatorio de clave temporal.
-* Recuperación de contraseña.
+* [x] Recuperación de contraseña. Implementada como solicitud segura desde app movil con auditoria y validacion operativa Wulkan.
 * Mantener sesión.
 * Cierre de sesión.
 * Bloqueo por intentos fallidos.
@@ -1213,7 +1213,7 @@ Debe permitir:
 * Ver total.
 * Validar stock.
 * Validar crédito.
-* Guardar carrito persistente.
+* [x] Guardar carrito persistente. Implementado en Fase 2.2 con almacenamiento seguro local, restauracion al iniciar la app y pruebas moviles.
 * Vaciar carrito.
 
 ## Checkout
@@ -1272,6 +1272,12 @@ Debe permitir ver:
 * Condición comercial.
 * Cambiar contraseña.
 * Solicitar actualización de datos.
+
+---
+
+## Servicios tecnicos en app
+
+* [x] Directorio movil sincronizado con servicios tecnicos activos del admin, incluyendo contacto, WhatsApp, direccion y especialidades.
 
 ---
 

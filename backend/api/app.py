@@ -11007,6 +11007,72 @@ def api_client_change_password():
     return jsonify({"status": "updated", "mustChangePassword": False})
 
 
+@app.post("/api/mobile/auth/recover-password")
+def api_mobile_recover_password():
+    store = load_store()
+    payload = request.get_json(silent=True) or {}
+    email = payload.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Correo requerido."}), 400
+
+    subject_type = "mobile_user"
+    subject_id = email
+    subject_name = email
+    subject_role = "mobile"
+    subject = next(
+        (
+            item
+            for item in store.get("clients", [])
+            if item.get("email", "").lower() == email and item.get("status") == "active"
+        ),
+        None,
+    )
+    if subject:
+        subject_type = "client"
+        subject_id = subject.get("id", email)
+        subject_name = subject.get("businessName", email)
+        subject_role = "client"
+    else:
+        subject = next(
+            (
+                user
+                for user in store.get("admin_users", [])
+                if user.get("email", "").lower() == email
+                and user.get("status") == "active"
+                and user.get("mobileAccessEnabled", True) is not False
+                and user.get("role") in MOBILE_SALES_ROLES
+            ),
+            None,
+        )
+        if subject:
+            subject_type = "admin_user"
+            subject_id = subject.get("id", email)
+            subject_name = subject.get("name", email)
+            subject_role = subject.get("role", "mobile")
+
+    if subject:
+        subject["passwordRecoveryRequestedAt"] = utc_now()
+        subject["passwordRecoveryStatus"] = "pending"
+        subject["updatedAt"] = utc_now()
+
+    record_audit_event(
+        store,
+        "password_reset_request",
+        subject_type,
+        subject_id,
+        "Solicitud de recuperacion de contrasena desde app movil.",
+        metadata={"email": email, "status": "received"},
+        actor={"id": subject_id, "name": subject_name, "role": subject_role},
+    )
+    save_store(store)
+    return jsonify(
+        {
+            "status": "received",
+            "message": "Si el correo existe, Wulkan gestionara la recuperacion de acceso.",
+        }
+    )
+
+
 @app.get("/api/mobile/products")
 def api_products():
     store = load_store()

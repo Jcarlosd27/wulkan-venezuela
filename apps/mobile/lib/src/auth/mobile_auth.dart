@@ -50,6 +50,7 @@ abstract class MobileAuthRepository {
     required String currentPassword,
     required String newPassword,
   });
+  Future<void> recoverPassword({required String email});
   Future<void> signOut();
 }
 
@@ -104,6 +105,13 @@ class MockMobileAuthRepository implements MobileAuthRepository {
     required String currentPassword,
     required String newPassword,
   }) async {}
+
+  @override
+  Future<void> recoverPassword({required String email}) async {
+    if (email.trim().isEmpty) {
+      throw StateError("Ingresa el correo registrado.");
+    }
+  }
 
   @override
   Future<void> signOut() async {
@@ -251,6 +259,31 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         assignedSeller: session.assignedSeller,
       );
       await _persistSession(_session!);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  @override
+  Future<void> recoverPassword({required String email}) async {
+    final uri =
+        _baseUri.replace(path: "${_baseUri.path}/auth/recover-password");
+    final client = HttpClient();
+
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({"email": email}));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final payload = body.isNotEmpty ? jsonDecode(body) : null;
+        final message = payload is Map<String, dynamic>
+            ? payload["error"]?.toString()
+            : null;
+        throw StateError(message ?? "No se pudo solicitar recuperacion.");
+      }
     } finally {
       client.close(force: true);
     }
