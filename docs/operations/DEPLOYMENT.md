@@ -109,6 +109,15 @@ Debe validar:
 - `/api/v1/mobile/categories`.
 - `/api/v1/mobile/announcements`.
 
+Si `WULKAN_REQUIRE_MOBILE_TOKEN=1`, el smoke sin credenciales valida que esas rutas moviles
+respondan `401 token requerido`. Para validar lectura real con token:
+
+```bash
+set WULKAN_SMOKE_MOBILE_EMAIL=cliente@empresa.com
+set WULKAN_SMOKE_MOBILE_PASSWORD=clave-temporal-o-real
+python backend/api/scripts/smoke_production.py --base-url https://crmwulky.com.ve
+```
+
 ## Backups
 
 Crear backup:
