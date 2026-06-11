@@ -17,7 +17,7 @@
 - [x] Fase 1.11 - Cobranza: modulo independiente con cuentas por cobrar, vencidas, criticas, promesas, pagadas, acciones de gestion, abonos, bloqueo/liberacion de cliente, estado de cuenta y export CSV.
 - [x] Fase 1.12 - Despacho / Logistica: modulo logistico conectado a ordenes, estados de despacho, transportista, guia, receptor, fechas, evidencia, historial, export CSV y auditoria before/after.
 - [x] Fase 1.13 - Cotizaciones: modulo comercial con creacion/edicion, descuentos por linea, vigencia, versiones, historial, estados, duplicado, export CSV, documento imprimible y conversion trazable a orden.
-- [ ] Fase 1.14 - CRM Comercial.
+- [x] Fase 1.14 - CRM Comercial: modulo de leads, prospectos, oportunidades, tareas y visitas con pipeline, actividades, proxima accion, valor ponderado, filtros, Graphify, export CSV, permisos y auditoria.
 - [ ] Fase 1.15 - Comisiones.
 - [ ] Fase 1.16 - Reportes.
 - [ ] Fase 1.17 - Auditoria.
@@ -888,6 +888,19 @@ El sistema debe tener CRM real.
 * Seguimiento.
 * Tarea interna.
 * Nota comercial.
+
+### Check implementado
+
+* [x] Modulo CRM Comercial visible en Comercial segun permisos `crm`.
+* [x] Tabla SQL `crm_records` con migracion Alembic para produccion DigitalOcean/PostgreSQL.
+* [x] Registros tipo lead, prospecto, oportunidad, seguimiento, tarea y visita.
+* [x] Pipeline: nuevo lead, contactado, calificado, interesado, cotizacion enviada, negociacion, ganado, perdido e inactivo.
+* [x] Actividades: llamada, WhatsApp, correo, visita, reunion, seguimiento, tarea interna y nota comercial.
+* [x] Vinculacion opcional con cliente ferretero y vendedor responsable.
+* [x] Valor estimado, probabilidad, valor ponderado, fecha de cierre y proxima accion.
+* [x] Filtros compactos, KPIs y graficos Graphify por etapa y valor ponderado.
+* [x] Exportacion CSV filtrada.
+* [x] Auditoria before/after para crear, editar, registrar actividad y eliminar logicamente.
 
 ---
 

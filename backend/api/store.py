@@ -78,6 +78,7 @@ DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
     "announcements": [],
     "orders": [],
     "quotes": [],
+    "crm_records": [],
     "admin_users": [],
     "clients": [],
     "credit_movements": [],
@@ -351,6 +352,35 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         quote.setdefault("createdByName", "")
         quote.setdefault("createdAt", utc_now())
         quote.setdefault("updatedAt", quote.get("createdAt", utc_now()))
+    store.setdefault("crm_records", [])
+    for record in store.get("crm_records", []):
+        record.setdefault("id", "")
+        record.setdefault("title", "Oportunidad comercial")
+        record.setdefault("recordType", "lead")
+        record.setdefault("pipelineStage", "new_lead")
+        record.setdefault("status", "active")
+        record.setdefault("clientId", "")
+        record.setdefault("clientName", "")
+        record.setdefault("sellerId", "")
+        record.setdefault("sellerName", "")
+        record.setdefault("contactName", "")
+        record.setdefault("phone", "")
+        record.setdefault("email", "")
+        record.setdefault("state", "")
+        record.setdefault("city", "")
+        record.setdefault("source", "")
+        record.setdefault("estimatedValueUsd", 0.0)
+        record.setdefault("probabilityPercent", 0)
+        record.setdefault("expectedCloseAt", "")
+        record.setdefault("nextActionAt", "")
+        record.setdefault("lastActivityAt", "")
+        record.setdefault("description", "")
+        record.setdefault("lossReason", "")
+        record.setdefault("activities", [])
+        record.setdefault("createdById", "")
+        record.setdefault("createdByName", "")
+        record.setdefault("createdAt", utc_now())
+        record.setdefault("updatedAt", record.get("createdAt", utc_now()))
     for movement in store.get("credit_movements", []):
         movement.setdefault("movementType", "payment")
         movement.setdefault("clientId", "")

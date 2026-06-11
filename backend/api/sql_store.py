@@ -10,6 +10,7 @@ from models import (
     AuditEvent,
     Category,
     Client,
+    CrmRecord,
     CreditMovement,
     MediaAsset,
     Order,
@@ -312,6 +313,35 @@ def quote_to_dict(row: Quote) -> dict[str, Any]:
     return payload
 
 
+def crm_record_to_dict(row: CrmRecord) -> dict[str, Any]:
+    payload = copy_payload(row.payload)
+    payload.update(
+        {
+            "id": row.id,
+            "title": row.title,
+            "recordType": row.record_type,
+            "pipelineStage": row.pipeline_stage,
+            "status": row.status,
+            "clientId": row.client_id,
+            "sellerId": row.seller_id,
+            "contactName": row.contact_name,
+            "phone": row.phone,
+            "email": row.email,
+            "source": row.source,
+            "estimatedValueUsd": row.estimated_value_usd,
+            "probabilityPercent": row.probability_percent,
+            "expectedCloseAt": row.expected_close_at,
+            "nextActionAt": row.next_action_at,
+            "lastActivityAt": row.last_activity_at,
+            "description": row.description,
+            "activities": row.activities or [],
+            "createdAt": iso_dt(row.created_at),
+            "updatedAt": iso_dt(row.updated_at),
+        }
+    )
+    return payload
+
+
 def credit_movement_to_dict(row: CreditMovement) -> dict[str, Any]:
     payload = copy_payload(row.payload)
     payload.update(
@@ -411,6 +441,10 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
             "stock_movements": [stock_movement_to_dict(row) for row in session.query(StockMovement).all()],
             "orders": [order_to_dict(row) for row in session.query(Order).all()],
             "quotes": [quote_to_dict(row) for row in session.query(Quote).all()],
+            "crm_records": [
+                crm_record_to_dict(row)
+                for row in session.query(CrmRecord).filter(CrmRecord.status != "deleted").all()
+            ],
             "credit_movements": [credit_movement_to_dict(row) for row in session.query(CreditMovement).all()],
             "service_technicians": [
                 service_technician_to_dict(row)
@@ -439,6 +473,8 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
         sync_orders(session, store)
         session.flush()
         sync_quotes(session, store)
+        session.flush()
+        sync_crm_records(session, store)
         session.flush()
         sync_credit_movements(session, store)
         sync_service_technicians(session, store)
@@ -770,6 +806,42 @@ def sync_quotes(session, store: dict[str, Any]) -> None:
             },
         )
     soft_prune(session, Quote, live_ids)
+
+
+def sync_crm_records(session, store: dict[str, Any]) -> None:
+    live_ids: set[str] = set()
+    for record in store.get("crm_records", []):
+        object_id = record["id"]
+        live_ids.add(object_id)
+        upsert(
+            session,
+            CrmRecord,
+            object_id,
+            {
+                "id": object_id,
+                "title": record.get("title", ""),
+                "record_type": record.get("recordType", "lead"),
+                "pipeline_stage": record.get("pipelineStage", "new_lead"),
+                "status": record.get("status", "active"),
+                "client_id": record.get("clientId", ""),
+                "seller_id": record.get("sellerId", ""),
+                "contact_name": record.get("contactName", ""),
+                "phone": record.get("phone", ""),
+                "email": record.get("email", ""),
+                "source": record.get("source", ""),
+                "estimated_value_usd": float(record.get("estimatedValueUsd") or 0),
+                "probability_percent": int(record.get("probabilityPercent") or 0),
+                "expected_close_at": record.get("expectedCloseAt", ""),
+                "next_action_at": record.get("nextActionAt", ""),
+                "last_activity_at": record.get("lastActivityAt", ""),
+                "description": record.get("description", ""),
+                "activities": record.get("activities") or [],
+                "created_at": parse_dt(record.get("createdAt")),
+                "updated_at": parse_dt(record.get("updatedAt")),
+                "payload": record,
+            },
+        )
+    soft_prune(session, CrmRecord, live_ids)
 
 
 def sync_credit_movements(session, store: dict[str, Any]) -> None:

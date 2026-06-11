@@ -218,6 +218,42 @@ QUOTE_STATUS_OPTIONS = [
     ("expired", "Vencida"),
     ("converted", "Convertida en orden"),
 ]
+CRM_RECORD_TYPE_OPTIONS = [
+    ("lead", "Lead"),
+    ("prospect", "Prospecto"),
+    ("opportunity", "Oportunidad"),
+    ("follow_up", "Seguimiento"),
+    ("task", "Tarea"),
+    ("visit", "Visita"),
+]
+CRM_PIPELINE_STAGE_OPTIONS = [
+    ("new_lead", "Nuevo lead"),
+    ("contacted", "Contactado"),
+    ("qualified", "Calificado"),
+    ("interested", "Interesado"),
+    ("quote_sent", "Cotizacion enviada"),
+    ("negotiation", "Negociacion"),
+    ("won", "Ganado"),
+    ("lost", "Perdido"),
+    ("inactive", "Inactivo"),
+]
+CRM_ACTIVITY_TYPE_OPTIONS = [
+    ("call", "Llamada"),
+    ("whatsapp", "WhatsApp"),
+    ("email", "Correo"),
+    ("visit", "Visita"),
+    ("meeting", "Reunion"),
+    ("follow_up", "Seguimiento"),
+    ("task", "Tarea interna"),
+    ("note", "Nota comercial"),
+]
+CRM_STATUS_OPTIONS = [
+    ("active", "Activo"),
+    ("pending", "Pendiente"),
+    ("won", "Ganado"),
+    ("lost", "Perdido"),
+    ("inactive", "Inactivo"),
+]
 CREDIT_RISK_OPTIONS = [
     ("low", "Bajo"),
     ("medium", "Medio"),
@@ -292,6 +328,7 @@ PERMISSION_MODULES = [
     ("dashboard", "Dashboard", "bi-grid-1x2", "KPIs ejecutivos y graficos Graphify."),
     ("sellers", "Vendedores", "bi-person-badge", "Fuerza comercial, cartera y metas."),
     ("clients", "Clientes", "bi-shop", "Ferreteros, datos comerciales y credito."),
+    ("crm", "CRM Comercial", "bi-kanban", "Leads, oportunidades, tareas, visitas y seguimiento."),
     ("credit", "Credito B2B", "bi-credit-card-2-front", "Lineas, cupos, vencimientos y riesgo."),
     ("orders", "Ordenes", "bi-receipt", "Pedidos, saldo, estado comercial y despacho."),
     ("commissions", "Comisiones", "bi-percent", "Liquidacion comercial por vendedor."),
@@ -330,6 +367,7 @@ ROLE_MODULE_PERMISSIONS = {
         "dashboard": set(ACTION_AUDIT),
         "sellers": set(ACTION_WORK),
         "clients": set(ACTION_WORK | {"approve", "reject"}),
+        "crm": set(ACTION_WORK | {"approve", "reject"}),
         "credit": set(ACTION_APPROVE),
         "orders": set(ACTION_FULL_NO_DELETE),
         "commissions": set(ACTION_APPROVE),
@@ -351,6 +389,7 @@ ROLE_MODULE_PERMISSIONS = {
         "dashboard": set(ACTION_READ),
         "sellers": set(ACTION_WORK),
         "clients": set(ACTION_WORK),
+        "crm": set(ACTION_WORK),
         "credit": {"view", "export", "audit"},
         "orders": {"view", "create", "edit", "annul", "export", "audit"},
         "commissions": set(ACTION_READ),
@@ -381,6 +420,7 @@ ROLE_MODULE_PERMISSIONS = {
     "collections": {
         "dashboard": set(ACTION_READ),
         "clients": set(ACTION_READ),
+        "crm": set(ACTION_READ | {"edit"}),
         "credit": set(ACTION_READ | {"edit"}),
         "orders": set(ACTION_READ | {"edit"}),
         "collections": {"view", "create", "edit", "export", "audit"},
@@ -405,6 +445,7 @@ ROLE_MODULE_PERMISSIONS = {
             "dashboard",
             "sellers",
             "clients",
+            "crm",
             "credit",
             "orders",
             "commissions",
@@ -443,6 +484,7 @@ ADMIN_MENU_GROUPS = [
         "items": [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
             {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "client_status_update", "clients_import", "client_delete"]},
+            {"module": "crm", "endpoint": "crm", "label": "CRM Comercial", "icon": "bi-kanban", "active": ["crm", "crm_export", "crm_update", "crm_activity_create", "crm_delete"]},
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
             {"module": "collections", "endpoint": "collections", "label": "Cobranza", "icon": "bi-cash-coin", "active": ["collections", "collections_export", "collection_action", "collection_statement"]},
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "orders_export", "order_new", "order_status_update", "order_payment_create"]},
@@ -916,6 +958,22 @@ def quote_status_label(value: str) -> str:
     return dict(QUOTE_STATUS_OPTIONS).get(value, value or "Sin estado")
 
 
+def crm_record_type_label(value: str) -> str:
+    return dict(CRM_RECORD_TYPE_OPTIONS).get(value, value or "Sin tipo")
+
+
+def crm_stage_label(value: str) -> str:
+    return dict(CRM_PIPELINE_STAGE_OPTIONS).get(value, value or "Sin etapa")
+
+
+def crm_activity_type_label(value: str) -> str:
+    return dict(CRM_ACTIVITY_TYPE_OPTIONS).get(value, value or "Actividad")
+
+
+def crm_status_label(value: str) -> str:
+    return dict(CRM_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
 def parse_utc_datetime(value: str | None) -> datetime:
     if not value:
         return datetime.now(timezone.utc)
@@ -1247,6 +1305,35 @@ def can_access_quote_record(quote: dict | None, store: dict) -> bool:
     return bool(client and client.get("assignedSellerId") == seller_id)
 
 
+def visible_crm_records_for_current_user(store: dict) -> list[dict]:
+    records = store.get("crm_records", [])
+    if current_admin_role() != "sales":
+        return records
+    seller_id = session.get("admin_user_id", "")
+    assigned_client_ids = {
+        client.get("id", "")
+        for client in store.get("clients", [])
+        if client.get("assignedSellerId") == seller_id
+    }
+    return [
+        record
+        for record in records
+        if record.get("sellerId") == seller_id or record.get("clientId") in assigned_client_ids
+    ]
+
+
+def can_access_crm_record(record: dict | None, store: dict) -> bool:
+    if not record:
+        return False
+    if current_admin_role() != "sales":
+        return True
+    seller_id = session.get("admin_user_id", "")
+    if record.get("sellerId") == seller_id:
+        return True
+    client = find_by_id(store.get("clients", []), record.get("clientId", ""))
+    return bool(client and client.get("assignedSellerId") == seller_id)
+
+
 def product_has_commercial_history(store: dict, product: dict | None) -> bool:
     if not product:
         return False
@@ -1525,6 +1612,10 @@ def security_context():
         "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
         "quote_status_label": quote_status_label,
+        "crm_record_type_label": crm_record_type_label,
+        "crm_stage_label": crm_stage_label,
+        "crm_activity_type_label": crm_activity_type_label,
+        "crm_status_label": crm_status_label,
         "sales_channel_label": sales_channel_label,
         "dispatch_status_label": dispatch_status_label,
         "due_status_label": due_status_label,
@@ -1771,6 +1862,7 @@ def readyz():
                 "clients": len(store.get("clients", [])),
                 "orders": len(store.get("orders", [])),
                 "quotes": len(store.get("quotes", [])),
+                "crm": len(store.get("crm_records", [])),
             }
         )
     except Exception as exc:
@@ -5622,6 +5714,201 @@ def quotes_page_context(store: dict, error: str = "") -> dict:
     }
 
 
+def crm_record_payload_from_form(store: dict, existing: dict | None = None) -> tuple[dict | None, str]:
+    title = request.form.get("title", "").strip()
+    if not title:
+        return None, "El titulo del seguimiento CRM es obligatorio."
+    record_type = request.form.get("recordType", (existing or {}).get("recordType", "lead"))
+    if record_type not in dict(CRM_RECORD_TYPE_OPTIONS):
+        record_type = "lead"
+    pipeline_stage = request.form.get("pipelineStage", (existing or {}).get("pipelineStage", "new_lead"))
+    if pipeline_stage not in dict(CRM_PIPELINE_STAGE_OPTIONS):
+        pipeline_stage = "new_lead"
+    status = request.form.get("status", (existing or {}).get("status", "active"))
+    if status not in dict(CRM_STATUS_OPTIONS):
+        status = "active"
+
+    client_id = request.form.get("clientId", "").strip()
+    client = find_by_id(store.get("clients", []), client_id) if client_id else None
+    if client_id and not can_access_client_record(client):
+        return None, "Cliente vinculado no encontrado o fuera de tu alcance."
+
+    seller_id = request.form.get("sellerId", "").strip()
+    if client and not seller_id:
+        seller_id = client.get("assignedSellerId", "")
+    seller = find_by_id(store.get("admin_users", []), seller_id) if seller_id else None
+    seller_name = (seller or {}).get("name", "") or (client or {}).get("assignedSellerName", "")
+
+    record = copy.deepcopy(existing or {})
+    now = utc_now()
+    if not record:
+        record["id"] = next_id("crm", title)
+        record["activities"] = []
+        record["createdAt"] = now
+        record["createdById"] = session.get("admin_user_id", "")
+        record["createdByName"] = session.get("admin_name", "Sistema")
+    record.update(
+        {
+            "title": title,
+            "recordType": record_type,
+            "pipelineStage": pipeline_stage,
+            "status": status,
+            "clientId": (client or {}).get("id", ""),
+            "clientName": (client or {}).get("businessName", request.form.get("clientName", "").strip()),
+            "sellerId": seller_id,
+            "sellerName": seller_name,
+            "contactName": request.form.get("contactName", "").strip() or (client or {}).get("contactName", ""),
+            "phone": request.form.get("phone", "").strip() or (client or {}).get("phone", ""),
+            "email": request.form.get("email", "").strip() or (client or {}).get("email", ""),
+            "state": request.form.get("state", "").strip() or (client or {}).get("state", ""),
+            "city": request.form.get("city", "").strip() or (client or {}).get("city", ""),
+            "source": request.form.get("source", "").strip(),
+            "estimatedValueUsd": round(max(0.0, safe_float(request.form.get("estimatedValueUsd"), 0)), 2),
+            "probabilityPercent": max(0, min(100, safe_int(request.form.get("probabilityPercent"), 0))),
+            "expectedCloseAt": request.form.get("expectedCloseAt", "").strip(),
+            "nextActionAt": request.form.get("nextActionAt", "").strip(),
+            "description": request.form.get("description", "").strip(),
+            "lossReason": request.form.get("lossReason", "").strip(),
+            "updatedAt": now,
+        }
+    )
+    return record, ""
+
+
+def append_crm_activity(record: dict, activity_type: str, note: str, next_action_at: str = "") -> None:
+    if activity_type not in dict(CRM_ACTIVITY_TYPE_OPTIONS):
+        activity_type = "note"
+    now = utc_now()
+    record.setdefault("activities", []).append(
+        {
+            "id": next_id("crm-act", record.get("title", "actividad")),
+            "type": activity_type,
+            "typeLabel": crm_activity_type_label(activity_type),
+            "note": note,
+            "nextActionAt": next_action_at,
+            "createdById": session.get("admin_user_id", ""),
+            "createdByName": session.get("admin_name", "Sistema"),
+            "createdAt": now,
+        }
+    )
+    record["lastActivityAt"] = now
+    if next_action_at:
+        record["nextActionAt"] = next_action_at
+    record["updatedAt"] = now
+
+
+def enrich_crm_record(record: dict) -> dict:
+    enriched = dict(record)
+    enriched["recordTypeLabel"] = crm_record_type_label(enriched.get("recordType", "lead"))
+    enriched["pipelineStageLabel"] = crm_stage_label(enriched.get("pipelineStage", "new_lead"))
+    enriched["statusLabel"] = crm_status_label(enriched.get("status", "active"))
+    enriched["clientName"] = enriched.get("clientName") or "Sin cliente vinculado"
+    enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
+    enriched["weightedValueUsd"] = round(
+        safe_float(enriched.get("estimatedValueUsd"), 0) * safe_int(enriched.get("probabilityPercent"), 0) / 100,
+        2,
+    )
+    enriched["activities"] = sorted(enriched.get("activities") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
+    enriched["activitiesCount"] = len(enriched["activities"])
+    next_action = enriched.get("nextActionAt", "")
+    if next_action:
+        try:
+            next_date = datetime.strptime(next_action[:10], "%Y-%m-%d").date()
+            today = datetime.now(timezone.utc).date()
+            if next_date < today:
+                enriched["nextActionStatus"] = "overdue"
+            elif next_date == today:
+                enriched["nextActionStatus"] = "due_soon"
+            else:
+                enriched["nextActionStatus"] = "current"
+        except ValueError:
+            enriched["nextActionStatus"] = "without_due_date"
+    else:
+        enriched["nextActionStatus"] = "without_due_date"
+    return enriched
+
+
+def crm_page_context(store: dict, error: str = "") -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "stage": request.args.get("stage", "").strip(),
+        "type": request.args.get("type", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "next": request.args.get("next", "").strip(),
+    }
+    all_records = [
+        enrich_crm_record(record)
+        for record in sorted(visible_crm_records_for_current_user(store), key=lambda item: item.get("updatedAt", ""), reverse=True)
+        if record.get("status") != "deleted"
+    ]
+    records = all_records
+    if filters["q"]:
+        records = [
+            record for record in records
+            if filters["q"] in " ".join(
+                [
+                    record.get("title", ""),
+                    record.get("clientName", ""),
+                    record.get("sellerName", ""),
+                    record.get("contactName", ""),
+                    record.get("phone", ""),
+                    record.get("email", ""),
+                    record.get("description", ""),
+                ]
+            ).lower()
+        ]
+    if filters["stage"]:
+        records = [record for record in records if record.get("pipelineStage") == filters["stage"]]
+    if filters["type"]:
+        records = [record for record in records if record.get("recordType") == filters["type"]]
+    if filters["seller"]:
+        records = [record for record in records if record.get("sellerId") == filters["seller"]]
+    if filters["status"]:
+        records = [record for record in records if record.get("status") == filters["status"]]
+    if filters["next"]:
+        records = [record for record in records if record.get("nextActionStatus") == filters["next"]]
+
+    stage_counts: dict[str, int] = {}
+    value_by_stage: dict[str, float] = {}
+    for record in all_records:
+        stage = record.get("pipelineStageLabel", "Sin etapa")
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        value_by_stage[stage] = value_by_stage.get(stage, 0.0) + safe_float(record.get("weightedValueUsd"), 0)
+    sellers = [
+        seller for seller in store.get("admin_users", [])
+        if seller.get("role") == "sales" and seller.get("status") != "deleted"
+    ]
+    metrics = {
+        "records": len(all_records),
+        "filtered": len(records),
+        "open": sum(1 for record in all_records if record.get("pipelineStage") not in {"won", "lost", "inactive"}),
+        "won": sum(1 for record in all_records if record.get("pipelineStage") == "won"),
+        "overdue": sum(1 for record in all_records if record.get("nextActionStatus") == "overdue"),
+        "weighted": round(sum(safe_float(record.get("weightedValueUsd"), 0) for record in records), 2),
+    }
+    return {
+        "records": records,
+        "metrics": metrics,
+        "filters": filters,
+        "record_type_options": CRM_RECORD_TYPE_OPTIONS,
+        "pipeline_stage_options": CRM_PIPELINE_STAGE_OPTIONS,
+        "activity_type_options": CRM_ACTIVITY_TYPE_OPTIONS,
+        "crm_status_options": CRM_STATUS_OPTIONS,
+        "seller_options": sorted(sellers, key=lambda item: item.get("name", "")),
+        "client_options": sorted(visible_clients_for_current_user(store), key=lambda item: item.get("businessName", "")),
+        "crm_charts": {
+            "stage": graphify_from_pairs(list(stage_counts.items()), 8),
+            "value": graphify_from_pairs(list(value_by_stage.items()), 8),
+        },
+        "can_create_crm": can_module_action("crm", "create"),
+        "can_edit_crm": can_module_action("crm", "edit"),
+        "can_export_crm": can_module_action("crm", "export"),
+        "can_delete_crm": can_delete_data() and can_module_action("crm", "delete"),
+        "error": error,
+    }
+
+
 def orders_page_context(store: dict, error: str = "") -> dict:
     filters = {
         "q": request.args.get("q", "").strip().lower(),
@@ -7539,6 +7826,7 @@ def audit():
         "collection_update",
         "dispatch_update",
         "quote_convert",
+        "crm_activity",
         "password_change",
         "bulk_import",
     }
@@ -7559,6 +7847,174 @@ def audit():
         entity_options=sorted({event.get("entityType", "") for event in all_events if event.get("entityType")}),
         actor_options=sorted({event.get("actorName", "") for event in all_events if event.get("actorName")}),
     )
+
+
+@app.route("/crm", methods=["GET", "POST"])
+@require_roles(*roles_for_action("crm", "view"))
+def crm():
+    store = load_store()
+    if request.method == "POST":
+        if not can_module_action("crm", "create"):
+            return forbidden_response()
+        record, error = crm_record_payload_from_form(store)
+        if error:
+            return render_template("crm.html", **crm_page_context(store, error)), 400
+        append_crm_activity(record, "note", "Registro CRM creado.")
+        store.setdefault("crm_records", []).append(record)
+        record_audit_event(
+            store,
+            "create",
+            "crm_record",
+            record["id"],
+            f"CRM creado: {record.get('title', '')}.",
+        )
+        save_store(store)
+        return redirect(url_for("crm"))
+    return render_template("crm.html", **crm_page_context(store))
+
+
+@app.get("/crm/export")
+@require_roles(*roles_for_action("crm", "export"))
+def crm_export():
+    store = load_store()
+    context = crm_page_context(store)
+    output = io.StringIO()
+    fieldnames = [
+        "titulo",
+        "tipo",
+        "pipeline",
+        "estado",
+        "cliente",
+        "vendedor",
+        "contacto",
+        "telefono",
+        "email",
+        "origen",
+        "valor_estimado_usd",
+        "probabilidad",
+        "valor_ponderado_usd",
+        "cierre_estimado",
+        "proxima_accion",
+        "ultima_actividad",
+        "actividades",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for record in context["records"]:
+        writer.writerow(
+            {
+                "titulo": record.get("title", ""),
+                "tipo": record.get("recordTypeLabel", ""),
+                "pipeline": record.get("pipelineStageLabel", ""),
+                "estado": record.get("statusLabel", ""),
+                "cliente": record.get("clientName", ""),
+                "vendedor": record.get("sellerName", ""),
+                "contacto": record.get("contactName", ""),
+                "telefono": record.get("phone", ""),
+                "email": record.get("email", ""),
+                "origen": record.get("source", ""),
+                "valor_estimado_usd": record.get("estimatedValueUsd", 0),
+                "probabilidad": record.get("probabilityPercent", 0),
+                "valor_ponderado_usd": record.get("weightedValueUsd", 0),
+                "cierre_estimado": record.get("expectedCloseAt", ""),
+                "proxima_accion": record.get("nextActionAt", ""),
+                "ultima_actividad": record.get("lastActivityAt", ""),
+                "actividades": record.get("activitiesCount", 0),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=crm_comercial_wulkan.csv"},
+    )
+
+
+@app.post("/crm/<record_id>/update")
+@require_roles(*roles_for_action("crm", "edit"))
+def crm_update(record_id: str):
+    store = load_store()
+    record = find_by_id(store.get("crm_records", []), record_id)
+    if not record or not can_access_crm_record(record, store):
+        return redirect(url_for("crm"))
+    before = copy.deepcopy(record)
+    updated, error = crm_record_payload_from_form(store, record)
+    if error:
+        return render_template("crm.html", **crm_page_context(store, error)), 400
+    record.clear()
+    record.update(updated)
+    append_crm_activity(record, "note", request.form.get("changeNote", "").strip() or "Registro CRM actualizado.")
+    record_change_event(
+        store,
+        "update",
+        "crm_record",
+        record_id,
+        f"CRM actualizado: {record.get('title', '')}.",
+        before,
+        record,
+    )
+    save_store(store)
+    return redirect(url_for("crm"))
+
+
+@app.post("/crm/<record_id>/activity")
+@require_roles(*roles_for_action("crm", "edit"))
+def crm_activity_create(record_id: str):
+    store = load_store()
+    record = find_by_id(store.get("crm_records", []), record_id)
+    if not record or not can_access_crm_record(record, store):
+        return redirect(url_for("crm"))
+    before = copy.deepcopy(record)
+    activity_type = request.form.get("activityType", "note")
+    note = request.form.get("activityNote", "").strip()
+    if not note:
+        return render_template("crm.html", **crm_page_context(store, "La actividad requiere comentario.")), 400
+    stage = request.form.get("pipelineStage", record.get("pipelineStage", "new_lead"))
+    status = request.form.get("status", record.get("status", "active"))
+    if stage in dict(CRM_PIPELINE_STAGE_OPTIONS):
+        record["pipelineStage"] = stage
+    if status in dict(CRM_STATUS_OPTIONS):
+        record["status"] = status
+    if record.get("pipelineStage") == "won":
+        record["status"] = "won"
+    elif record.get("pipelineStage") == "lost":
+        record["status"] = "lost"
+    elif record.get("pipelineStage") == "inactive":
+        record["status"] = "inactive"
+    append_crm_activity(record, activity_type, note, request.form.get("nextActionAt", "").strip())
+    record_change_event(
+        store,
+        "crm_activity",
+        "crm_record",
+        record_id,
+        f"Actividad CRM registrada: {crm_activity_type_label(activity_type)}.",
+        before,
+        record,
+    )
+    save_store(store)
+    return redirect(url_for("crm"))
+
+
+@app.post("/crm/<record_id>/delete")
+@require_roles(*DELETE_ROLES)
+def crm_delete(record_id: str):
+    store = load_store()
+    record = find_by_id(store.get("crm_records", []), record_id)
+    if not record or not can_module_action("crm", "delete"):
+        return redirect(url_for("crm"))
+    before = copy.deepcopy(record)
+    record["status"] = "deleted"
+    record["updatedAt"] = utc_now()
+    record_change_event(
+        store,
+        "delete",
+        "crm_record",
+        record_id,
+        f"CRM eliminado logicamente: {record.get('title', '')}.",
+        before,
+        record,
+    )
+    save_store(store)
+    return redirect(url_for("crm"))
 
 
 @app.get("/quotes")

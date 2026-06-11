@@ -1,0 +1,456 @@
+{% extends "base.html" %}
+{% set heading = "CRM Comercial" %}
+{% set description = "Gestiona leads, prospectos, oportunidades, tareas, visitas y seguimiento comercial." %}
+
+{% macro crm_graph(title, chart, empty_text) -%}
+<article class="panel order-chart h-100">
+  <div class="panel-header">
+    <h2>{{ title }}</h2>
+    <span>Graphify</span>
+  </div>
+  {% if chart.values %}
+  <div class="graphify-bars" data-labels='{{ chart["labels"] | tojson }}' data-values='{{ chart["values"] | tojson }}'></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-kanban"></i></div>
+    <strong>Sin datos</strong>
+    <span>{{ empty_text }}</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
+
+{% macro crm_fields(record=none) -%}
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <label class="form-label fw-semibold">Titulo comercial</label>
+    <input class="form-control" name="title" value="{{ record.title if record else '' }}" placeholder="Ej: Reposicion motosierra zona Valencia" required>
+  </div>
+  <div class="col-6 col-lg-3">
+    <label class="form-label fw-semibold">Tipo</label>
+    <select class="form-select" name="recordType">
+      {% for value, label in record_type_options %}
+      <option value="{{ value }}" {% if record and record.recordType == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-lg-3">
+    <label class="form-label fw-semibold">Pipeline</label>
+    <select class="form-select" name="pipelineStage">
+      {% for value, label in pipeline_stage_options %}
+      <option value="{{ value }}" {% if record and record.pipelineStage == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-12 col-lg-4">
+    <label class="form-label fw-semibold">Cliente vinculado</label>
+    <select class="form-select" name="clientId">
+      <option value="">Lead sin cliente creado</option>
+      {% for client in client_options %}
+      <option value="{{ client.id }}" {% if record and record.clientId == client.id %}selected{% endif %}>{{ client.businessName }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-12 col-lg-4">
+    <label class="form-label fw-semibold">Vendedor responsable</label>
+    <select class="form-select" name="sellerId">
+      <option value="">Sin vendedor</option>
+      {% for seller in seller_options %}
+      <option value="{{ seller.id }}" {% if record and record.sellerId == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-12 col-lg-4">
+    <label class="form-label fw-semibold">Estado</label>
+    <select class="form-select" name="status">
+      {% for value, label in crm_status_options %}
+      <option value="{{ value }}" {% if record and record.status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-12 col-lg-4">
+    <label class="form-label fw-semibold">Contacto</label>
+    <input class="form-control" name="contactName" value="{{ record.contactName if record else '' }}" placeholder="Nombre del contacto">
+  </div>
+  <div class="col-6 col-lg-2">
+    <label class="form-label fw-semibold">Telefono</label>
+    <input class="form-control" name="phone" value="{{ record.phone if record else '' }}">
+  </div>
+  <div class="col-6 col-lg-3">
+    <label class="form-label fw-semibold">Email</label>
+    <input class="form-control" name="email" value="{{ record.email if record else '' }}">
+  </div>
+  <div class="col-6 col-lg-3">
+    <label class="form-label fw-semibold">Origen</label>
+    <input class="form-control" name="source" value="{{ record.source if record else '' }}" placeholder="WhatsApp, visita, feria, referido">
+  </div>
+  <div class="col-6 col-lg-2">
+    <label class="form-label fw-semibold">Valor USD</label>
+    <input class="form-control" name="estimatedValueUsd" inputmode="decimal" value="{{ record.estimatedValueUsd if record else '' }}">
+  </div>
+  <div class="col-6 col-lg-2">
+    <label class="form-label fw-semibold">Prob. %</label>
+    <input class="form-control" name="probabilityPercent" inputmode="numeric" value="{{ record.probabilityPercent if record else '' }}">
+  </div>
+  <div class="col-6 col-lg-3">
+    <label class="form-label fw-semibold">Cierre estimado</label>
+    <input class="form-control" type="date" name="expectedCloseAt" value="{{ record.expectedCloseAt if record else '' }}">
+  </div>
+  <div class="col-6 col-lg-3">
+    <label class="form-label fw-semibold">Proxima accion</label>
+    <input class="form-control" type="date" name="nextActionAt" value="{{ record.nextActionAt if record else '' }}">
+  </div>
+  <div class="col-6 col-lg-2">
+    <label class="form-label fw-semibold">Estado/ciudad</label>
+    <input class="form-control" name="state" value="{{ record.state if record else '' }}" placeholder="Estado">
+  </div>
+  <div class="col-6 col-lg-2">
+    <label class="form-label fw-semibold">&nbsp;</label>
+    <input class="form-control" name="city" value="{{ record.city if record else '' }}" placeholder="Ciudad">
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Descripcion</label>
+    <textarea class="form-control" name="description" rows="3" placeholder="Necesidad, productos de interes, contexto y proximo paso">{{ record.description if record else '' }}</textarea>
+  </div>
+  {% if record %}
+  <div class="col-12">
+    <label class="form-label fw-semibold">Nota del cambio</label>
+    <textarea class="form-control" name="changeNote" rows="2" placeholder="Motivo o resultado de la actualizacion"></textarea>
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% block top_action %}
+<div class="d-flex flex-wrap gap-2">
+  {% if can_export_crm %}
+  <a class="btn btn-light" href="{{ url_for('crm_export', **request.args.to_dict()) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+  {% endif %}
+  {% if can_create_crm %}
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCrmModal">
+    <i class="bi bi-plus-lg"></i> Nuevo seguimiento
+  </button>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<section class="row g-3 mb-3">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-kanban"></i></div>
+      <span>Registros</span>
+      <strong>{{ metrics.records }}</strong>
+      <em>{{ metrics.filtered }} vista</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-lightning-charge"></i></div>
+      <span>Abiertos</span>
+      <strong>{{ metrics.open }}</strong>
+      <em>Pipeline</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Ganados</span>
+      <strong>{{ metrics.won }}</strong>
+      <em>Cierre</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-alarm"></i></div>
+      <span>Atrasados</span>
+      <strong>{{ metrics.overdue }}</strong>
+      <em>Seguimiento</em>
+    </article>
+  </div>
+  <div class="col-12 col-lg-8 col-xl-4">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+      <span>Valor ponderado</span>
+      <strong>{{ money_usd(metrics.weighted) }}</strong>
+      <em>Probabilidad</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel product-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-3">
+      <label class="form-label">Buscar</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Lead, cliente, vendedor, contacto">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Pipeline</label>
+      <select class="form-select" name="stage">
+        <option value="">Todos</option>
+        {% for value, label in pipeline_stage_options %}
+        <option value="{{ value }}" {% if filters.stage == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Tipo</label>
+      <select class="form-select" name="type">
+        <option value="">Todos</option>
+        {% for value, label in record_type_options %}
+        <option value="{{ value }}" {% if filters.type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in seller_options %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-1">
+      <label class="form-label">Proxima</label>
+      <select class="form-select" name="next">
+        <option value="">Todas</option>
+        <option value="overdue" {% if filters.next == 'overdue' %}selected{% endif %}>Atrasada</option>
+        <option value="due_soon" {% if filters.next == 'due_soon' %}selected{% endif %}>Hoy</option>
+        <option value="current" {% if filters.next == 'current' %}selected{% endif %}>Vigente</option>
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-6">{{ crm_graph("Pipeline por etapa", crm_charts.stage, "Los leads apareceran al crear seguimiento.") }}</div>
+  <div class="col-12 col-xl-6">{{ crm_graph("Valor ponderado por etapa", crm_charts.value, "El valor se pondera por probabilidad.") }}</div>
+</section>
+
+<section class="panel order-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Pipeline comercial</h2>
+      <span>Leads, oportunidades, tareas y visitas con trazabilidad de actividades.</span>
+    </div>
+    <span>{{ records | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle order-table">
+      <thead>
+        <tr>
+          <th>Registro</th>
+          <th>Cliente / contacto</th>
+          <th>Vendedor</th>
+          <th>Pipeline</th>
+          <th>Valor</th>
+          <th>Seguimiento</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in records %}
+        <tr>
+          <td>
+            <strong class="d-block">{{ record.title }}</strong>
+            <span class="badge {{ record.recordType | badge_class }}">{{ record.recordTypeLabel }}</span>
+            <small class="d-block text-secondary">{{ record.source or 'Sin origen' }}</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ record.clientName }}</strong>
+            <small class="text-secondary">{{ record.contactName or 'Sin contacto' }}</small>
+            <small class="d-block text-secondary">{{ record.phone or record.email or 'Sin datos' }}</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ record.sellerName }}</strong>
+            <small class="text-secondary">{{ record.city or record.state or 'Sin zona' }}</small>
+          </td>
+          <td>
+            <span class="badge {{ record.pipelineStage | badge_class }}">{{ record.pipelineStageLabel }}</span>
+            <small class="d-block text-secondary">{{ record.statusLabel }}</small>
+          </td>
+          <td>
+            <strong>{{ money_usd(record.estimatedValueUsd) }}</strong>
+            <small class="d-block text-secondary">{{ record.probabilityPercent }}% - {{ money_usd(record.weightedValueUsd) }}</small>
+          </td>
+          <td>
+            <span class="badge {{ record.nextActionStatus | badge_class }}">{{ record.nextActionAt or 'Sin proxima' }}</span>
+            <small class="d-block text-secondary">{{ record.activitiesCount }} actividades</small>
+          </td>
+          <td class="text-end">
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#crmDetail{{ loop.index }}"><i class="bi bi-eye"></i> Detalle</button>
+              {% if can_edit_crm %}
+              <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#crmEdit{{ loop.index }}"><i class="bi bi-pencil"></i> Editar</button>
+              <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#crmActivity{{ loop.index }}"><i class="bi bi-chat-dots"></i> Actividad</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-kanban"></i></div>
+              <strong>Sin actividad CRM</strong>
+              <span>Crea leads, oportunidades o tareas para alimentar el pipeline comercial.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if can_create_crm %}
+<div class="modal fade" id="newCrmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <form class="modal-content" method="post" action="{{ url_for('crm') }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <h5 class="modal-title">Nuevo seguimiento CRM</h5>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">{{ crm_fields() }}</div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Crear registro</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% for record in records %}
+<div class="modal fade" id="crmDetail{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title">{{ record.title }}</h5>
+          <small class="text-secondary">{{ record.pipelineStageLabel }} - {{ record.sellerName }}</small>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-lg-5">
+            <div class="list-group">
+              <div class="list-group-item"><strong>Cliente:</strong> {{ record.clientName }}</div>
+              <div class="list-group-item"><strong>Contacto:</strong> {{ record.contactName or 'Sin contacto' }}</div>
+              <div class="list-group-item"><strong>Telefono:</strong> {{ record.phone or 'Sin telefono' }}</div>
+              <div class="list-group-item"><strong>Email:</strong> {{ record.email or 'Sin email' }}</div>
+              <div class="list-group-item"><strong>Valor ponderado:</strong> {{ money_usd(record.weightedValueUsd) }}</div>
+            </div>
+            {% if record.description %}
+            <div class="alert alert-light border mt-3">{{ record.description }}</div>
+            {% endif %}
+          </div>
+          <div class="col-12 col-lg-7">
+            <h6 class="fw-bold">Actividades recientes</h6>
+            <div class="d-flex flex-column gap-2">
+              {% for activity in record.activities[:8] %}
+              <div class="border rounded-3 p-3">
+                <strong>{{ activity.typeLabel }}</strong>
+                <small class="text-secondary"> - {{ activity.createdAt }} - {{ activity.createdByName }}</small>
+                <p class="mb-0 text-secondary">{{ activity.note }}</p>
+                {% if activity.nextActionAt %}<small>Proxima accion: {{ activity.nextActionAt }}</small>{% endif %}
+              </div>
+              {% else %}
+              <span class="text-secondary">Sin actividades registradas.</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if can_edit_crm %}
+<div class="modal fade" id="crmEdit{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <form class="modal-content" method="post" action="{{ url_for('crm_update', record_id=record.id) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <h5 class="modal-title">Editar CRM</h5>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">{{ crm_fields(record) }}</div>
+      <div class="modal-footer">
+        {% if can_delete_crm %}
+        <button class="btn btn-outline-danger me-auto" form="deleteCrm{{ loop.index }}" type="submit"><i class="bi bi-trash"></i> Eliminar</button>
+        {% endif %}
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+    {% if can_delete_crm %}
+    <form id="deleteCrm{{ loop.index }}" method="post" action="{{ url_for('crm_delete', record_id=record.id) }}">{{ csrf_field() }}</form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="crmActivity{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="{{ url_for('crm_activity_create', record_id=record.id) }}">
+      {{ csrf_field() }}
+      <div class="modal-header">
+        <h5 class="modal-title">Registrar actividad</h5>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-semibold">Tipo de actividad</label>
+        <select class="form-select mb-3" name="activityType">
+          {% for value, label in activity_type_options %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label fw-semibold">Mover pipeline</label>
+        <select class="form-select mb-3" name="pipelineStage">
+          {% for value, label in pipeline_stage_options %}
+          <option value="{{ value }}" {% if record.pipelineStage == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label fw-semibold">Estado</label>
+        <select class="form-select mb-3" name="status">
+          {% for value, label in crm_status_options %}
+          <option value="{{ value }}" {% if record.status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label fw-semibold">Comentario</label>
+        <textarea class="form-control mb-3" name="activityNote" rows="4" required></textarea>
+        <label class="form-label fw-semibold">Proxima accion</label>
+        <input class="form-control" type="date" name="nextActionAt" value="{{ record.nextActionAt }}">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-success" type="submit">Guardar actividad</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}

@@ -190,6 +190,30 @@ class Quote(TimestampMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class CrmRecord(TimestampMixin, Base):
+    __tablename__ = "crm_records"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    record_type: Mapped[str] = mapped_column(String(50), default="lead", nullable=False)
+    pipeline_stage: Mapped[str] = mapped_column(String(50), default="new_lead", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    client_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    seller_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    contact_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    phone: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    email: Mapped[str] = mapped_column(String(180), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    estimated_value_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    probability_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expected_close_at: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    next_action_at: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    last_activity_at: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    activities: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class CreditMovement(Base):
     __tablename__ = "credit_movements"
 
