@@ -301,19 +301,34 @@ class ApiMobileRepository implements MobileRepository {
 
   @override
   Future<MobileProductPage> listProductPage(MobileProductQuery query) async {
-    final items = await _getItems("/products");
+    final payload = await _getPayload(
+      "/products",
+      queryParameters: _productQueryParameters(query),
+    );
+    final items = _itemsFromPayload(payload);
     final products = items
         .map((item) => mapApiProduct(_asString(item["id"]), item))
-        .where((product) => _matchesQuery(product, query))
         .toList();
+    final pagination = _paginationFromPayload(payload);
+    if (pagination != null) {
+      final nextCursor = _asString(pagination["nextCursor"]);
+      return MobileProductPage(
+        products: products,
+        hasMore: pagination["hasMore"] == true,
+        nextCursor: nextCursor.isEmpty ? null : nextCursor,
+      );
+    }
+
+    final filteredProducts =
+        products.where((product) => _matchesQuery(product, query)).toList();
     final start = int.tryParse(query.cursor ?? "") ?? 0;
     final limit = query.limit.clamp(1, 100).toInt();
-    final end = (start + limit).clamp(0, products.length).toInt();
+    final end = (start + limit).clamp(0, filteredProducts.length).toInt();
 
     return MobileProductPage(
-      products: products.sublist(start, end),
-      hasMore: end < products.length,
-      nextCursor: end < products.length ? end.toString() : null,
+      products: filteredProducts.sublist(start, end),
+      hasMore: end < filteredProducts.length,
+      nextCursor: end < filteredProducts.length ? end.toString() : null,
     );
   }
 
@@ -520,6 +535,10 @@ class ApiMobileRepository implements MobileRepository {
     Map<String, String>? queryParameters,
   }) async {
     final payload = await _getPayload(path, queryParameters: queryParameters);
+    return _itemsFromPayload(payload);
+  }
+
+  List<Map<String, dynamic>> _itemsFromPayload(Map<String, dynamic> payload) {
     final items = payload["items"];
 
     if (items is! List) {
@@ -530,6 +549,40 @@ class ApiMobileRepository implements MobileRepository {
       for (final item in items)
         if (item is Map<String, dynamic>) item,
     ];
+  }
+
+  Map<String, dynamic>? _paginationFromPayload(Map<String, dynamic> payload) {
+    final meta = payload["meta"];
+    if (meta is! Map<String, dynamic>) {
+      return null;
+    }
+    final pagination = meta["pagination"];
+    return pagination is Map<String, dynamic> ? pagination : null;
+  }
+
+  Map<String, String> _productQueryParameters(MobileProductQuery query) {
+    final parameters = <String, String>{
+      "limit": query.limit.clamp(1, 100).toString(),
+    };
+    if (query.cursor != null && query.cursor!.isNotEmpty) {
+      parameters["cursor"] = query.cursor!;
+    }
+    if (query.text.trim().isNotEmpty) {
+      parameters["q"] = query.text.trim();
+    }
+    if (query.verticalName != null && query.verticalName!.trim().isNotEmpty) {
+      parameters["verticalName"] = query.verticalName!.trim();
+    }
+    if (query.categoryId != null && query.categoryId!.trim().isNotEmpty) {
+      parameters["categoryId"] = query.categoryId!.trim();
+    }
+    if (query.onlyAvailable) {
+      parameters["onlyAvailable"] = "1";
+    }
+    if (query.onlyNeedsValidation) {
+      parameters["onlyNeedsValidation"] = "1";
+    }
+    return parameters;
   }
 }
 

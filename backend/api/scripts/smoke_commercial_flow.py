@@ -261,6 +261,16 @@ def main() -> int:
     client_id = new_client["client"]["id"]
     assert new_client["client"]["assignedSeller"]["id"] == "admin-seller-flow"
     assert new_client["client"]["creditRequestStatus"] == "pending"
+    seller_clients_paged = assert_status(
+        client.get(
+            "/api/v1/mobile/seller/clients?limit=1&q=Flow",
+            headers={"Authorization": f"Bearer {seller_token}"},
+        ),
+        200,
+        "clientes vendedor paginados v1",
+    )
+    assert seller_clients_paged["meta"]["pagination"]["limit"] == 1
+    assert seller_clients_paged["items"][0]["id"] == client_id
     mobile_quote = assert_status(
         client.post(
             "/api/v1/mobile/seller/quotes",
@@ -292,6 +302,15 @@ def main() -> int:
         "listar cotizaciones vendedor v1",
     )
     assert seller_quotes["items"]
+    seller_quotes_paged = assert_status(
+        client.get(
+            "/api/mobile/seller/quotes?limit=1&status=draft",
+            headers={"Authorization": f"Bearer {seller_token}"},
+        ),
+        200,
+        "cotizaciones vendedor legacy paginadas",
+    )
+    assert seller_quotes_paged["meta"]["pagination"]["limit"] == 1
     mobile_activity = assert_status(
         client.post(
             "/api/v1/mobile/seller/activities",
@@ -316,6 +335,15 @@ def main() -> int:
         "listar actividades vendedor v1",
     )
     assert seller_activities["items"]
+    seller_activities_paged = assert_status(
+        client.get(
+            "/api/mobile/seller/activities?limit=1&q=Flow",
+            headers={"Authorization": f"Bearer {seller_token}"},
+        ),
+        200,
+        "actividades vendedor legacy paginadas",
+    )
+    assert seller_activities_paged["meta"]["pagination"]["limit"] == 1
     seller_logout_v1 = assert_status(
         client.post(
             "/api/v1/mobile/auth/logout",
@@ -407,6 +435,16 @@ def main() -> int:
         "detalle producto v1",
     )
     assert product_detail_v1["product"]["sku"] == "WUL-FLOW-45CC"
+    products_paged_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/products?limit=1&q=WUL-FLOW&sort=price_desc",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "catalogo paginado v1",
+    )
+    assert products_paged_v1["meta"]["pagination"]["limit"] == 1
+    assert products_paged_v1["items"][0]["sku"] == "WUL-FLOW-45CC"
     cart_v1 = assert_status(
         client.get(
             "/api/v1/mobile/cart",
@@ -457,6 +495,16 @@ def main() -> int:
         "ordenes ferretero v1",
     )
     assert orders_v1["items"]
+    orders_filtered_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/orders?limit=1&saleType=credit_line&sort=balance_desc",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "ordenes ferretero filtradas v1",
+    )
+    assert orders_filtered_v1["meta"]["filters"]["saleType"] == "credit_line"
+    assert orders_filtered_v1["items"][0]["saleType"] == "credit_line"
 
     cash_order_response = assert_status(
         client.post(

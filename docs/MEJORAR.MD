@@ -25,7 +25,7 @@
 - [x] Fase 1.19 - Importaciones Masivas: plantillas oficiales, preview antes de guardar, confirmacion/descartar, deteccion de creados/actualizados/omitidos, errores y advertencias por fila, historial reciente y descarga CSV de incidencias por carga.
 - [x] Fase 1.20 - Documentos: repositorio documental por cliente, producto, orden o administracion; RIF, contratos, credito, estados de cuenta, fichas, manuales, garantias, certificados, cotizaciones, comprobantes, guias, evidencias y facturas; carga manual, importacion Excel/CSV con preview, export CSV, visibilidad por rol/app, vencimiento, Graphify y auditoria before/after.
 - [x] Fase 2 - App Movil Cliente y Vendedor: login por rol, clave temporal obligatoria, sesion validada con backend, catalogo real, galeria/carrusel de productos, carrito persistente, checkout ferretero/vendedor, ordenes, credito, cartera, comisiones, servicios tecnicos y bloqueo de pantallas/datos demo.
-- [ ] Fase 3 - Backend API versionada y endpoints faltantes.
+- [x] Fase 3 - Backend API versionada y endpoints faltantes.
 - [ ] Fase 4 - Seguridad avanzada.
 - [x] Fase 5 - UI/UX Admin Panel.
 - [ ] Fase 6 - UI/UX App Movil.
@@ -1431,14 +1431,14 @@ El backend debe conectar Admin Panel y App Móvil.
 * [x] Validación por rol en endpoints moviles de vendedor, gerente comercial y ferretero.
 * [x] Validación de permisos/cartera para clientes, ordenes, cotizaciones y actividades creadas desde vendedor movil.
 * [x] Respuestas JSON consistentes con `items`, objetos de dominio y `meta` de version en endpoints v1.
-* Manejo de errores.
-* Logs.
-* Paginación.
-* Filtros.
-* Ordenamiento.
-* Protección de endpoints sensibles.
-* Validación de archivos.
-* Manejo seguro de imágenes/PDFs.
+* [x] Manejo de errores.
+* [x] Logs.
+* [x] Paginación.
+* [x] Filtros.
+* [x] Ordenamiento.
+* [x] Protección de endpoints sensibles.
+* [x] Validación de archivos.
+* [x] Manejo seguro de imágenes/PDFs.
 
 ## Endpoints mínimos
 
@@ -1468,19 +1468,19 @@ El backend debe conectar Admin Panel y App Móvil.
 
 ### Admin
 
-* CRUD clientes.
-* CRUD productos.
-* CRUD categorías.
-* CRUD vendedores.
-* CRUD órdenes.
-* CRUD cotizaciones.
-* CRUD crédito.
-* CRUD cobranza.
-* CRUD despacho.
-* CRUD comisiones.
-* Reportes.
-* Auditoría.
-* Configuración.
+* [x] CRUD clientes.
+* [x] CRUD productos.
+* [x] CRUD categorías.
+* [x] CRUD vendedores.
+* [x] CRUD órdenes.
+* [x] CRUD cotizaciones.
+* [x] CRUD crédito.
+* [x] CRUD cobranza.
+* [x] CRUD despacho.
+* [x] CRUD comisiones.
+* [x] Reportes.
+* [x] Auditoría.
+* [x] Configuración.
 
 ---
 

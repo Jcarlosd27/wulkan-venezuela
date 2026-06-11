@@ -16,7 +16,7 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import Markup
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import get_config
@@ -85,6 +85,23 @@ def add_security_headers(response):
     if app.config.get("ENV") == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
+
+
+@app.errorhandler(HTTPException)
+def handle_api_http_exception(exc: HTTPException):
+    if not request.path.startswith("/api/"):
+        return exc
+    app.logger.warning("API HTTP error %s on %s", exc.code, request.path)
+    code = str(exc.name or "http_error").lower().replace(" ", "_")
+    return jsonify({"meta": mobile_api_meta(), "error": exc.description, "code": code}), exc.code
+
+
+@app.errorhandler(Exception)
+def handle_api_unexpected_exception(exc: Exception):
+    if not request.path.startswith("/api/"):
+        raise exc
+    app.logger.exception("Unexpected API error on %s", request.path)
+    return jsonify({"meta": mobile_api_meta(), "error": "Error interno del servidor.", "code": "internal_server_error"}), 500
 
 ORDER_STATUS_OPTIONS = [
     ("credit_review", "En revision"),
@@ -2749,6 +2766,413 @@ def mobile_api_meta() -> dict:
         "versionedPrefix": "/api/v1/mobile",
         "service": "wulkan-mobile-api",
     }
+
+
+def mobile_api_response(
+    *,
+    items: list[dict] | None = None,
+    key: str | None = None,
+    value=None,
+    pagination: dict | None = None,
+    filters: dict | None = None,
+    sort: str | None = None,
+    status: int = 200,
+    **extra,
+):
+    payload: dict = {"meta": mobile_api_meta()}
+    if pagination is not None:
+        payload["meta"]["pagination"] = pagination
+    if filters is not None:
+        payload["meta"]["filters"] = filters
+    if sort:
+        payload["meta"]["sort"] = sort
+    if items is not None:
+        payload["items"] = items
+    if key:
+        payload[key] = value
+    payload.update(extra)
+    return jsonify(payload), status
+
+
+def mobile_api_error(message: str, status: int = 400, code: str = "bad_request"):
+    return jsonify({"meta": mobile_api_meta(), "error": message, "code": code}), status
+
+
+def api_bool_arg(name: str) -> bool:
+    return str(request.args.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def api_list_pagination(items: list[dict], default_limit: int = 0) -> tuple[list[dict], dict]:
+    total = len(items)
+    requested_limit = safe_int(request.args.get("limit"), default_limit)
+    if requested_limit <= 0:
+        return items, {
+            "total": total,
+            "limit": total,
+            "offset": 0,
+            "page": 1,
+            "hasMore": False,
+            "nextCursor": None,
+        }
+
+    limit = max(1, min(requested_limit, 100))
+    if request.args.get("cursor"):
+        offset = max(0, safe_int(request.args.get("cursor"), 0))
+    else:
+        page = max(1, safe_int(request.args.get("page"), 1))
+        offset = (page - 1) * limit
+    page = (offset // limit) + 1
+    end = min(offset + limit, total)
+    return items[offset:end], {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "page": page,
+        "hasMore": end < total,
+        "nextCursor": str(end) if end < total else None,
+    }
+
+
+def normalize_search_text(*values) -> str:
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def filter_mobile_products(products: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", request.args.get("text", "")).strip().lower(),
+        "category": request.args.get("category", request.args.get("categoryId", "")).strip(),
+        "vertical": request.args.get("vertical", request.args.get("verticalName", "")).strip().lower(),
+        "brand": request.args.get("brand", "").strip().lower(),
+        "stockStatus": request.args.get("stockStatus", "").strip(),
+        "onlyAvailable": api_bool_arg("onlyAvailable") or api_bool_arg("available"),
+        "onlyDiscount": api_bool_arg("onlyDiscount") or api_bool_arg("discount"),
+        "onlyNeedsValidation": api_bool_arg("onlyNeedsValidation") or api_bool_arg("validation"),
+        "minPriceUsd": request.args.get("minPriceUsd", "").strip(),
+        "maxPriceUsd": request.args.get("maxPriceUsd", "").strip(),
+    }
+    min_price = safe_float(filters["minPriceUsd"], -1)
+    max_price = safe_float(filters["maxPriceUsd"], -1)
+
+    def matches(product: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            product.get("name"),
+            product.get("sku"),
+            product.get("description"),
+            product.get("categoryName"),
+            product.get("brand"),
+            product.get("model"),
+        ):
+            return False
+        if filters["category"] and filters["category"] not in {
+            product.get("categoryId", ""),
+            product.get("categoryName", ""),
+            product.get("verticalName", ""),
+        }:
+            return False
+        if filters["vertical"] and filters["vertical"] not in normalize_search_text(
+            product.get("verticalName"),
+            product.get("categoryName"),
+            product.get("productType"),
+        ):
+            return False
+        if filters["brand"] and filters["brand"] not in str(product.get("brand", "")).lower():
+            return False
+        if filters["stockStatus"] and product.get("stockStatus") != filters["stockStatus"]:
+            return False
+        if filters["onlyAvailable"] and (safe_int(product.get("availableStock"), 0) <= 0 or product.get("requiresQuote")):
+            return False
+        if filters["onlyDiscount"] and not product.get("onSale"):
+            return False
+        if filters["onlyNeedsValidation"] and not (product.get("requiresQuote") or product.get("requiresTechnicalValidation")):
+            return False
+        price = safe_float(product.get("b2bPriceUsd") or product.get("publicPriceUsd"), 0)
+        if min_price >= 0 and price < min_price:
+            return False
+        if max_price >= 0 and price > max_price:
+            return False
+        return True
+
+    return [product for product in products if matches(product)], filters
+
+
+def sort_mobile_products(products: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "newest").strip() or "newest"
+    sorters = {
+        "name_asc": (lambda item: str(item.get("name", "")).lower(), False),
+        "price_asc": (lambda item: safe_float(item.get("b2bPriceUsd") or item.get("publicPriceUsd"), 0), False),
+        "price_desc": (lambda item: safe_float(item.get("b2bPriceUsd") or item.get("publicPriceUsd"), 0), True),
+        "stock_desc": (lambda item: safe_int(item.get("availableStock"), 0), True),
+        "discount_desc": (lambda item: safe_float(item.get("discountPercent"), 0), True),
+        "newest": (lambda item: str(item.get("createdAt", item.get("id", ""))), True),
+    }
+    key, reverse = sorters.get(sort, sorters["newest"])
+    return sorted(products, key=key, reverse=reverse), sort if sort in sorters else "newest"
+
+
+def filter_mobile_orders(orders: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "saleType": request.args.get("saleType", "").strip(),
+        "paymentStatus": request.args.get("paymentStatus", "").strip(),
+        "stockStatus": request.args.get("stockStatus", "").strip(),
+        "due": request.args.get("due", "").strip(),
+    }
+
+    def matches(order: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            order.get("orderId"),
+            order.get("id"),
+            order.get("customerName"),
+            order.get("sellerName"),
+            order.get("saleTypeLabel"),
+        ):
+            return False
+        for key in ("status", "saleType", "paymentStatus", "stockStatus"):
+            if filters[key] and order.get(key) != filters[key]:
+                return False
+        if filters["due"] and order.get("dueStatus") != filters["due"]:
+            return False
+        return True
+
+    return [order for order in orders if matches(order)], filters
+
+
+def sort_mobile_orders(orders: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "created_desc").strip() or "created_desc"
+    sorters = {
+        "created_desc": (lambda item: str(item.get("createdAt", "")), True),
+        "created_asc": (lambda item: str(item.get("createdAt", "")), False),
+        "total_desc": (lambda item: safe_float(item.get("totalUsd"), 0), True),
+        "balance_desc": (lambda item: safe_float(item.get("balanceUsd"), 0), True),
+        "due_asc": (lambda item: str(item.get("dueDate") or "9999-12-31"), False),
+    }
+    key, reverse = sorters.get(sort, sorters["created_desc"])
+    return sorted(orders, key=key, reverse=reverse), sort if sort in sorters else "created_desc"
+
+
+def filter_mobile_clients(clients: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "creditStatus": request.args.get("creditStatus", "").strip(),
+        "creditRequestStatus": request.args.get("creditRequestStatus", "").strip(),
+        "zone": request.args.get("zone", "").strip().lower(),
+    }
+
+    def matches(client: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            client.get("businessName"),
+            client.get("email"),
+            client.get("phone"),
+            client.get("taxId"),
+            client.get("city"),
+            client.get("state"),
+        ):
+            return False
+        if filters["status"] and client.get("status") != filters["status"]:
+            return False
+        if filters["creditStatus"] and client.get("creditStatus") != filters["creditStatus"]:
+            return False
+        if filters["creditRequestStatus"] and client.get("creditRequestStatus") != filters["creditRequestStatus"]:
+            return False
+        if filters["zone"] and filters["zone"] not in normalize_search_text(client.get("deliveryZone"), client.get("city"), client.get("state")):
+            return False
+        return True
+
+    return [client for client in clients if matches(client)], filters
+
+
+def sort_mobile_clients(clients: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "name_asc").strip() or "name_asc"
+    sorters = {
+        "name_asc": (lambda item: str(item.get("businessName", "")).lower(), False),
+        "credit_desc": (lambda item: safe_float(item.get("creditLimitUsd"), 0), True),
+        "available_desc": (lambda item: safe_float(item.get("creditAvailableUsd"), 0), True),
+        "recent": (lambda item: str(item.get("updatedAt", item.get("id", ""))), True),
+    }
+    key, reverse = sorters.get(sort, sorters["name_asc"])
+    return sorted(clients, key=key, reverse=reverse), sort if sort in sorters else "name_asc"
+
+
+def filter_mobile_categories(categories: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "parentId": request.args.get("parentId", "").strip(),
+    }
+
+    def matches(category: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            category.get("name"),
+            category.get("slug"),
+            category.get("description"),
+        ):
+            return False
+        if filters["parentId"] and category.get("parentId", "") != filters["parentId"]:
+            return False
+        return True
+
+    return [category for category in categories if matches(category)], filters
+
+
+def sort_mobile_categories(categories: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "order_asc").strip() or "order_asc"
+    sorters = {
+        "order_asc": (lambda item: (safe_int(item.get("sortOrder"), 0), str(item.get("name", "")).lower()), False),
+        "name_asc": (lambda item: str(item.get("name", "")).lower(), False),
+        "name_desc": (lambda item: str(item.get("name", "")).lower(), True),
+    }
+    key, reverse = sorters.get(sort, sorters["order_asc"])
+    return sorted(categories, key=key, reverse=reverse), sort if sort in sorters else "order_asc"
+
+
+def filter_mobile_announcements(items: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "placement": request.args.get("placement", "").strip(),
+    }
+
+    def matches(item: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            item.get("title"),
+            item.get("body"),
+            item.get("message"),
+            item.get("placement"),
+        ):
+            return False
+        return True
+
+    return [item for item in items if matches(item)], filters
+
+
+def sort_mobile_announcements(items: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "priority_desc").strip() or "priority_desc"
+    sorters = {
+        "priority_desc": (lambda item: safe_int(item.get("priority"), 0), True),
+        "updated_desc": (lambda item: str(item.get("updatedAt", item.get("createdAt", ""))), True),
+        "title_asc": (lambda item: str(item.get("title", "")).lower(), False),
+    }
+    key, reverse = sorters.get(sort, sorters["priority_desc"])
+    return sorted(items, key=key, reverse=reverse), sort if sort in sorters else "priority_desc"
+
+
+def filter_mobile_directory_items(items: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "state": request.args.get("state", "").strip().lower(),
+        "city": request.args.get("city", "").strip().lower(),
+        "specialty": request.args.get("specialty", "").strip().lower(),
+    }
+
+    def matches(item: dict) -> bool:
+        specialties = " ".join(str(value) for value in item.get("specialties", []) or [])
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            item.get("name"),
+            item.get("companyName"),
+            item.get("contactName"),
+            item.get("subtitle"),
+            item.get("state"),
+            item.get("city"),
+            item.get("coverage"),
+            specialties,
+        ):
+            return False
+        if filters["state"] and filters["state"] not in normalize_search_text(item.get("state")):
+            return False
+        if filters["city"] and filters["city"] not in normalize_search_text(item.get("city")):
+            return False
+        if filters["specialty"] and filters["specialty"] not in specialties.lower():
+            return False
+        return True
+
+    return [item for item in items if matches(item)], filters
+
+
+def sort_mobile_directory_items(items: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "name_asc").strip() or "name_asc"
+    sorters = {
+        "name_asc": (lambda item: str(item.get("name", "")).lower(), False),
+        "city_asc": (lambda item: (str(item.get("city", "")).lower(), str(item.get("name", "")).lower()), False),
+    }
+    key, reverse = sorters.get(sort, sorters["name_asc"])
+    return sorted(items, key=key, reverse=reverse), sort if sort in sorters else "name_asc"
+
+
+def filter_mobile_quotes(quotes: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "saleType": request.args.get("saleType", "").strip(),
+    }
+
+    def matches(quote: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            quote.get("quoteNumber"),
+            quote.get("clientName"),
+            quote.get("sellerName"),
+            quote.get("statusLabel"),
+        ):
+            return False
+        if filters["status"] and quote.get("status") != filters["status"]:
+            return False
+        if filters["saleType"] and quote.get("saleType") != filters["saleType"]:
+            return False
+        return True
+
+    return [quote for quote in quotes if matches(quote)], filters
+
+
+def sort_mobile_quotes(quotes: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "updated_desc").strip() or "updated_desc"
+    sorters = {
+        "updated_desc": (lambda item: str(item.get("updatedAt", item.get("createdAt", ""))), True),
+        "created_desc": (lambda item: str(item.get("createdAt", "")), True),
+        "total_desc": (lambda item: safe_float(item.get("totalUsd"), 0), True),
+        "client_asc": (lambda item: str(item.get("clientName", "")).lower(), False),
+    }
+    key, reverse = sorters.get(sort, sorters["updated_desc"])
+    return sorted(quotes, key=key, reverse=reverse), sort if sort in sorters else "updated_desc"
+
+
+def filter_mobile_crm_records(records: list[dict]) -> tuple[list[dict], dict]:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "recordType": request.args.get("recordType", "").strip(),
+        "pipelineStage": request.args.get("pipelineStage", "").strip(),
+    }
+
+    def matches(record: dict) -> bool:
+        if filters["q"] and filters["q"] not in normalize_search_text(
+            record.get("title"),
+            record.get("clientName"),
+            record.get("sellerName"),
+            record.get("recordTypeLabel"),
+            record.get("pipelineStageLabel"),
+        ):
+            return False
+        for key in ("status", "recordType", "pipelineStage"):
+            if filters[key] and record.get(key) != filters[key]:
+                return False
+        return True
+
+    return [record for record in records if matches(record)], filters
+
+
+def sort_mobile_crm_records(records: list[dict]) -> tuple[list[dict], str]:
+    sort = request.args.get("sort", "updated_desc").strip() or "updated_desc"
+    sorters = {
+        "updated_desc": (lambda item: str(item.get("updatedAt", "")), True),
+        "next_action_asc": (lambda item: str(item.get("nextActionAt") or "9999-12-31"), False),
+        "client_asc": (lambda item: str(item.get("clientName", "")).lower(), False),
+    }
+    key, reverse = sorters.get(sort, sorters["updated_desc"])
+    return sorted(records, key=key, reverse=reverse), sort if sort in sorters else "updated_desc"
+
+
+def mobile_paginated_response(items: list[dict], filters: dict | None = None, sort: str | None = None):
+    page_items, pagination = api_list_pagination(items)
+    return mobile_api_response(items=page_items, pagination=pagination, filters=filters, sort=sort)
 
 
 def mobile_product_payload(product: dict) -> dict:
@@ -11308,15 +11732,10 @@ def api_orders():
         orders = [order for order in orders if order.get("customerId") == customer_id]
     movements = store.get("credit_movements", [])
 
-    return jsonify(
-        {
-            "items": sorted(
-                [enrich_order(order, movements) for order in orders],
-                key=lambda order: order.get("createdAt", ""),
-                reverse=True,
-            )
-        }
-    )
+    items = [enrich_order(order, movements) for order in orders]
+    items, filters = filter_mobile_orders(items)
+    items, sort = sort_mobile_orders(items)
+    return mobile_paginated_response(items, filters, sort)
 
 
 @app.get("/api/v1/mobile/seller/summary")
@@ -11469,11 +11888,10 @@ def api_mobile_seller_clients():
         response["temporaryPassword"] = temporary_password
         return jsonify({"client": response}), 201
 
-    clients = [
-        mobile_seller_client_payload(client, store)
-        for client in sorted(seller_scope_clients(store, user), key=lambda item: item.get("businessName", ""))
-    ]
-    return jsonify({"items": clients})
+    clients = [mobile_seller_client_payload(client, store) for client in seller_scope_clients(store, user)]
+    clients, filters = filter_mobile_clients(clients)
+    clients, sort = sort_mobile_clients(clients)
+    return mobile_paginated_response(clients, filters, sort)
 
 
 @app.route("/api/v1/mobile/seller/orders", methods=["GET", "POST"])
@@ -11510,11 +11928,10 @@ def api_mobile_seller_orders():
         save_store(store)
         return jsonify({"order": mobile_seller_order_payload(order, store), "orderId": order["orderId"]}), 201
 
-    orders = [
-        mobile_seller_order_payload(order, store)
-        for order in sorted(seller_scope_orders(store, user), key=lambda item: item.get("createdAt", ""), reverse=True)
-    ]
-    return jsonify({"items": orders})
+    orders = [mobile_seller_order_payload(order, store) for order in seller_scope_orders(store, user)]
+    orders, filters = filter_mobile_orders(orders)
+    orders, sort = sort_mobile_orders(orders)
+    return mobile_paginated_response(orders, filters, sort)
 
 
 @app.get("/api/v1/mobile/seller/commissions")
@@ -11526,13 +11943,20 @@ def api_mobile_seller_commissions():
         return auth_error, 401
     orders = [
         mobile_seller_order_payload(order, store)
-        for order in sorted(seller_scope_orders(store, user), key=lambda item: item.get("createdAt", ""), reverse=True)
+        for order in seller_scope_orders(store, user)
         if float(order.get("commissionUsd") or 0) > 0
     ]
-    return jsonify({"items": orders})
+    commission_status = request.args.get("commissionStatus", "").strip()
+    if commission_status:
+        orders = [order for order in orders if order.get("commissionStatus") == commission_status]
+    orders, filters = filter_mobile_orders(orders)
+    filters["commissionStatus"] = commission_status
+    orders, sort = sort_mobile_orders(orders)
+    return mobile_paginated_response(orders, filters, sort)
 
 
 @app.route("/api/v1/mobile/seller/quotes", methods=["GET", "POST"])
+@app.route("/api/mobile/seller/quotes", methods=["GET", "POST"])
 def api_mobile_seller_quotes():
     store = load_store()
     user, auth_error = require_mobile_sales_user(store)
@@ -11657,14 +12081,14 @@ def api_mobile_seller_quotes():
         save_store(store)
         return jsonify({"quote": mobile_quote_payload(quote)}), 201
 
-    quotes = [
-        mobile_quote_payload(quote)
-        for quote in sorted(seller_scope_quotes(store, user), key=lambda item: item.get("updatedAt", ""), reverse=True)
-    ]
-    return jsonify({"meta": mobile_api_meta(), "items": quotes})
+    quotes = [mobile_quote_payload(quote) for quote in seller_scope_quotes(store, user)]
+    quotes, filters = filter_mobile_quotes(quotes)
+    quotes, sort = sort_mobile_quotes(quotes)
+    return mobile_paginated_response(quotes, filters, sort)
 
 
 @app.route("/api/v1/mobile/seller/activities", methods=["GET", "POST"])
+@app.route("/api/mobile/seller/activities", methods=["GET", "POST"])
 def api_mobile_seller_activities():
     store = load_store()
     user, auth_error = require_mobile_sales_user(store)
@@ -11750,11 +12174,10 @@ def api_mobile_seller_activities():
         save_store(store)
         return jsonify({"record": mobile_crm_record_payload(record), "activity": activity}), 201
 
-    records = [
-        mobile_crm_record_payload(record)
-        for record in sorted(seller_scope_crm_records(store, user), key=lambda item: item.get("updatedAt", ""), reverse=True)
-    ]
-    return jsonify({"meta": mobile_api_meta(), "items": records})
+    records = [mobile_crm_record_payload(record) for record in seller_scope_crm_records(store, user)]
+    records, filters = filter_mobile_crm_records(records)
+    records, sort = sort_mobile_crm_records(records)
+    return mobile_paginated_response(records, filters, sort)
 
 
 @app.get("/api/v1/mobile/credit")
@@ -11921,7 +12344,9 @@ def api_categories():
         )
         if category.get("visibleInApp")
     ]
-    return jsonify({"meta": mobile_api_meta(), "items": categories})
+    categories, filters = filter_mobile_categories(categories)
+    categories, sort = sort_mobile_categories(categories)
+    return mobile_paginated_response(categories, filters, sort)
 
 
 @app.post("/api/v1/mobile/auth/login")
@@ -12228,7 +12653,9 @@ def api_products():
     if auth_error:
         return auth_error, 401
     products = [mobile_product_payload(product) for product in mobile_visible_products(store)]
-    return jsonify({"meta": mobile_api_meta(), "items": products})
+    products, filters = filter_mobile_products(products)
+    products, sort = sort_mobile_products(products)
+    return mobile_paginated_response(products, filters, sort)
 
 
 @app.get("/api/v1/mobile/products/<product_id>")
@@ -12271,7 +12698,10 @@ def api_announcements():
     if auth_error:
         return auth_error, 401
     placement = request.args.get("placement")
-    return jsonify({"meta": mobile_api_meta(), "items": active_announcements(placement, store)})
+    announcements = active_announcements(placement, store)
+    announcements, filters = filter_mobile_announcements(announcements)
+    announcements, sort = sort_mobile_announcements(announcements)
+    return mobile_paginated_response(announcements, filters, sort)
 
 
 @app.get("/api/v1/mobile/service-technicians")
@@ -12286,7 +12716,9 @@ def api_service_technicians():
         for technician in store.get("service_technicians", [])
         if technician.get("status") == "active" and technician.get("visibleInApp")
     ]
-    return jsonify({"meta": mobile_api_meta(), "items": technicians})
+    technicians, filters = filter_mobile_directory_items(technicians)
+    technicians, sort = sort_mobile_directory_items(technicians)
+    return mobile_paginated_response(technicians, filters, sort)
 
 
 @app.get("/api/v1/mobile/locations")
@@ -12301,27 +12733,27 @@ def api_locations():
         for technician in store.get("service_technicians", [])
         if technician.get("status") == "active" and technician.get("visibleInApp")
     ]
-    return jsonify(
+    locations = [
         {
-            "meta": mobile_api_meta(),
-            "items": [
-                {
-                    "id": technician.get("id", ""),
-                    "name": technician.get("name", ""),
-                    "subtitle": " - ".join(
-                        part
-                        for part in [technician.get("city", ""), technician.get("coverage", "")]
-                        if part
-                    ),
-                    "phone": technician.get("phone", ""),
-                    "whatsapp": technician.get("whatsapp", ""),
-                    "address": technician.get("address", ""),
-                    "specialties": technician.get("specialties", []),
-                }
-                for technician in technicians
-            ]
+            "id": technician.get("id", ""),
+            "name": technician.get("name", ""),
+            "state": technician.get("state", ""),
+            "city": technician.get("city", ""),
+            "subtitle": " - ".join(
+                part
+                for part in [technician.get("city", ""), technician.get("coverage", "")]
+                if part
+            ),
+            "phone": technician.get("phone", ""),
+            "whatsapp": technician.get("whatsapp", ""),
+            "address": technician.get("address", ""),
+            "specialties": technician.get("specialties", []),
         }
-    )
+        for technician in technicians
+    ]
+    locations, filters = filter_mobile_directory_items(locations)
+    locations, sort = sort_mobile_directory_items(locations)
+    return mobile_paginated_response(locations, filters, sort)
 
 
 @app.context_processor
