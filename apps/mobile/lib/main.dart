@@ -783,6 +783,13 @@ class _SellerSummaryCard extends StatelessWidget {
       builder: (context, snapshot) {
         final summary = snapshot.data;
         final isLoading = snapshot.connectionState != ConnectionState.done;
+        final goalProgress =
+            ((summary?.goalProgressPercent ?? 0).clamp(0, 100) / 100)
+                .toDouble();
+        final sellerMeta = [
+          summary?.sellerCode ?? '',
+          summary?.sellerZone ?? '',
+        ].where((item) => item.isNotEmpty).join(' - ');
 
         return Container(
           padding: const EdgeInsets.all(16),
@@ -822,7 +829,9 @@ class _SellerSummaryCard extends StatelessWidget {
                                   ),
                         ),
                         Text(
-                          summary?.roleLabel ?? session.roleLabel,
+                          sellerMeta.isEmpty
+                              ? (summary?.roleLabel ?? session.roleLabel)
+                              : sellerMeta,
                           style: const TextStyle(
                             color: Color(0xFFD4D4D4),
                             fontWeight: FontWeight.w700,
@@ -838,22 +847,83 @@ class _SellerSummaryCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: Colors.white.withValues(alpha: 0.08),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Meta mensual',
+                          style: TextStyle(
+                            color: Color(0xFFD4D4D4),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          isLoading
+                              ? 'Sync'
+                              : '${(summary?.goalProgressPercent ?? 0).toStringAsFixed(0)}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(99),
+                      child: LinearProgressIndicator(
+                        minHeight: 8,
+                        value: isLoading ? null : goalProgress,
+                        backgroundColor: Colors.white24,
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          _wulkanOrange,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      isLoading
+                          ? 'Sincronizando cartera'
+                          : 'USD ${(summary?.salesMonthUsd ?? 0).toStringAsFixed(0)} de USD ${(summary?.salesGoalUsd ?? 0).toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        color: Color(0xFFD4D4D4),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: _DarkMetric(
                       label: 'Clientes',
                       value:
-                          isLoading ? '...' : '${summary?.clientsCount ?? 0}',
+                          isLoading
+                              ? '...'
+                              : '${summary?.activeClientsCount ?? summary?.clientsCount ?? 0}/${summary?.clientsCount ?? 0}',
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _DarkMetric(
-                      label: 'Ventas',
+                      label: 'Ticket prom.',
                       value: isLoading
                           ? '...'
-                          : 'USD ${(summary?.salesUsd ?? 0).toStringAsFixed(0)}',
+                          : 'USD ${(summary?.ticketAverageUsd ?? 0).toStringAsFixed(0)}',
                     ),
                   ),
                 ],

@@ -1,18 +1,42 @@
 {% extends "base.html" %}
 {% set heading = "Vendedores" %}
-{% set description = "Administra vendedores, cartera asignada, ventas y comisiones por orden B2B." %}
+{% set description = "Fuerza comercial, acceso movil, cartera, metas, ventas y comisiones por vendedor." %}
+
+{% macro seller_graph(title, chart) -%}
+<article class="panel seller-chart">
+  <div class="panel-header">
+    <h2>{{ title }}</h2>
+    <span>Graphify</span>
+  </div>
+  {% if chart.values %}
+  <div
+    class="graphify-bars"
+    data-labels='{{ chart["labels"] | tojson }}'
+    data-values='{{ chart["values"] | tojson }}'
+  ></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-bar-chart"></i></div>
+    <strong>Sin datos</strong>
+    <span>Las ventas y cartera apareceran cuando existan registros reales.</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
 
 {% block top_action %}
-{% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
 <div class="d-flex flex-wrap gap-2">
+  {% if can_module_action('sellers', 'import') %}
   <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#sellersImportModal">
     <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
   </button>
+  {% endif %}
+  {% if can_create_sellers %}
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSellerModal">
     <i class="bi bi-plus-lg"></i> Nuevo vendedor
   </button>
+  {% endif %}
 </div>
-{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -26,58 +50,117 @@
 {% endif %}
 
 <section class="row g-3 mb-3">
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-person-badge"></i></div>
       <span>Vendedores</span>
       <strong>{{ metrics.sellers }}</strong>
-      <em>Activos</em>
+      <em>{{ metrics.active }} activos</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-shop"></i></div>
       <span>Cartera</span>
       <strong>{{ metrics.clients }}</strong>
-      <em>Clientes</em>
+      <em>Clientes asignados</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
-    <article class="metric-card">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-active">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
-      <span>Ventas</span>
-      <strong>{{ money_usd(metrics.sales) }}</strong>
-      <em>USD</em>
+      <span>Venta mes</span>
+      <strong>{{ money_usd(metrics.sales_month) }}</strong>
+      <em>{{ metrics.goal_progress }}% meta</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-bullseye"></i></div>
+      <span>Meta total</span>
+      <strong>{{ money_usd(metrics.goal_total) }}</strong>
+      <em>Mensual</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-receipt"></i></div>
+      <span>Ticket prom.</span>
+      <strong>{{ money_usd(metrics.ticket_average) }}</strong>
+      <em>Por orden</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-cash-stack"></i></div>
       <span>Comision pend.</span>
       <strong>{{ money_usd(metrics.commission_pending) }}</strong>
-      <em>Liquidar</em>
+      <em>{{ metrics.pending_credit }} creditos</em>
     </article>
   </div>
 </section>
 
-<section class="panel category-panel">
+<section class="seller-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-lg-5">
+      <label class="form-label">Buscar vendedor</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Nombre, email, codigo, zona o telefono">
+      </div>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in seller_status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3">
+      <label class="form-label">Zona</label>
+      <select class="form-select" name="zone">
+        <option value="">Todas</option>
+        {% for zone in zones %}
+        <option value="{{ zone }}" {% if filters.zone == zone %}selected{% endif %}>{{ zone }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-lg-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-7">
+    {{ seller_graph("Venta mensual por vendedor", seller_charts.sales_month) }}
+  </div>
+  <div class="col-12 col-xl-5">
+    {{ seller_graph("Cartera asignada", seller_charts.clients) }}
+  </div>
+</section>
+
+<section class="panel seller-panel">
   <div class="panel-header">
     <div>
-      <h2>Equipo de ventas</h2>
-      <span>Comision, cartera asignada y actividad comercial.</span>
+      <h2>Equipo comercial</h2>
+      <span>Cartera, avance de meta, comisiones y acceso movil sincronizado con Android.</span>
     </div>
     <span>{{ sellers | length }} registros</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table">
+    <table class="table align-middle seller-table">
       <thead>
         <tr>
+          <th>Ranking</th>
           <th>Vendedor</th>
           <th>Zona</th>
           <th>Cartera</th>
-          <th>Ventas</th>
-          <th>Comision</th>
-          <th>Estado</th>
+          <th>Mes / meta</th>
+          <th>Comisiones</th>
+          <th>Acceso</th>
           <th class="text-end">Acciones</th>
         </tr>
       </thead>
@@ -85,49 +168,76 @@
         {% for seller in sellers %}
         <tr>
           <td>
-            <div class="category-cell">
-              <div class="category-thumb"><i class="bi bi-person-badge"></i></div>
+            <span class="seller-rank">#{{ seller.ranking }}</span>
+          </td>
+          <td>
+            <div class="seller-cell">
+              <div class="seller-avatar">{{ (seller.name or 'V')[:1] }}</div>
               <div>
                 <strong>{{ seller.name }}</strong>
-                <small>{{ seller.sellerCode or seller.email }}</small>
+                <small>{{ seller.sellerCode or 'Sin codigo' }} - {{ seller.email }}</small>
               </div>
             </div>
           </td>
           <td>
             <strong class="d-block">{{ seller.sellerZone or 'Sin zona' }}</strong>
-            <small class="text-secondary">{{ seller.phone or seller.email }}</small>
+            <small class="text-secondary">{{ seller.sellerTerritory or seller.phone or 'Sin ruta registrada' }}</small>
           </td>
           <td>
             <strong>{{ seller.clientsCount }}</strong>
-            <small class="d-block text-secondary">{{ seller.ordersCount }} ordenes</small>
+            <small class="d-block text-secondary">{{ seller.activeClientsCount }} activos / {{ seller.newClientsMonth }} nuevos</small>
           </td>
-          <td>
-            <strong>{{ money_usd(seller.salesUsd) }}</strong>
-            <small class="d-block text-secondary">{{ seller.openOrders }} abiertas</small>
+          <td class="seller-goal-cell">
+            <strong>{{ money_usd(seller.salesMonthUsd) }}</strong>
+            <small class="d-block text-secondary">Meta {{ money_usd(seller.salesGoalUsd) }}</small>
+            <div class="progress seller-progress" role="progressbar" aria-label="Avance meta" aria-valuenow="{{ seller.goalProgressPercent }}" aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-bar" style="width: {{ [seller.goalProgressPercent, 100] | min }}%"></div>
+            </div>
+            <small class="text-secondary">{{ seller.goalProgressPercent }}%</small>
           </td>
           <td>
             <strong>{{ money_usd(seller.commissionPendingUsd) }}</strong>
-            <small class="d-block text-secondary">{{ seller.commissionRatePercent }}% base</small>
+            <small class="d-block text-secondary">Pendiente / {{ seller.commissionRatePercent }}% base</small>
           </td>
-          <td><span class="badge {{ seller.status | badge_class }}">{{ seller.status }}</span></td>
+          <td>
+            <span class="badge {{ seller.status | badge_class }}">{{ seller.statusLabel }}</span>
+            <small class="d-block text-secondary mt-1">
+              {% if seller.mobileAccessEnabled %}
+              App activa
+              {% else %}
+              App desactivada
+              {% endif %}
+            </small>
+          </td>
           <td class="text-end">
-            {% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
             <div class="d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#sellerDetail{{ loop.index }}">
+                <i class="bi bi-eye"></i> Ver
+              </button>
+              {% if can_edit_sellers %}
               <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editSeller{{ loop.index }}">
                 <i class="bi bi-pencil"></i> Editar
               </button>
-              {% if can_delete_data() %}
+              {% endif %}
+              {% if can_module_action('sellers', 'delete') %}
               <form method="post" action="{{ url_for('seller_delete', seller_id=seller.id) }}">
                 {{ csrf_field() }}
-                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+                <button class="btn btn-sm btn-outline-danger" type="submit" title="Eliminar o desactivar"><i class="bi bi-trash"></i></button>
               </form>
               {% endif %}
             </div>
-            {% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="text-secondary">Sin vendedores registrados.</td></tr>
+        <tr>
+          <td colspan="8">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-person-badge"></i></div>
+              <strong>Sin vendedores registrados</strong>
+              <span>Crea vendedores o importa la plantilla para habilitar usuarios moviles de venta.</span>
+            </div>
+          </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
@@ -135,13 +245,13 @@
 </section>
 
 <div class="modal fade" id="newSellerModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
     <form class="modal-content" method="post">
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Nuevo vendedor</h2>
-          <p class="mb-0 text-secondary">Crea acceso movil y define comision comercial.</p>
+          <p class="mb-0 text-secondary">Crea acceso movil y define cartera, zona, meta y comision.</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
@@ -157,14 +267,113 @@
 </div>
 
 {% for seller in sellers %}
+<div class="modal fade" id="sellerDetail{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">{{ seller.name }}</h2>
+          <p class="mb-0 text-secondary">{{ seller.sellerCode or 'Sin codigo' }} - {{ seller.sellerZone or 'Sin zona' }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="seller-detail-grid">
+          <article class="seller-detail-card">
+            <span>Venta mes</span>
+            <strong>{{ money_usd(seller.salesMonthUsd) }}</strong>
+            <small>{{ seller.goalProgressPercent }}% de {{ money_usd(seller.salesGoalUsd) }}</small>
+          </article>
+          <article class="seller-detail-card">
+            <span>Cartera</span>
+            <strong>{{ seller.clientsCount }} clientes</strong>
+            <small>{{ seller.pendingCreditRequests }} creditos pendientes</small>
+          </article>
+          <article class="seller-detail-card">
+            <span>Saldo abierto</span>
+            <strong>{{ money_usd(seller.openBalanceUsd) }}</strong>
+            <small>Vencido {{ money_usd(seller.overdueBalanceUsd) }}</small>
+          </article>
+          <article class="seller-detail-card">
+            <span>Comisiones</span>
+            <strong>{{ money_usd(seller.commissionPendingUsd) }}</strong>
+            <small>Aprobada {{ money_usd(seller.commissionApprovedUsd) }}</small>
+          </article>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-lg-5">
+            <article class="panel seller-modal-panel">
+              <div class="panel-header">
+                <h2>Ficha operativa</h2>
+                <span>{{ seller.statusLabel }}</span>
+              </div>
+              <dl class="detail-list">
+                <div><dt>Email</dt><dd>{{ seller.email }}</dd></div>
+                <div><dt>Telefono</dt><dd>{{ seller.phone or 'Sin telefono' }}</dd></div>
+                <div><dt>Supervisor</dt><dd>{{ seller.sellerSupervisor or 'Sin supervisor' }}</dd></div>
+                <div><dt>Ingreso</dt><dd>{{ seller.hiredAt or seller.createdAt or 'Sin fecha' }}</dd></div>
+                <div><dt>Ultimo acceso app</dt><dd>{{ seller.lastMobileLoginAt or 'Sin ingreso movil' }}</dd></div>
+                <div><dt>Ultima orden</dt><dd>{{ seller.lastOrderAt or 'Sin ordenes' }}</dd></div>
+              </dl>
+              {% if seller.internalNotes %}
+              <div class="seller-notes mt-3">{{ seller.internalNotes }}</div>
+              {% endif %}
+            </article>
+          </div>
+          <div class="col-12 col-lg-7">
+            <article class="panel seller-modal-panel">
+              <div class="panel-header">
+                <h2>Cartera asignada</h2>
+                <span>{{ seller.clientsCount }} clientes</span>
+              </div>
+              <div class="seller-mini-list">
+                {% for client in seller.clientsPreview %}
+                <div>
+                  <strong>{{ client.businessName }}</strong>
+                  <span>{{ client.city or 'Sin ciudad' }} - {{ client.statusLabel }}</span>
+                  <em>{{ money_usd(client.creditAvailableUsd) }} disp.</em>
+                </div>
+                {% else %}
+                <p class="mb-0 text-secondary">Sin clientes asignados.</p>
+                {% endfor %}
+              </div>
+            </article>
+            <article class="panel seller-modal-panel mt-3">
+              <div class="panel-header">
+                <h2>Ordenes recientes</h2>
+                <span>{{ seller.ordersCount }} ordenes</span>
+              </div>
+              <div class="seller-mini-list">
+                {% for order in seller.ordersPreview %}
+                <div>
+                  <strong>{{ order.orderId }}</strong>
+                  <span>{{ order.customerName }} - {{ order.saleTypeLabel }}</span>
+                  <em>{{ money_usd(order.totalUsd) }}</em>
+                </div>
+                {% else %}
+                <p class="mb-0 text-secondary">Sin ordenes registradas.</p>
+                {% endfor %}
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="editSeller{{ loop.index }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
     <form class="modal-content" method="post" action="{{ url_for('seller_edit', seller_id=seller.id) }}">
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Editar {{ seller.name }}</h2>
-          <p class="mb-0 text-secondary">Actualiza acceso, zona, meta y comision.</p>
+          <p class="mb-0 text-secondary">Actualiza acceso movil, zona, meta y comision.</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
@@ -183,8 +392,8 @@
 {% set bulk_modal_id = "sellersImportModal" %}
 {% set bulk_action = url_for("sellers_import") %}
 {% set bulk_title = "Importar vendedores" %}
-{% set bulk_help = "Crea o actualiza usuarios vendedores para app movil con zona, comision y meta comercial." %}
-{% set bulk_columns = ["nombre", "email", "telefono", "codigo_vendedor", "zona", "comision", "meta_usd", "estado"] %}
+{% set bulk_help = "Crea o actualiza usuarios vendedores para app movil con zona, ruta, comision, meta y acceso." %}
+{% set bulk_columns = ["nombre_completo", "email", "telefono", "codigo_vendedor", "zona", "territorio", "supervisor", "comision", "meta_mensual_usd", "fecha_ingreso", "acceso_movil", "estado"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 

@@ -135,6 +135,12 @@ CREDIT_RISK_OPTIONS = [
     ("high", "Alto"),
     ("critical", "Critico"),
 ]
+SELLER_STATUS_OPTIONS = [
+    ("active", "Activo"),
+    ("inactive", "Inactivo"),
+    ("blocked", "Bloqueado"),
+    ("suspended", "Suspendido"),
+]
 ROLE_LABELS = {
     "super_admin": "Super admin",
     "general_manager": "Gerente general",
@@ -374,15 +380,20 @@ IMPORT_TEMPLATE_GROUPS = [
                 "title": "Vendedores",
                 "description": "Usuarios de venta para app movil, zonas, metas y comision.",
                 "columns": [
-                    {"name": "nombre", "required": True, "example": "Carlos Perez", "help": "Nombre visible del vendedor."},
+                    {"name": "nombre_completo", "required": True, "example": "Carlos Perez", "help": "Nombre visible del vendedor."},
                     {"name": "email", "required": True, "example": "carlos@wulkanvenezuela.com", "help": "Correo unico para login movil."},
                     {"name": "telefono", "required": False, "example": "+584120000000", "help": "Telefono o WhatsApp."},
                     {"name": "codigo_vendedor", "required": False, "example": "VEN-CAR-01", "help": "Codigo interno comercial."},
                     {"name": "zona", "required": False, "example": "Caracas", "help": "Zona o cartera principal."},
+                    {"name": "territorio", "required": False, "example": "Centro - Ruta A", "help": "Ruta, territorio o cobertura."},
+                    {"name": "supervisor", "required": False, "example": "Gerente Comercial", "help": "Responsable interno del vendedor."},
                     {"name": "comision", "required": False, "example": "5", "help": "Porcentaje de comision."},
-                    {"name": "meta_usd", "required": False, "example": "2500", "help": "Meta comercial mensual."},
-                    {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
+                    {"name": "meta_mensual_usd", "required": False, "example": "2500", "help": "Meta comercial mensual."},
+                    {"name": "fecha_ingreso", "required": False, "example": "2026-06-01", "help": "Fecha de ingreso comercial."},
+                    {"name": "acceso_movil", "required": False, "example": "si", "help": "si/no para permitir ingreso desde la app."},
+                    {"name": "estado", "required": False, "example": "active", "help": "active, inactive, blocked o suspended."},
                     {"name": "clave", "required": False, "example": "Temporal2026", "help": "Si viene vacia se genera clave temporal."},
+                    {"name": "observacion", "required": False, "example": "Cartera inicial zona centro", "help": "Notas internas comerciales."},
                 ],
             },
             {
@@ -681,6 +692,10 @@ def client_type_label(value: str) -> str:
     return dict(CLIENT_TYPE_OPTIONS).get(value, value or "Sin tipo")
 
 
+def seller_status_label(value: str) -> str:
+    return dict(SELLER_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
 def order_status_label(value: str) -> str:
     return dict(ORDER_STATUS_OPTIONS).get(value, value or "Sin estado")
 
@@ -760,6 +775,13 @@ def parse_filter_date(value: str | None) -> datetime | None:
 def safe_int(value, default: int = 0) -> int:
     try:
         return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(str(value).replace(",", "."))
     except (TypeError, ValueError):
         return default
 
@@ -1282,6 +1304,7 @@ def security_context():
         "client_status_label": client_status_label,
         "collection_status_label": collection_status_label,
         "client_type_label": client_type_label,
+        "seller_status_label": seller_status_label,
         "commission_status_label": commission_status_label,
     }
 
@@ -1581,7 +1604,12 @@ def mobile_token_admin_id() -> str:
 def require_mobile_sales_user(store: dict) -> tuple[dict | None, object | None]:
     admin_id = mobile_token_admin_id()
     user = find_by_id(store.get("admin_users", []), admin_id)
-    if not user or user.get("status") != "active" or user.get("role") not in MOBILE_SALES_ROLES:
+    if (
+        not user
+        or user.get("status") != "active"
+        or user.get("role") not in MOBILE_SALES_ROLES
+        or user.get("mobileAccessEnabled", True) is False
+    ):
         return None, jsonify({"error": "Token de vendedor requerido."})
     return user, None
 
@@ -1604,7 +1632,12 @@ def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | No
 
     if payload.get("type") == "admin":
         user = find_by_id(store.get("admin_users", []), payload.get("adminUserId") or payload.get("id", ""))
-        if user and user.get("status") == "active" and user.get("role") in MOBILE_SALES_ROLES:
+        if (
+            user
+            and user.get("status") == "active"
+            and user.get("role") in MOBILE_SALES_ROLES
+            and user.get("mobileAccessEnabled", True) is not False
+        ):
             return user, None
         return None, jsonify({"error": "Token movil invalido."})
 
@@ -1682,6 +1715,12 @@ def mobile_admin_payload(user: dict, access_token: str) -> dict:
             "clientType": role,
             "accountRole": role,
             "roleLabel": ROLE_LABELS.get(role, "Vendedor"),
+            "sellerCode": user.get("sellerCode", ""),
+            "sellerZone": user.get("sellerZone", ""),
+            "sellerTerritory": user.get("sellerTerritory", ""),
+            "commissionRatePercent": safe_float(user.get("commissionRatePercent"), 0),
+            "salesGoalUsd": safe_float(user.get("salesGoalUsd"), 0),
+            "mobileAccessEnabled": bool(user.get("mobileAccessEnabled", True)),
             "creditEnabled": False,
             "creditLimitUsd": 0.0,
             "creditUsedUsd": 0.0,
@@ -2376,7 +2415,9 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
     seen_emails: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
-        name = row_value(row, "name", "nombre", "vendedor")
+        first_name = row_value(row, "firstName", "nombre")
+        last_name = row_value(row, "lastName", "apellido")
+        name = row_value(row, "name", "nombre_completo", "vendedor") or f"{first_name} {last_name}".strip()
         if not email or not name:
             bulk_error(result, row_number, "vendedor requiere nombre y email.")
             continue
@@ -2394,29 +2435,55 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             continue
         if not password and not user:
             password = secrets.token_urlsafe(12)
+        status = row_value(row, "status", "estado", default=(user or {}).get("status", "active")) or "active"
+        if status not in {key for key, _label in SELLER_STATUS_OPTIONS}:
+            bulk_error(result, row_number, f"{status}: estado de vendedor no valido.")
+            continue
+        commission = parse_import_float(
+            row_value(row, "commissionRatePercent", "comision", "porcentaje_comision"),
+            float((user or {}).get("commissionRatePercent") or 0),
+        )
+        if commission < 0 or commission > 100:
+            bulk_error(result, row_number, "la comision debe estar entre 0 y 100%.")
+            continue
         payload = {
+            "firstName": first_name or (user or {}).get("firstName", ""),
+            "lastName": last_name or (user or {}).get("lastName", ""),
             "name": name,
             "email": email,
             "role": "sales",
-            "status": row_value(row, "status", "estado", default=(user or {}).get("status", "active")) or "active",
+            "status": status,
             "sellerCode": row_value(row, "sellerCode", "codigo_vendedor", default=(user or {}).get("sellerCode", "")).upper(),
             "sellerZone": row_value(row, "sellerZone", "zona", default=(user or {}).get("sellerZone", "")),
+            "sellerTerritory": row_value(row, "sellerTerritory", "territorio", "ruta", default=(user or {}).get("sellerTerritory", "")),
+            "sellerSupervisor": row_value(row, "sellerSupervisor", "supervisor", default=(user or {}).get("sellerSupervisor", "")),
             "phone": row_value(row, "phone", "telefono", "whatsapp", default=(user or {}).get("phone", "")),
-            "commissionRatePercent": parse_import_float(
-                row_value(row, "commissionRatePercent", "comision", "porcentaje_comision"),
-                float((user or {}).get("commissionRatePercent") or 0),
-            ),
+            "commissionRatePercent": commission,
             "salesGoalUsd": parse_import_float(
-                row_value(row, "salesGoalUsd", "meta_usd", "meta_ventas_usd"),
+                row_value(row, "salesGoalUsd", "meta_usd", "meta_mensual_usd", "meta_ventas_usd"),
                 float((user or {}).get("salesGoalUsd") or 0),
             ),
+            "hiredAt": row_value(row, "hiredAt", "fecha_ingreso", default=(user or {}).get("hiredAt", "")),
+            "mobileAccessEnabled": parse_import_bool(
+                row_value(row, "mobileAccessEnabled", "acceso_movil", "usuario_movil"),
+                bool((user or {}).get("mobileAccessEnabled", True)),
+            ),
+            "internalNotes": row_value(row, "internalNotes", "observacion", "notas", default=(user or {}).get("internalNotes", "")),
             "updatedAt": utc_now(),
         }
+        if payload["status"] != "active":
+            payload["mobileAccessEnabled"] = False
         if user:
             payload["id"] = user["id"]
             payload["createdAt"] = user.get("createdAt", utc_now())
             payload["passwordHash"] = generate_password_hash(password) if password else user.get("passwordHash", "")
             payload["mustChangePassword"] = True if password else bool(user.get("mustChangePassword"))
+            payload["failedLoginAttempts"] = safe_int(user.get("failedLoginAttempts"))
+            payload["lastFailedLoginAt"] = user.get("lastFailedLoginAt", "")
+            payload["lastLoginAt"] = user.get("lastLoginAt", "")
+            payload["lastLoginIp"] = user.get("lastLoginIp", "")
+            payload["lastMobileLoginAt"] = user.get("lastMobileLoginAt", "")
+            payload["sessionVersion"] = user_session_version(user)
             store["admin_users"] = [payload if item["id"] == user["id"] else item for item in store.get("admin_users", [])]
             result["updated"] += 1
             bulk_row(result, "updated", row_number, f"{name} - {email}")
@@ -2425,6 +2492,12 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             payload["createdAt"] = utc_now()
             payload["passwordHash"] = generate_password_hash(password)
             payload["mustChangePassword"] = True
+            payload["failedLoginAttempts"] = 0
+            payload["lastFailedLoginAt"] = ""
+            payload["lastLoginAt"] = ""
+            payload["lastLoginIp"] = ""
+            payload["lastMobileLoginAt"] = ""
+            payload["sessionVersion"] = 0
             store.setdefault("admin_users", []).append(payload)
             result["created"] += 1
             bulk_row(result, "created", row_number, f"{name} - {email}")
@@ -3573,8 +3646,20 @@ def admin_user_form_error(store: dict, existing: dict | None = None) -> str:
 def seller_form_error(store: dict, existing: dict | None = None) -> str:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
+    name = request.form.get("name", "").strip()
+    status = request.form.get("status", "active")
+    commission = safe_float(request.form.get("commissionRatePercent"), 0)
+    goal = safe_float(request.form.get("salesGoalUsd"), 0)
+    if not name:
+        return "El nombre del vendedor es obligatorio."
     if not email:
         return "El email del vendedor es obligatorio."
+    if status not in {key for key, _label in SELLER_STATUS_OPTIONS}:
+        return "El estado del vendedor no es valido."
+    if commission < 0 or commission > 100:
+        return "La comision debe estar entre 0 y 100%."
+    if goal < 0:
+        return "La meta mensual no puede ser negativa."
     duplicated = any(
         user.get("email", "").lower() == email
         and (existing is None or user.get("id") != existing.get("id"))
@@ -3636,6 +3721,7 @@ def admin_user_payload(existing: dict | None = None) -> dict:
     display_name = request.form.get("name", "").strip()
     if first_name or last_name:
         display_name = f"{first_name} {last_name}".strip()
+    mobile_access_values = request.form.getlist("mobileAccessEnabled")
     payload = {
         "firstName": first_name or (existing or {}).get("firstName", ""),
         "lastName": last_name or (existing or {}).get("lastName", ""),
@@ -3645,12 +3731,24 @@ def admin_user_payload(existing: dict | None = None) -> dict:
         "status": request.form.get("status", "active"),
         "sellerCode": request.form.get("sellerCode", "").strip().upper(),
         "sellerZone": request.form.get("sellerZone", "").strip(),
+        "sellerTerritory": request.form.get("sellerTerritory", "").strip(),
+        "sellerSupervisor": request.form.get("sellerSupervisor", "").strip(),
         "phone": request.form.get("phone", "").strip(),
+        "hiredAt": request.form.get("hiredAt", "").strip(),
+        "mobileAccessEnabled": "on" in mobile_access_values if mobile_access_values else bool((existing or {}).get("mobileAccessEnabled", True)),
         "internalNotes": request.form.get("internalNotes", "").strip(),
-        "commissionRatePercent": float(request.form.get("commissionRatePercent") or (existing or {}).get("commissionRatePercent") or 0),
-        "salesGoalUsd": float(request.form.get("salesGoalUsd") or (existing or {}).get("salesGoalUsd") or 0),
+        "commissionRatePercent": safe_float(
+            request.form.get("commissionRatePercent"),
+            safe_float((existing or {}).get("commissionRatePercent"), 0),
+        ),
+        "salesGoalUsd": safe_float(
+            request.form.get("salesGoalUsd"),
+            safe_float((existing or {}).get("salesGoalUsd"), 0),
+        ),
         "updatedAt": now,
     }
+    if payload["status"] != "active":
+        payload["mobileAccessEnabled"] = False
     if existing is None:
         payload["id"] = next_id("admin", email)
         payload["createdAt"] = now
@@ -3891,14 +3989,45 @@ def enrich_seller(store: dict, seller: dict) -> dict:
         for order in store.get("orders", [])
         if order.get("sellerId") == seller_id
     ]
-    enriched["clientsCount"] = sum(
-        1
+    seller_clients = [
+        enrich_client(client, store.get("orders", []), movements)
         for client in store.get("clients", [])
         if client.get("assignedSellerId") == seller_id
-    )
+    ]
+    now = datetime.now(timezone.utc)
+
+    def is_current_month(value: str | None) -> bool:
+        if not value:
+            return False
+        parsed = parse_utc_datetime(value)
+        return parsed.year == now.year and parsed.month == now.month
+
+    month_orders = [order for order in seller_orders if is_current_month(order.get("createdAt"))]
+    closed_month_orders = [
+        order for order in month_orders if order.get("status") not in {"cancelled", "rejected"}
+    ]
+    active_clients = [client for client in seller_clients if client.get("status") == "active"]
+    sales_goal = safe_float(enriched.get("salesGoalUsd"), 0)
+    month_sales = round(sum(float(order.get("totalUsd") or 0) for order in closed_month_orders), 2)
+    orders_count = len(seller_orders)
     enriched["ordersCount"] = len(seller_orders)
+    enriched["clientsCount"] = len(seller_clients)
+    enriched["activeClientsCount"] = len(active_clients)
+    enriched["newClientsMonth"] = sum(1 for client in seller_clients if is_current_month(client.get("createdAt")))
     enriched["salesUsd"] = round(sum(float(order.get("totalUsd") or 0) for order in seller_orders), 2)
+    enriched["salesMonthUsd"] = month_sales
+    enriched["salesGoalUsd"] = sales_goal
+    enriched["goalProgressPercent"] = round((month_sales / sales_goal) * 100, 1) if sales_goal > 0 else 0
+    enriched["ticketAverageUsd"] = round(enriched["salesUsd"] / orders_count, 2) if orders_count else 0.0
     enriched["openOrders"] = sum(1 for order in seller_orders if order.get("balanceUsd", 0) > 0)
+    enriched["openBalanceUsd"] = round(sum(float(order.get("balanceUsd") or 0) for order in seller_orders), 2)
+    enriched["overdueBalanceUsd"] = round(
+        sum(float(order.get("balanceUsd") or 0) for order in seller_orders if order.get("dueStatus") == "overdue"),
+        2,
+    )
+    enriched["pendingCreditRequests"] = sum(
+        1 for client in seller_clients if client.get("creditRequestStatus") == "pending"
+    )
     enriched["commissionUsd"] = round(sum(float(order.get("commissionUsd") or 0) for order in seller_orders), 2)
     enriched["commissionPendingUsd"] = round(
         sum(
@@ -3908,20 +4037,100 @@ def enrich_seller(store: dict, seller: dict) -> dict:
         ),
         2,
     )
+    enriched["commissionApprovedUsd"] = round(
+        sum(
+            float(order.get("commissionUsd") or 0)
+            for order in seller_orders
+            if order.get("commissionStatus") == "commission_approved"
+        ),
+        2,
+    )
+    enriched["commissionPaidUsd"] = round(
+        sum(
+            float(order.get("commissionUsd") or 0)
+            for order in seller_orders
+            if order.get("commissionStatus") == "commission_paid"
+        ),
+        2,
+    )
+    enriched["lastOrderAt"] = max((order.get("createdAt", "") for order in seller_orders), default="")
+    enriched["statusLabel"] = seller_status_label(enriched.get("status", "active"))
+    enriched["mobileAccessEnabled"] = bool(enriched.get("mobileAccessEnabled", True))
+    enriched["mobileAccessLabel"] = "Activo" if enriched["mobileAccessEnabled"] else "Desactivado"
+    enriched["clientsPreview"] = sorted(seller_clients, key=lambda item: item.get("businessName", ""))[:5]
+    enriched["ordersPreview"] = sorted(seller_orders, key=lambda item: item.get("createdAt", ""), reverse=True)[:5]
     return enriched
 
 
 def sellers_page_context(store: dict, error: str = "") -> dict:
-    sellers = [enrich_seller(store, seller) for seller in sales_users(store)]
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "zone": request.args.get("zone", "").strip(),
+    }
+    all_sellers = [
+        enrich_seller(store, seller)
+        for seller in store.get("admin_users", [])
+        if seller.get("role") == "sales" and seller.get("status") != "deleted"
+    ]
+    sellers = all_sellers
+    if filters["q"]:
+        sellers = [
+            seller
+            for seller in sellers
+            if filters["q"] in " ".join(
+                [
+                    seller.get("name", ""),
+                    seller.get("email", ""),
+                    seller.get("sellerCode", ""),
+                    seller.get("sellerZone", ""),
+                    seller.get("phone", ""),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        sellers = [seller for seller in sellers if seller.get("status") == filters["status"]]
+    if filters["zone"]:
+        sellers = [seller for seller in sellers if seller.get("sellerZone") == filters["zone"]]
+    sellers = sorted(sellers, key=lambda item: (-float(item.get("salesMonthUsd") or 0), item.get("name", "")))
+    for index, seller in enumerate(sellers, start=1):
+        seller["ranking"] = index
+    total_goal = sum(float(seller.get("salesGoalUsd") or 0) for seller in sellers)
+    total_month = sum(float(seller.get("salesMonthUsd") or 0) for seller in sellers)
     metrics = {
         "sellers": len(sellers),
+        "active": sum(1 for seller in sellers if seller.get("status") == "active"),
         "clients": sum(int(seller.get("clientsCount") or 0) for seller in sellers),
         "sales": sum(float(seller.get("salesUsd") or 0) for seller in sellers),
+        "sales_month": total_month,
+        "goal_total": total_goal,
+        "goal_progress": round((total_month / total_goal) * 100, 1) if total_goal > 0 else 0,
+        "ticket_average": round(
+            sum(float(seller.get("salesUsd") or 0) for seller in sellers)
+            / max(sum(int(seller.get("ordersCount") or 0) for seller in sellers), 1),
+            2,
+        ),
+        "pending_credit": sum(int(seller.get("pendingCreditRequests") or 0) for seller in sellers),
         "commission_pending": sum(float(seller.get("commissionPendingUsd") or 0) for seller in sellers),
     }
     return {
         "sellers": sellers,
         "metrics": metrics,
+        "filters": filters,
+        "seller_status_options": SELLER_STATUS_OPTIONS,
+        "zones": sorted({seller.get("sellerZone", "") for seller in all_sellers if seller.get("sellerZone")}),
+        "seller_charts": {
+            "sales_month": graphify_from_pairs(
+                [(seller.get("name", "Vendedor"), float(seller.get("salesMonthUsd") or 0)) for seller in sellers],
+                6,
+            ),
+            "clients": graphify_from_pairs(
+                [(seller.get("name", "Vendedor"), float(seller.get("clientsCount") or 0)) for seller in sellers],
+                6,
+            ),
+        },
+        "can_edit_sellers": can_module_action("sellers", "edit"),
+        "can_create_sellers": can_module_action("sellers", "create"),
         "error": error,
         "bulk_result": consume_bulk_result("sellers") if not error else None,
     }
@@ -4389,6 +4598,7 @@ def seller_delete(seller_id: str):
     has_orders = any(order.get("sellerId") == seller_id for order in store.get("orders", []))
     if has_clients or has_orders:
         seller["status"] = "inactive"
+        seller["mobileAccessEnabled"] = False
         seller["updatedAt"] = utc_now()
         after = seller
     else:
@@ -5628,6 +5838,7 @@ def api_mobile_seller_summary():
 
     clients = seller_scope_clients(store, user)
     orders = [enrich_order(order, store.get("credit_movements", [])) for order in seller_scope_orders(store, user)]
+    seller_snapshot = enrich_seller(store, user)
     pending_credit = [
         client for client in clients if client.get("creditRequestStatus") == "pending"
     ]
@@ -5638,6 +5849,16 @@ def api_mobile_seller_summary():
                 "sellerName": user.get("name", "Vendedor Wulkan"),
                 "role": user.get("role", ""),
                 "roleLabel": ROLE_LABELS.get(user.get("role", ""), "Vendedor"),
+                "sellerCode": user.get("sellerCode", ""),
+                "sellerZone": user.get("sellerZone", ""),
+                "sellerTerritory": user.get("sellerTerritory", ""),
+                "commissionRatePercent": safe_float(user.get("commissionRatePercent"), 0),
+                "salesGoalUsd": seller_snapshot.get("salesGoalUsd", 0.0),
+                "salesMonthUsd": seller_snapshot.get("salesMonthUsd", 0.0),
+                "goalProgressPercent": seller_snapshot.get("goalProgressPercent", 0.0),
+                "ticketAverageUsd": seller_snapshot.get("ticketAverageUsd", 0.0),
+                "activeClientsCount": seller_snapshot.get("activeClientsCount", 0),
+                "newClientsMonth": seller_snapshot.get("newClientsMonth", 0),
                 "clientsCount": len(clients),
                 "ordersCount": len(orders),
                 "pendingCreditRequests": len(pending_credit),
@@ -5931,6 +6152,7 @@ def api_client_login():
             for user in store.get("admin_users", [])
             if user.get("email", "").lower() == email
             and user.get("status") == "active"
+            and user.get("mobileAccessEnabled", True) is not False
             and user.get("role") in MOBILE_SALES_ROLES
         ),
         None,
@@ -5977,7 +6199,12 @@ def api_client_change_password():
         subject_type = "admin_user"
         subject = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
         subject_name_key = "name"
-        if not subject or subject.get("status") != "active" or subject.get("role") not in MOBILE_SALES_ROLES:
+        if (
+            not subject
+            or subject.get("status") != "active"
+            or subject.get("role") not in MOBILE_SALES_ROLES
+            or subject.get("mobileAccessEnabled", True) is False
+        ):
             return jsonify({"error": "Token movil invalido."}), 401
     elif not subject or subject.get("status") != "active":
         return jsonify({"error": "Cliente no encontrado."}), 404

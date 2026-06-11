@@ -8,7 +8,7 @@
 - [x] Fase 1.2 - Gestion de Usuarios Admin: crear/editar usuarios internos, telefono, rol, estado, observacion interna, clave temporal con cambio obligatorio, intentos fallidos persistentes, bloqueo/activacion, reset de clave, cierre remoto de sesiones, ultimo acceso, IP y auditoria de login/logout.
 - [x] Fase 1.3 - Roles y Permisos granulares: matriz centralizada por rol, modulo y accion; menu y rutas principales conectadas a permisos de ver/crear/editar/importar/aprobar/eliminar; vista profesional para Super Admin con KPIs de cobertura y validacion por roles internos.
 - [x] Fase 1.4 - Clientes B2B / Ferreteros: ficha comercial completa con razon social, RIF, contactos, WhatsApp, direccion fiscal/despacho, vendedor asignado, lista de precios, descuento autorizado, estados de cliente, cobranza, riesgo, credito, filtros, acciones de activar/revisar/bloquear, detalle con ordenes recientes, importacion Excel ampliada, datos sincronizados hacia app movil y auditoria before/after.
-- [ ] Fase 1.5 - Vendedores.
+- [x] Fase 1.5 - Vendedores: ficha comercial completa con codigo, zona, territorio, supervisor, fecha ingreso, acceso movil, comision, meta mensual, observaciones, filtros por estado/zona/busqueda, ranking, avance de meta, ticket promedio, cartera asignada, ventas, comisiones, creditos pendientes, detalle operativo, importacion Excel ampliada, bloqueo real de acceso movil y resumen sincronizado hacia la app vendedor.
 - [ ] Fase 1.6 - Productos / Catalogo.
 - [ ] Fase 1.7 - Categorias.
 - [ ] Fase 1.8 - Inventario / Stock.

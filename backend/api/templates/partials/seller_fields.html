@@ -1,48 +1,110 @@
-<div class="row g-3">
-  <div class="col-12 col-md-7">
-    <label class="form-label fw-semibold">Nombre del vendedor</label>
-    <input class="form-control" name="name" required value="{{ seller.name if seller is defined else '' }}">
-  </div>
-  <div class="col-12 col-md-5">
-    <label class="form-label fw-semibold">Codigo vendedor</label>
-    <input class="form-control" name="sellerCode" value="{{ seller.sellerCode if seller is defined else '' }}" placeholder="VEN-CENTRO-01">
-  </div>
-  <div class="col-12 col-md-7">
-    <label class="form-label fw-semibold">Email de acceso</label>
-    <input class="form-control" name="email" type="email" required value="{{ seller.email if seller is defined else '' }}">
-  </div>
-  <div class="col-12 col-md-5">
-    <label class="form-label fw-semibold">Contrasena</label>
-    <div class="input-group">
-      <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if seller is defined else 'Crea una contrasena temporal segura' }}" {% if seller is not defined %}required{% endif %}>
-      <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
-        <i class="bi bi-eye"></i>
-      </button>
+{% set selected_status = seller.status if seller is defined else 'active' %}
+{% set mobile_enabled = seller.mobileAccessEnabled if seller is defined and seller.mobileAccessEnabled is defined else true %}
+
+<div class="seller-form-stack">
+  <section class="form-section">
+    <div class="form-section-head">
+      <div>
+        <h3>Identificacion del vendedor</h3>
+        <p>Datos usados para acceso movil, cartera y trazabilidad comercial.</p>
+      </div>
+      <i class="bi bi-person-badge"></i>
     </div>
-  </div>
-  <div class="col-12 col-md-4">
-    <label class="form-label fw-semibold">Telefono</label>
-    <input class="form-control" name="phone" value="{{ seller.phone if seller is defined else '' }}">
-  </div>
-  <div class="col-12 col-md-4">
-    <label class="form-label fw-semibold">Zona</label>
-    <input class="form-control" name="sellerZone" value="{{ seller.sellerZone if seller is defined else '' }}" placeholder="Caracas, Centro, Oriente">
-  </div>
-  <div class="col-12 col-md-4">
-    <label class="form-label fw-semibold">Estado</label>
-    {% set selected_status = seller.status if seller is defined else 'active' %}
-    <select class="form-select" name="status">
-      <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Activo</option>
-      <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactivo</option>
-      <option value="blocked" {% if selected_status == 'blocked' %}selected{% endif %}>Bloqueado</option>
-    </select>
-  </div>
-  <div class="col-12 col-md-6">
-    <label class="form-label fw-semibold">Comision %</label>
-    <input class="form-control" name="commissionRatePercent" inputmode="decimal" value="{{ seller.commissionRatePercent if seller is defined else 0 }}">
-  </div>
-  <div class="col-12 col-md-6">
-    <label class="form-label fw-semibold">Meta mensual USD</label>
-    <input class="form-control" name="salesGoalUsd" inputmode="decimal" value="{{ seller.salesGoalUsd if seller is defined else 0 }}">
-  </div>
+    <div class="row g-3">
+      <div class="col-12 col-lg-6">
+        <label class="form-label fw-semibold">Nombre visible</label>
+        <input class="form-control" name="name" required value="{{ seller.name if seller is defined else '' }}" placeholder="Nombre y apellido">
+      </div>
+      <div class="col-12 col-md-6 col-lg-3">
+        <label class="form-label fw-semibold">Codigo vendedor</label>
+        <input class="form-control" name="sellerCode" value="{{ seller.sellerCode if seller is defined else '' }}" placeholder="VEN-CENTRO-01">
+      </div>
+      <div class="col-12 col-md-6 col-lg-3">
+        <label class="form-label fw-semibold">Fecha ingreso</label>
+        <input class="form-control" name="hiredAt" type="date" value="{{ seller.hiredAt if seller is defined else '' }}">
+      </div>
+      <div class="col-12 col-md-7">
+        <label class="form-label fw-semibold">Email de acceso</label>
+        <input class="form-control" name="email" type="email" required value="{{ seller.email if seller is defined else '' }}" placeholder="vendedor@wulkanvenezuela.com">
+      </div>
+      <div class="col-12 col-md-5">
+        <label class="form-label fw-semibold">Contrasena</label>
+        <div class="input-group">
+          <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if seller is defined else 'Crea una contrasena temporal segura' }}" {% if seller is not defined %}required{% endif %}>
+          <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+        <div class="form-text">El vendedor entra desde la app movil, no desde el admin panel.</div>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Telefono / WhatsApp</label>
+        <input class="form-control" name="phone" value="{{ seller.phone if seller is defined else '' }}" placeholder="+58...">
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Estado</label>
+        <select class="form-select" name="status">
+          {% for value, label in seller_status_options %}
+          <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Acceso movil</label>
+        <div class="form-check form-switch seller-access-switch">
+          <input type="hidden" name="mobileAccessEnabled" value="off">
+          <input class="form-check-input" id="mobileAccess{{ seller.id if seller is defined else 'New' }}" name="mobileAccessEnabled" type="checkbox" value="on" {% if mobile_enabled %}checked{% endif %}>
+          <label class="form-check-label" for="mobileAccess{{ seller.id if seller is defined else 'New' }}">Puede usar la app</label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <div class="form-section-head">
+      <div>
+        <h3>Cartera y zona</h3>
+        <p>Organiza rutas, territorios y supervisor responsable.</p>
+      </div>
+      <i class="bi bi-geo-alt"></i>
+    </div>
+    <div class="row g-3">
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Zona</label>
+        <input class="form-control" name="sellerZone" value="{{ seller.sellerZone if seller is defined else '' }}" placeholder="Caracas, Centro, Oriente">
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Territorio / ruta</label>
+        <input class="form-control" name="sellerTerritory" value="{{ seller.sellerTerritory if seller is defined else '' }}" placeholder="Ruta semanal o territorio">
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label fw-semibold">Supervisor</label>
+        <input class="form-control" name="sellerSupervisor" value="{{ seller.sellerSupervisor if seller is defined else '' }}" placeholder="Gerente comercial">
+      </div>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <div class="form-section-head">
+      <div>
+        <h3>Condicion comercial</h3>
+        <p>Metas y reglas base para calcular comisiones por orden.</p>
+      </div>
+      <i class="bi bi-graph-up-arrow"></i>
+    </div>
+    <div class="row g-3">
+      <div class="col-12 col-md-6">
+        <label class="form-label fw-semibold">Comision base %</label>
+        <input class="form-control" name="commissionRatePercent" inputmode="decimal" value="{{ seller.commissionRatePercent if seller is defined else 0 }}" placeholder="0">
+      </div>
+      <div class="col-12 col-md-6">
+        <label class="form-label fw-semibold">Meta mensual USD</label>
+        <input class="form-control" name="salesGoalUsd" inputmode="decimal" value="{{ seller.salesGoalUsd if seller is defined else 0 }}" placeholder="0">
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Observacion interna</label>
+        <textarea class="form-control" name="internalNotes" rows="3" placeholder="Notas de gerencia, condiciones especiales o cobertura">{{ seller.internalNotes if seller is defined else '' }}</textarea>
+      </div>
+    </div>
+  </section>
 </div>

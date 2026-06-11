@@ -349,6 +349,16 @@ class MobileSellerSummary {
     required this.sellerId,
     required this.sellerName,
     required this.roleLabel,
+    this.sellerCode = "",
+    this.sellerZone = "",
+    this.sellerTerritory = "",
+    this.commissionRatePercent = 0,
+    this.salesGoalUsd = 0,
+    this.salesMonthUsd = 0,
+    this.goalProgressPercent = 0,
+    this.ticketAverageUsd = 0,
+    this.activeClientsCount = 0,
+    this.newClientsMonth = 0,
     required this.clientsCount,
     required this.ordersCount,
     required this.pendingCreditRequests,
@@ -362,6 +372,16 @@ class MobileSellerSummary {
   final String sellerId;
   final String sellerName;
   final String roleLabel;
+  final String sellerCode;
+  final String sellerZone;
+  final String sellerTerritory;
+  final double commissionRatePercent;
+  final double salesGoalUsd;
+  final double salesMonthUsd;
+  final double goalProgressPercent;
+  final double ticketAverageUsd;
+  final int activeClientsCount;
+  final int newClientsMonth;
   final int clientsCount;
   final int ordersCount;
   final int pendingCreditRequests;
