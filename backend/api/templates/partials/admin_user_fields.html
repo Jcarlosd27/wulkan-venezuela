@@ -1,20 +1,36 @@
+{% set full_name = user.name if user is defined else '' %}
+{% set first_name = user.firstName if user is defined and user.firstName is defined and user.firstName else '' %}
+{% set last_name = user.lastName if user is defined and user.lastName is defined and user.lastName else '' %}
 <div class="row g-3">
-  <div class="col-12">
+  <input type="hidden" name="name" value="{{ full_name }}">
+  <div class="col-12 col-md-6">
     <label class="form-label fw-semibold">Nombre</label>
-    <input class="form-control" name="name" required value="{{ user.name if user is defined else '' }}">
+    <input class="form-control" name="firstName" required value="{{ first_name or full_name }}">
   </div>
-  <div class="col-12">
+  <div class="col-12 col-md-6">
+    <label class="form-label fw-semibold">Apellido</label>
+    <input class="form-control" name="lastName" value="{{ last_name }}">
+  </div>
+  <div class="col-12 col-md-7">
     <label class="form-label fw-semibold">Email</label>
     <input class="form-control" name="email" type="email" required value="{{ user.email if user is defined else '' }}">
+  </div>
+  <div class="col-12 col-md-5">
+    <label class="form-label fw-semibold">Telefono</label>
+    <input class="form-control" name="phone" value="{{ user.phone if user is defined else '' }}" placeholder="+58...">
   </div>
   <div class="col-12 col-md-6">
     <label class="form-label fw-semibold">Rol</label>
     {% set selected_role = user.role if user is defined else 'operator' %}
     <select class="form-select" name="role">
       <option value="super_admin" {% if selected_role == 'super_admin' %}selected{% endif %}>Super admin</option>
+      <option value="general_manager" {% if selected_role == 'general_manager' %}selected{% endif %}>Gerente general</option>
       <option value="commercial_manager" {% if selected_role == 'commercial_manager' %}selected{% endif %}>Gerente comercial</option>
-      <option value="operator" {% if selected_role == 'operator' %}selected{% endif %}>Operador</option>
+      <option value="operator" {% if selected_role == 'operator' %}selected{% endif %}>Operador comercial</option>
       <option value="inventory" {% if selected_role == 'inventory' %}selected{% endif %}>Inventario</option>
+      <option value="collections" {% if selected_role == 'collections' %}selected{% endif %}>Cobranza</option>
+      <option value="dispatch" {% if selected_role == 'dispatch' %}selected{% endif %}>Despacho</option>
+      <option value="auditor" {% if selected_role == 'auditor' %}selected{% endif %}>Auditor</option>
       <option value="readonly" {% if selected_role == 'readonly' %}selected{% endif %}>Solo lectura</option>
     </select>
   </div>
@@ -28,13 +44,17 @@
     </select>
   </div>
   <div class="col-12">
-    <label class="form-label fw-semibold">Contrasena</label>
+    <label class="form-label fw-semibold">Contrasena temporal</label>
     <div class="input-group">
       <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if user is defined else 'Crea una contrasena temporal segura' }}" {% if user is not defined %}required{% endif %}>
       <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
         <i class="bi bi-eye"></i>
       </button>
     </div>
-    <div class="form-text">Minimo 10 caracteres, con letras y numeros.</div>
+    <div class="form-text">Minimo 10 caracteres, con letras y numeros. El usuario debera cambiarla al ingresar.</div>
+  </div>
+  <div class="col-12">
+    <label class="form-label fw-semibold">Observacion interna</label>
+    <textarea class="form-control" name="internalNotes" rows="3" placeholder="Contexto operativo, area, restricciones o motivo del bloqueo.">{{ user.internalNotes if user is defined else '' }}</textarea>
   </div>
 </div>

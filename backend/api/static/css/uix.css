@@ -982,6 +982,29 @@ body {
   font-size: 22px;
 }
 
+.admin-user-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 1248px);
+  margin: 0 auto 14px;
+}
+
+.admin-user-notice strong,
+.admin-user-notice span {
+  display: block;
+}
+
+.admin-temp-password .form-control {
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.admin-users-table {
+  min-width: 1120px;
+}
+
 .announcement-thumb {
   width: 72px;
   border-radius: 12px;
@@ -1681,7 +1704,8 @@ body {
   .template-help,
   .template-grid,
   .bulk-result-grid,
-  .dashboard-filter-grid {
+  .dashboard-filter-grid,
+  .admin-user-notice {
     grid-template-columns: 1fr;
   }
 }

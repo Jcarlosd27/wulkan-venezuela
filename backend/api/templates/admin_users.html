@@ -1,12 +1,47 @@
 {% extends "base.html" %}
 {% set heading = "Usuarios admin" %}
-{% set description = "Gestiona operadores internos, roles y acceso al panel Wulkan." %}
+{% set description = "Gestiona operadores internos, roles, bloqueo, claves temporales y accesos al panel Wulkan." %}
 
 {% block top_action %}
 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newAdminUserModal">
   <i class="bi bi-plus-lg"></i> Nuevo usuario
 </button>
 {% endblock %}
+
+{% macro user_status_actions(user) -%}
+<div class="d-flex flex-wrap justify-content-end gap-2">
+  <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editAdminUser{{ user.id | replace('-', '') }}">
+    <i class="bi bi-pencil"></i> Editar
+  </button>
+  {% if user.status != 'active' %}
+  <form method="post" action="{{ url_for('admin_user_status', user_id=user.id) }}">
+    {{ csrf_field() }}
+    <input type="hidden" name="status" value="active">
+    <button class="btn btn-sm btn-outline-success" type="submit"><i class="bi bi-check2-circle"></i> Activar</button>
+  </form>
+  {% elif session.get('admin_user_id') != user.id %}
+  <form method="post" action="{{ url_for('admin_user_status', user_id=user.id) }}">
+    {{ csrf_field() }}
+    <input type="hidden" name="status" value="blocked">
+    <button class="btn btn-sm btn-outline-warning" type="submit"><i class="bi bi-lock"></i> Bloquear</button>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin_user_reset_password', user_id=user.id) }}">
+    {{ csrf_field() }}
+    <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-key"></i> Reset</button>
+  </form>
+  <form method="post" action="{{ url_for('admin_user_revoke_sessions', user_id=user.id) }}">
+    {{ csrf_field() }}
+    <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-x-circle"></i> Sesiones</button>
+  </form>
+  {% if can_delete_data() and session.get('admin_user_id') != user.id %}
+  <form method="post" action="{{ url_for('admin_user_delete', user_id=user.id) }}">
+    {{ csrf_field() }}
+    <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+  </form>
+  {% endif %}
+</div>
+{%- endmacro %}
 
 {% block content %}
 {% if error %}
@@ -15,6 +50,56 @@
   <span>{{ error }}</span>
 </div>
 {% endif %}
+
+{% if notice %}
+<div class="alert alert-info border-0 admin-user-notice" role="alert">
+  <div>
+    <strong>{{ notice.title }}</strong>
+    <span>{{ notice.message }}</span>
+  </div>
+  <div class="input-group input-group-sm admin-temp-password">
+    <input class="form-control" type="password" value="{{ notice.password }}" readonly>
+    <button class="btn btn-outline-primary" type="button" data-password-toggle aria-label="Mostrar clave temporal" title="Mostrar clave temporal">
+      <i class="bi bi-eye"></i>
+    </button>
+  </div>
+</div>
+{% endif %}
+
+<section class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-people"></i></div>
+      <span>Usuarios</span>
+      <strong>{{ metrics.total }}</strong>
+      <em>Total</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-3">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Activos</span>
+      <strong>{{ metrics.active }}</strong>
+      <em>Panel</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-3">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-lock"></i></div>
+      <span>Bloqueados</span>
+      <strong>{{ metrics.blocked }}</strong>
+      <em>Seguridad</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-3">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-key"></i></div>
+      <span>Clave temporal</span>
+      <strong>{{ metrics.temporary }}</strong>
+      <em>Cambio</em>
+    </article>
+  </div>
+</section>
 
 <section class="panel category-panel">
   <div class="panel-header">
@@ -25,12 +110,14 @@
     <span>{{ users | length }} registros</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table">
+    <table class="table align-middle category-table admin-users-table">
       <thead>
         <tr>
           <th>Usuario</th>
-          <th>Email</th>
+          <th>Contacto</th>
           <th>Rol</th>
+          <th>Acceso</th>
+          <th>Seguridad</th>
           <th>Estado</th>
           <th class="text-end">Acciones</th>
         </tr>
@@ -47,28 +134,32 @@
               </div>
             </div>
           </td>
-          <td>{{ user.email }}</td>
+          <td>
+            <strong class="d-block">{{ user.email }}</strong>
+            <small class="text-secondary">{{ user.phone or 'Sin telefono' }}</small>
+          </td>
           <td><span class="badge text-bg-light">{{ role_labels.get(user.role, user.role) }}</span></td>
+          <td>
+            <strong class="d-block">{{ user.lastLoginAt or 'Sin ingreso' }}</strong>
+            <small class="text-secondary">{{ user.lastLoginIp or 'Sin IP registrada' }}</small>
+          </td>
+          <td>
+            <strong class="d-block">{{ user.failedLoginAttempts or 0 }} intentos</strong>
+            <small class="text-secondary">{{ user.lastFailedLoginAt or 'Sin fallos recientes' }}</small>
+            <button class="btn btn-sm btn-link px-0" type="button" data-bs-toggle="modal" data-bs-target="#accessLog{{ user.id | replace('-', '') }}">
+              Ver historial
+            </button>
+          </td>
           <td>
             <span class="badge {{ user.status | badge_class }}">{{ user.status }}</span>
             {% if user.mustChangePassword %}
-            <span class="badge text-bg-warning ms-1">Clave temporal</span>
+            <span class="badge text-bg-warning d-inline-block mt-1">Clave temporal</span>
             {% endif %}
           </td>
-          <td class="text-end">
-            <div class="d-flex justify-content-end gap-2">
-              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editAdminUser{{ loop.index }}">
-                <i class="bi bi-pencil"></i> Editar
-              </button>
-              {% if can_delete_data() and session.get('admin_user_id') != user.id %}
-              <form method="post" action="{{ url_for('admin_user_delete', user_id=user.id) }}">
-                {{ csrf_field() }}
-                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
-              </form>
-              {% endif %}
-            </div>
-          </td>
+          <td class="text-end">{{ user_status_actions(user) }}</td>
         </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-secondary">Sin usuarios admin registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -76,11 +167,14 @@
 </section>
 
 <div class="modal fade" id="newAdminUserModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <form class="modal-content" method="post">
       {{ csrf_field() }}
       <div class="modal-header">
-        <h2 class="modal-title h5">Nuevo usuario admin</h2>
+        <div>
+          <h2 class="modal-title h5">Nuevo usuario admin</h2>
+          <p class="mb-0 text-secondary">Crea acceso interno con clave temporal y rol operativo.</p>
+        </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
@@ -95,12 +189,15 @@
 </div>
 
 {% for user in users %}
-<div class="modal fade" id="editAdminUser{{ loop.index }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+<div class="modal fade" id="editAdminUser{{ user.id | replace('-', '') }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <form class="modal-content" method="post" action="{{ url_for('admin_user_edit', user_id=user.id) }}">
       {{ csrf_field() }}
       <div class="modal-header">
-        <h2 class="modal-title h5">Editar {{ user.name }}</h2>
+        <div>
+          <h2 class="modal-title h5">Editar {{ user.name }}</h2>
+          <p class="mb-0 text-secondary">Actualiza datos, rol, estado y observaciones internas.</p>
+        </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
@@ -111,6 +208,48 @@
         <button class="btn btn-primary" type="submit">Guardar cambios</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div class="modal fade" id="accessLog{{ user.id | replace('-', '') }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Historial de acceso</h2>
+          <p class="mb-0 text-secondary">{{ user.name }} - {{ user.email }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Evento</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% set access_events = access_events_by_user.get(user.id, []) %}
+              {% for event in access_events[:12] %}
+              <tr>
+                <td>{{ event.createdAt }}</td>
+                <td><span class="badge {{ event.action | badge_class }}">{{ event.action }}</span></td>
+                <td>{{ event.detail }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-secondary">Sin eventos de acceso registrados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
   </div>
 </div>
 {% endfor %}

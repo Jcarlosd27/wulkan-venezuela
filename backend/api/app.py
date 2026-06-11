@@ -96,8 +96,12 @@ SALE_TYPE_OPTIONS = [
 PAYMENT_TERM_OPTIONS = [0, 10, 15, 20, 30, 40]
 ROLE_LABELS = {
     "super_admin": "Super admin",
+    "general_manager": "Gerente general",
     "commercial_manager": "Gerente comercial",
     "operator": "Operador",
+    "collections": "Cobranza",
+    "dispatch": "Despacho",
+    "auditor": "Auditor",
     "sales": "Vendedor app movil",
     "inventory": "Inventario",
     "readonly": "Solo lectura",
@@ -105,13 +109,13 @@ ROLE_LABELS = {
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
 IMPORT_DRAFT_TTL_SECONDS = 60 * 60
-WEB_ADMIN_ROLES = {"super_admin", "commercial_manager", "operator", "inventory", "readonly"}
-WRITE_ROLES = {"super_admin", "commercial_manager", "operator"}
+WEB_ADMIN_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"}
+WRITE_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator"}
 SALES_ROLES = {"super_admin", "commercial_manager", "operator"}
 INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
-CREDIT_APPROVAL_ROLES = {"super_admin", "commercial_manager"}
-ORDER_MANAGEMENT_ROLES = {"super_admin", "commercial_manager", "operator"}
-COMMISSION_MANAGEMENT_ROLES = {"super_admin", "commercial_manager"}
+CREDIT_APPROVAL_ROLES = {"super_admin", "general_manager", "commercial_manager"}
+ORDER_MANAGEMENT_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator"}
+COMMISSION_MANAGEMENT_ROLES = {"super_admin", "general_manager", "commercial_manager"}
 MOBILE_SALES_ROLES = {"super_admin", "commercial_manager", "sales"}
 ADMIN_ONLY_ROLES = {"super_admin"}
 DELETE_ROLES = {"super_admin"}
@@ -167,7 +171,7 @@ ADMIN_MENU_GROUPS = [
         "items": [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit"]},
-            {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete"]},
+            {"module": "admin_users", "endpoint": "admin_users", "label": "Usuarios admin", "icon": "bi-people", "active": ["admin_users", "admin_user_edit", "admin_user_delete", "admin_user_status", "admin_user_reset_password", "admin_user_revoke_sessions"]},
         ],
     },
 ]
@@ -394,7 +398,7 @@ def web_admin_users(store: dict) -> list[dict]:
         [
             user
             for user in store.get("admin_users", [])
-            if user.get("role") != "sales"
+            if user.get("role") != "sales" and user.get("status") != "deleted"
         ],
         key=lambda user: user.get("name", ""),
     )
@@ -402,6 +406,52 @@ def web_admin_users(store: dict) -> list[dict]:
 
 def current_admin_user(store: dict) -> dict | None:
     return find_by_id(store.get("admin_users", []), session.get("admin_user_id", ""))
+
+
+def user_session_version(user: dict | None) -> int:
+    return safe_int((user or {}).get("sessionVersion"), 0)
+
+
+def bump_user_session_version(user: dict) -> None:
+    user["sessionVersion"] = user_session_version(user) + 1
+    user["updatedAt"] = utc_now()
+
+
+def admin_user_by_email(store: dict, email: str) -> dict | None:
+    normalized = email.strip().lower()
+    return next(
+        (
+            user
+            for user in store.get("admin_users", [])
+            if user.get("email", "").lower() == normalized
+        ),
+        None,
+    )
+
+
+def register_admin_user_failed_attempt(store: dict, email: str) -> None:
+    user = admin_user_by_email(store, email)
+    if not user:
+        return
+    user["failedLoginAttempts"] = safe_int(user.get("failedLoginAttempts")) + 1
+    user["lastFailedLoginAt"] = utc_now()
+    user["lastLoginIp"] = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    if user["failedLoginAttempts"] >= int(app.config.get("LOGIN_MAX_ATTEMPTS", 5)):
+        user["status"] = "blocked"
+        bump_user_session_version(user)
+    else:
+        user["updatedAt"] = utc_now()
+
+
+def reset_admin_user_failed_attempts(user: dict) -> None:
+    user["failedLoginAttempts"] = 0
+    user["lastFailedLoginAt"] = ""
+    user["lastLoginIp"] = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    user["updatedAt"] = utc_now()
+
+
+def temporary_admin_password() -> str:
+    return f"Wulkan{secrets.randbelow(900000) + 100000}"
 
 
 def current_seller_assignment(store: dict) -> tuple[str, str]:
@@ -998,6 +1048,10 @@ def require_admin_session():
         session.clear()
         return redirect(url_for("login", next=request.path))
 
+    if safe_int(session.get("admin_session_version")) != user_session_version(admin_user):
+        session.clear()
+        return redirect(url_for("login", next=request.path))
+
     session["admin_name"] = admin_user.get("name", "Admin Wulkan")
     session["admin_role"] = admin_user.get("role", "operator")
     session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
@@ -1025,6 +1079,7 @@ def login():
         store = load_store()
         if is_blocked_default_login(email):
             register_login_failure("admin", email)
+            register_admin_user_failed_attempt(store, email)
             record_audit_event(
                 store,
                 "login_failed",
@@ -1037,6 +1092,7 @@ def login():
             error = "Credenciales invalidas."
             return render_template("login.html", error=error)
         if is_login_limited("admin", email):
+            register_admin_user_failed_attempt(store, email)
             error = "Demasiados intentos. Espera unos minutos e intentalo nuevamente."
             record_audit_event(
                 store,
@@ -1078,14 +1134,24 @@ def login():
             session["admin_name"] = admin_user.get("name", "Admin Wulkan")
             session["admin_role"] = admin_user.get("role", "operator")
             session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
+            session["admin_session_version"] = user_session_version(admin_user)
             admin_user["lastLoginAt"] = utc_now()
-            record_audit_event(store, "login", "admin_user", admin_user["id"], "Inicio de sesion admin.")
+            reset_admin_user_failed_attempts(admin_user)
+            record_audit_event(
+                store,
+                "login",
+                "admin_user",
+                admin_user["id"],
+                "Inicio de sesion admin.",
+                metadata={"ipAddress": admin_user.get("lastLoginIp", "")},
+            )
             save_store(store)
             if session.get("must_change_password"):
                 return redirect(url_for("account_password"))
             return redirect(request.args.get("next") or url_for("dashboard"))
 
         register_login_failure("admin", email)
+        register_admin_user_failed_attempt(store, email)
         record_audit_event(
             store,
             "login_failed",
@@ -1102,6 +1168,19 @@ def login():
 
 @app.get("/logout")
 def logout():
+    if session.get("admin_authenticated"):
+        store = load_store()
+        admin_user = current_admin_user(store)
+        if admin_user:
+            record_audit_event(
+                store,
+                "logout",
+                "admin_user",
+                admin_user["id"],
+                "Cierre de sesion admin.",
+                actor={"id": admin_user["id"], "name": admin_user.get("name", ""), "role": admin_user.get("role", "")},
+            )
+            save_store(store)
     session.clear()
     return redirect(url_for("login"))
 
@@ -1129,8 +1208,9 @@ def account_password():
         else:
             admin_user["passwordHash"] = generate_password_hash(new_password)
             admin_user["mustChangePassword"] = False
-            admin_user["updatedAt"] = utc_now()
+            bump_user_session_version(admin_user)
             session["must_change_password"] = False
+            session["admin_session_version"] = user_session_version(admin_user)
             record_audit_event(
                 store,
                 "password_change",
@@ -3141,14 +3221,22 @@ def admin_user_payload(existing: dict | None = None) -> dict:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     now = utc_now()
+    first_name = request.form.get("firstName", "").strip()
+    last_name = request.form.get("lastName", "").strip()
+    display_name = request.form.get("name", "").strip()
+    if first_name or last_name:
+        display_name = f"{first_name} {last_name}".strip()
     payload = {
-        "name": request.form.get("name", "").strip(),
+        "firstName": first_name or (existing or {}).get("firstName", ""),
+        "lastName": last_name or (existing or {}).get("lastName", ""),
+        "name": display_name,
         "email": email,
         "role": request.form.get("role", "operator"),
         "status": request.form.get("status", "active"),
         "sellerCode": request.form.get("sellerCode", "").strip().upper(),
         "sellerZone": request.form.get("sellerZone", "").strip(),
         "phone": request.form.get("phone", "").strip(),
+        "internalNotes": request.form.get("internalNotes", "").strip(),
         "commissionRatePercent": float(request.form.get("commissionRatePercent") or (existing or {}).get("commissionRatePercent") or 0),
         "salesGoalUsd": float(request.form.get("salesGoalUsd") or (existing or {}).get("salesGoalUsd") or 0),
         "updatedAt": now,
@@ -3158,6 +3246,11 @@ def admin_user_payload(existing: dict | None = None) -> dict:
         payload["createdAt"] = now
         payload["passwordHash"] = generate_password_hash(password)
         payload["mustChangePassword"] = True
+        payload["failedLoginAttempts"] = 0
+        payload["lastFailedLoginAt"] = ""
+        payload["lastLoginAt"] = ""
+        payload["lastLoginIp"] = ""
+        payload["sessionVersion"] = 0
     else:
         payload["id"] = existing["id"]
         payload["createdAt"] = existing.get("createdAt", now)
@@ -3165,7 +3258,40 @@ def admin_user_payload(existing: dict | None = None) -> dict:
             generate_password_hash(password) if password else existing.get("passwordHash", "")
         )
         payload["mustChangePassword"] = True if password else bool(existing.get("mustChangePassword"))
+        payload["failedLoginAttempts"] = safe_int(existing.get("failedLoginAttempts"))
+        payload["lastFailedLoginAt"] = existing.get("lastFailedLoginAt", "")
+        payload["lastLoginAt"] = existing.get("lastLoginAt", "")
+        payload["lastLoginIp"] = existing.get("lastLoginIp", "")
+        payload["sessionVersion"] = user_session_version(existing)
+        payload["deletedAt"] = existing.get("deletedAt", "")
     return payload
+
+
+def admin_users_page_context(store: dict, error: str = "") -> dict:
+    users = web_admin_users(store)
+    audit_events = store.get("audit_events", [])
+    access_events_by_user: dict[str, list[dict]] = {}
+    for event in audit_events:
+        if event.get("entityType") != "admin_user":
+            continue
+        if event.get("action") not in {"login", "logout", "login_failed", "login_limited", "password_change", "password_reset", "session_revoke"}:
+            continue
+        access_events_by_user.setdefault(event.get("entityId", ""), []).append(event)
+    for events in access_events_by_user.values():
+        events.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
+    metrics = {
+        "total": len(users),
+        "active": sum(1 for user in users if user.get("status") == "active"),
+        "blocked": sum(1 for user in users if user.get("status") == "blocked"),
+        "temporary": sum(1 for user in users if user.get("mustChangePassword")),
+    }
+    return {
+        "users": users,
+        "metrics": metrics,
+        "error": error,
+        "notice": session.pop("admin_user_notice", None),
+        "access_events_by_user": access_events_by_user,
+    }
 
 
 def client_payload(existing: dict | None = None) -> dict:
@@ -3544,21 +3670,14 @@ def admin_users():
         email = request.form.get("email", "").strip().lower()
         error = admin_user_form_error(store)
         if error:
-            return render_template(
-                "admin_users.html",
-                users=web_admin_users(store),
-                error=error,
-            )
+            return render_template("admin_users.html", **admin_users_page_context(store, error))
         user = admin_user_payload()
         store["admin_users"].append(user)
         record_audit_event(store, "create", "admin_user", user["id"], f"Usuario admin creado: {email}.")
         save_store(store)
         return redirect(url_for("admin_users"))
 
-    return render_template(
-        "admin_users.html",
-        users=web_admin_users(store),
-    )
+    return render_template("admin_users.html", **admin_users_page_context(store))
 
 
 @app.post("/admin-users/<user_id>/edit")
@@ -3571,11 +3690,7 @@ def admin_user_edit(user_id: str):
     if user:
         error = admin_user_form_error(store, user)
         if error:
-            return render_template(
-                "admin_users.html",
-                users=web_admin_users(store),
-                error=error,
-            )
+            return render_template("admin_users.html", **admin_users_page_context(store, error))
         before = copy.deepcopy(user)
         updated = admin_user_payload(user)
         store["admin_users"] = [updated if item["id"] == user_id else item for item in store["admin_users"]]
@@ -3600,15 +3715,102 @@ def admin_user_delete(user_id: str):
     if not user or user.get("role") == "sales" or user_id == session.get("admin_user_id"):
         return redirect(url_for("admin_users"))
     before = copy.deepcopy(user)
-    store["admin_users"] = [item for item in store.get("admin_users", []) if item.get("id") != user_id]
+    user["status"] = "deleted"
+    user["deletedAt"] = utc_now()
+    bump_user_session_version(user)
     record_change_event(
         store,
-        "delete",
+        "logical_delete",
         "admin_user",
         user_id,
-        f"Usuario admin eliminado: {user.get('email', user_id)}.",
+        f"Usuario admin eliminado logicamente: {user.get('email', user_id)}.",
         before,
-        None,
+        user,
+    )
+    save_store(store)
+    return redirect(url_for("admin_users"))
+
+
+@app.post("/admin-users/<user_id>/status")
+@require_roles("super_admin")
+def admin_user_status(user_id: str):
+    store = load_store()
+    user = find_by_id(store.get("admin_users", []), user_id)
+    target_status = request.form.get("status", "").strip()
+    if not user or user.get("role") == "sales" or target_status not in {"active", "inactive", "blocked"}:
+        return redirect(url_for("admin_users"))
+    if user_id == session.get("admin_user_id") and target_status != "active":
+        return redirect(url_for("admin_users"))
+    before = copy.deepcopy(user)
+    user["status"] = target_status
+    if target_status == "active":
+        user["failedLoginAttempts"] = 0
+        user["lastFailedLoginAt"] = ""
+    bump_user_session_version(user)
+    record_change_event(
+        store,
+        "status_update",
+        "admin_user",
+        user_id,
+        f"Usuario admin marcado como {target_status}: {user.get('email', user_id)}.",
+        before,
+        user,
+    )
+    save_store(store)
+    return redirect(url_for("admin_users"))
+
+
+@app.post("/admin-users/<user_id>/reset-password")
+@require_roles("super_admin")
+def admin_user_reset_password(user_id: str):
+    store = load_store()
+    user = find_by_id(store.get("admin_users", []), user_id)
+    if not user or user.get("role") == "sales" or user.get("status") == "deleted":
+        return redirect(url_for("admin_users"))
+    before = copy.deepcopy(user)
+    password = temporary_admin_password()
+    user["passwordHash"] = generate_password_hash(password)
+    user["mustChangePassword"] = True
+    user["failedLoginAttempts"] = 0
+    user["lastFailedLoginAt"] = ""
+    if user.get("status") == "blocked":
+        user["status"] = "active"
+    bump_user_session_version(user)
+    record_change_event(
+        store,
+        "password_reset",
+        "admin_user",
+        user_id,
+        f"Clave temporal generada para {user.get('email', user_id)}.",
+        before,
+        user,
+    )
+    session["admin_user_notice"] = {
+        "title": "Clave temporal generada",
+        "message": f"Entrega esta clave a {user.get('email', user_id)} y solicita cambio al ingresar.",
+        "password": password,
+    }
+    save_store(store)
+    return redirect(url_for("admin_users"))
+
+
+@app.post("/admin-users/<user_id>/revoke-sessions")
+@require_roles("super_admin")
+def admin_user_revoke_sessions(user_id: str):
+    store = load_store()
+    user = find_by_id(store.get("admin_users", []), user_id)
+    if not user or user.get("role") == "sales" or user.get("status") == "deleted":
+        return redirect(url_for("admin_users"))
+    before = copy.deepcopy(user)
+    bump_user_session_version(user)
+    record_change_event(
+        store,
+        "session_revoke",
+        "admin_user",
+        user_id,
+        f"Sesiones activas cerradas para {user.get('email', user_id)}.",
+        before,
+        user,
     )
     save_store(store)
     return redirect(url_for("admin_users"))
