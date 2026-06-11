@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import csv
 import copy
@@ -20,7 +21,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import get_config
 from graphify import rotation_chart, stock_health
-from storage import save_uploaded_file
+from storage import save_uploaded_file, stream_size
 from store import (
     INSECURE_PRODUCTION_ADMIN_EMAILS,
     INSECURE_PRODUCTION_CLIENT_EMAILS,
@@ -65,6 +66,22 @@ def add_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy-Report-Only",
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+        "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+        "font-src 'self' https://cdn.jsdelivr.net data:; "
+        "img-src 'self' data: https: blob:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'",
+    )
+    if response.mimetype == "text/html" and (session.get("admin_authenticated") or request.endpoint == "login"):
+        response.headers.setdefault("Cache-Control", "no-store, max-age=0")
+        response.headers.setdefault("Pragma", "no-cache")
     if app.config.get("ENV") == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
@@ -604,6 +621,117 @@ ADMIN_MENU_GROUPS = [
         ],
     },
 ]
+ENDPOINT_MODULE_MAP = {
+    item["endpoint"]: item["module"]
+    for group in ADMIN_MENU_GROUPS
+    for item in group["items"]
+}
+for group in ADMIN_MENU_GROUPS:
+    for item in group["items"]:
+        for endpoint_name in item["active"]:
+            ENDPOINT_MODULE_MAP.setdefault(endpoint_name, item["module"])
+ENDPOINT_MODULE_MAP["dashboard"] = "dashboard"
+ENDPOINT_MODULE_MAP.update({
+    "credit_export": "credit",
+    "credit_due_export": "credit",
+    "credit_history_export": "credit",
+    "import_issues_export": "import_templates",
+})
+
+ENDPOINT_ACTION_OVERRIDES = {
+    "dashboard": "view",
+    "download_import_template": "export",
+    "import_issues_export": "export",
+    "admin_users": {"GET": "view", "POST": "create"},
+    "admin_user_edit": "edit",
+    "admin_user_delete": "delete",
+    "admin_user_status": "edit",
+    "admin_user_reset_password": "edit",
+    "admin_user_revoke_sessions": "annul",
+    "sellers": {"GET": "view", "POST": "create"},
+    "sellers_import": "import",
+    "seller_edit": "edit",
+    "seller_delete": "delete",
+    "clients": {"GET": "view", "POST": "create"},
+    "clients_import": "import",
+    "client_edit": "edit",
+    "client_status_update": "edit",
+    "client_delete": "delete",
+    "crm": {"GET": "view", "POST": "create"},
+    "crm_export": "export",
+    "crm_update": "edit",
+    "crm_activity_create": "create",
+    "crm_delete": "delete",
+    "credit": "view",
+    "credit_due": "view",
+    "credit_history": "view",
+    "credit_export": "export",
+    "credit_due_export": "export",
+    "credit_history_export": "export",
+    "credit_decision": "approve",
+    "collections": "view",
+    "collections_export": "export",
+    "collection_statement": "export",
+    "collection_action": "edit",
+    "orders": "view",
+    "orders_export": "export",
+    "order_new": "create",
+    "order_status_update": "edit",
+    "order_payment_create": "edit",
+    "dispatch": "view",
+    "dispatch_export": "export",
+    "dispatch_update": "edit",
+    "quotes": "view",
+    "quotes_export": "export",
+    "quote_new": "create",
+    "quote_edit": "edit",
+    "quote_status_update": "approve",
+    "quote_duplicate": "create",
+    "quote_convert": "create",
+    "quote_download": "export",
+    "commissions": "view",
+    "commissions_export": "export",
+    "commission_status_update": "approve",
+    "reports": "view",
+    "reports_export": "export",
+    "reports_print": "export",
+    "products": "view",
+    "products_export": "export",
+    "products_import": "import",
+    "product_new": "create",
+    "product_edit": "edit",
+    "product_duplicate": "create",
+    "product_delete": "delete",
+    "categories": {"GET": "view", "POST": "create"},
+    "categories_export": "export",
+    "categories_import": "import",
+    "category_edit": "edit",
+    "category_status": "edit",
+    "category_delete": "delete",
+    "media_library": {"GET": "view", "POST": "create"},
+    "media_library_import": "import",
+    "media_asset_delete": "delete",
+    "stock": {"GET": "view", "POST": "create"},
+    "stock_export": "export",
+    "stock_import": "import",
+    "announcements": {"GET": "view", "POST": "create"},
+    "announcements_import": "import",
+    "announcement_edit": "edit",
+    "announcement_delete": "delete",
+    "service_technicians": {"GET": "view", "POST": "create"},
+    "service_technicians_import": "import",
+    "service_technician_edit": "edit",
+    "service_technician_delete": "delete",
+    "import_templates": "view",
+    "documents": {"GET": "view", "POST": "create"},
+    "documents_import": "import",
+    "documents_export": "export",
+    "document_delete": "delete",
+    "audit": "view",
+    "audit_export": "export",
+    "settings": {"GET": "view", "POST": "edit"},
+    "permissions": "view",
+}
 
 IMPORT_TEMPLATE_GROUPS = [
     {
@@ -932,7 +1060,7 @@ def register_admin_user_failed_attempt(store: dict, email: str) -> None:
         return
     user["failedLoginAttempts"] = safe_int(user.get("failedLoginAttempts")) + 1
     user["lastFailedLoginAt"] = utc_now()
-    user["lastLoginIp"] = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    user["lastLoginIp"] = request_ip_address()
     if user["failedLoginAttempts"] >= int(app.config.get("LOGIN_MAX_ATTEMPTS", 5)):
         user["status"] = "blocked"
         bump_user_session_version(user)
@@ -943,12 +1071,98 @@ def register_admin_user_failed_attempt(store: dict, email: str) -> None:
 def reset_admin_user_failed_attempts(user: dict) -> None:
     user["failedLoginAttempts"] = 0
     user["lastFailedLoginAt"] = ""
-    user["lastLoginIp"] = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    user["lastLoginIp"] = request_ip_address()
     user["updatedAt"] = utc_now()
 
 
 def temporary_admin_password() -> str:
     return f"Wulkan{secrets.randbelow(900000) + 100000}"
+
+
+def request_ip_address() -> str:
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
+
+def request_user_agent() -> str:
+    return request.headers.get("User-Agent", "").strip()[:280]
+
+
+def request_device_hash() -> str:
+    raw_value = f"{request_user_agent()}|{request.headers.get('Accept-Language', '').strip()[:80]}"
+    return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:32]
+
+
+def admin_session_record(session_id: str) -> dict:
+    now = int(time.time())
+    return {
+        "id": session_id,
+        "createdAt": utc_now(),
+        "createdEpoch": now,
+        "lastSeenAt": utc_now(),
+        "lastSeenEpoch": now,
+        "ipAddress": request_ip_address(),
+        "userAgent": request_user_agent(),
+        "deviceHash": request_device_hash(),
+        "revokedAt": "",
+    }
+
+
+def start_admin_session(admin_user: dict) -> None:
+    session_id = secrets.token_urlsafe(24)
+    now = int(time.time())
+    session["admin_authenticated"] = True
+    session["admin_user_id"] = admin_user["id"]
+    session["admin_name"] = admin_user.get("name", "Admin Wulkan")
+    session["admin_role"] = admin_user.get("role", "operator")
+    session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
+    session["admin_session_version"] = user_session_version(admin_user)
+    session["admin_session_id"] = session_id
+    session["admin_login_at"] = now
+    session["admin_last_seen_at"] = now
+    session["admin_device_hash"] = request_device_hash()
+    session["admin_ip_address"] = request_ip_address()
+
+    active_sessions = [
+        item for item in admin_user.get("activeSessions", [])
+        if not item.get("revokedAt")
+    ]
+    active_sessions.append(admin_session_record(session_id))
+    admin_user["activeSessions"] = active_sessions[-8:]
+
+
+def validate_admin_session(admin_user: dict) -> tuple[str, bool]:
+    now = int(time.time())
+    login_at = safe_int(session.get("admin_login_at"), now)
+    last_seen_at = safe_int(session.get("admin_last_seen_at"), now)
+    idle_limit = int(app.config.get("ADMIN_SESSION_IDLE_SECONDS", 3600))
+    absolute_limit = int(app.config.get("ADMIN_SESSION_ABSOLUTE_SECONDS", 28800))
+
+    if idle_limit and now - last_seen_at > idle_limit:
+        return "Sesion expirada por inactividad.", False
+    if absolute_limit and now - login_at > absolute_limit:
+        return "Sesion expirada por tiempo maximo.", False
+    if session.get("admin_device_hash") and session.get("admin_device_hash") != request_device_hash():
+        return "Sesion cerrada por cambio de dispositivo.", False
+
+    session_id = session.get("admin_session_id", "")
+    active_session = None
+    if session_id:
+        active_session = next(
+            (item for item in admin_user.get("activeSessions", []) if item.get("id") == session_id),
+            None,
+        )
+        if active_session and active_session.get("revokedAt"):
+            return "Sesion cerrada remotamente.", False
+        if admin_user.get("activeSessions") and not active_session:
+            return "Sesion no reconocida.", False
+
+    session["admin_last_seen_at"] = now
+    if active_session and now - safe_int(active_session.get("lastSeenEpoch"), 0) >= 300:
+        active_session["lastSeenAt"] = utc_now()
+        active_session["lastSeenEpoch"] = now
+        active_session["ipAddress"] = request_ip_address()
+        return "", True
+    return "", False
 
 
 def current_seller_assignment(store: dict) -> tuple[str, str]:
@@ -1523,6 +1737,18 @@ def can_access_module(module: str) -> bool:
     return can_module_action(module, "view")
 
 
+def endpoint_permission(endpoint: str, method: str) -> tuple[str, str] | None:
+    module = ENDPOINT_MODULE_MAP.get(endpoint)
+    if not module:
+        return None
+    override = ENDPOINT_ACTION_OVERRIDES.get(endpoint, "view")
+    if isinstance(override, dict):
+        action = override.get(method, override.get("*", "view"))
+    else:
+        action = override
+    return module, action
+
+
 def can_delete_data() -> bool:
     return any(role_can(current_admin_role(), module, "delete") for module in ALL_MODULE_KEYS)
 
@@ -1788,6 +2014,23 @@ def require_admin_session():
         session.clear()
         return redirect(url_for("login", next=request.path))
 
+    session_error, session_store_changed = validate_admin_session(admin_user)
+    if session_error:
+        record_audit_event(
+            store,
+            "session_revoke",
+            "admin_user",
+            admin_user["id"],
+            session_error,
+            actor={"id": admin_user["id"], "name": admin_user.get("name", ""), "role": admin_user.get("role", "")},
+            metadata={"sessionId": session.get("admin_session_id", ""), "deviceHash": session.get("admin_device_hash", "")},
+        )
+        save_store(store)
+        session.clear()
+        return redirect(url_for("login", next=request.path))
+    if session_store_changed:
+        save_store(store)
+
     session["admin_name"] = admin_user.get("name", "Admin Wulkan")
     session["admin_role"] = admin_user.get("role", "operator")
     session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
@@ -1799,6 +2042,22 @@ def require_admin_session():
     allowed_password_endpoints = {"account_password", "logout"}
     if session.get("must_change_password") and request.endpoint not in allowed_password_endpoints:
         return redirect(url_for("account_password"))
+
+    required_permission = endpoint_permission(request.endpoint or "", request.method)
+    if required_permission:
+        module, action = required_permission
+        if not can_module_action(module, action):
+            record_audit_event(
+                store,
+                "unauthorized",
+                module,
+                request.endpoint or request.path,
+                f"Intento no autorizado: {module}.{action}.",
+                actor={"id": admin_user["id"], "name": admin_user.get("name", ""), "role": admin_user.get("role", "")},
+                metadata={"path": request.path, "method": request.method, "requiredAction": action},
+            )
+            save_store(store)
+            return forbidden_response()
 
     return None
 
@@ -1865,12 +2124,7 @@ def login():
                 error = "Los vendedores ingresan desde la app movil. El panel web es solo administrativo."
                 return render_template("login.html", error=error)
             reset_login_attempts("admin", email)
-            session["admin_authenticated"] = True
-            session["admin_user_id"] = admin_user["id"]
-            session["admin_name"] = admin_user.get("name", "Admin Wulkan")
-            session["admin_role"] = admin_user.get("role", "operator")
-            session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
-            session["admin_session_version"] = user_session_version(admin_user)
+            start_admin_session(admin_user)
             admin_user["lastLoginAt"] = utc_now()
             reset_admin_user_failed_attempts(admin_user)
             record_audit_event(
@@ -1879,7 +2133,11 @@ def login():
                 "admin_user",
                 admin_user["id"],
                 "Inicio de sesion admin.",
-                metadata={"ipAddress": admin_user.get("lastLoginIp", "")},
+                metadata={
+                    "ipAddress": admin_user.get("lastLoginIp", ""),
+                    "sessionId": session.get("admin_session_id", ""),
+                    "deviceHash": session.get("admin_device_hash", ""),
+                },
             )
             save_store(store)
             if session.get("must_change_password"):
@@ -1908,6 +2166,10 @@ def logout():
         store = load_store()
         admin_user = current_admin_user(store)
         if admin_user:
+            session_id = session.get("admin_session_id", "")
+            for active_session in admin_user.get("activeSessions", []):
+                if active_session.get("id") == session_id and not active_session.get("revokedAt"):
+                    active_session["revokedAt"] = utc_now()
             record_audit_event(
                 store,
                 "logout",
@@ -1915,6 +2177,7 @@ def logout():
                 admin_user["id"],
                 "Cierre de sesion admin.",
                 actor={"id": admin_user["id"], "name": admin_user.get("name", ""), "role": admin_user.get("role", "")},
+                metadata={"sessionId": session_id},
             )
             save_store(store)
     session.clear()
@@ -2017,15 +2280,40 @@ def mobile_token_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="wulkan-mobile-client")
 
 
+def mobile_device_id() -> str:
+    payload = request.get_json(silent=True) if request.method in {"POST", "PUT", "PATCH"} else {}
+    payload = payload or {}
+    return (
+        request.headers.get("X-Wulkan-Device-Id")
+        or request.headers.get("X-Device-Id")
+        or str(payload.get("deviceId") or "")
+        or request_device_hash()
+    )[:120]
+
+
 def issue_mobile_token(client: dict) -> str:
     return mobile_token_serializer().dumps(
-        {"type": "client", "clientId": client["id"], "id": client["id"], "role": "client"}
+        {
+            "type": "client",
+            "clientId": client["id"],
+            "id": client["id"],
+            "role": "client",
+            "sessionVersion": safe_int(client.get("mobileSessionVersion"), 0),
+            "deviceId": mobile_device_id(),
+        }
     )
 
 
 def issue_mobile_admin_token(user: dict) -> str:
     return mobile_token_serializer().dumps(
-        {"type": "admin", "adminUserId": user["id"], "id": user["id"], "role": user.get("role", "")}
+        {
+            "type": "admin",
+            "adminUserId": user["id"],
+            "id": user["id"],
+            "role": user.get("role", ""),
+            "sessionVersion": user_session_version(user),
+            "deviceId": mobile_device_id(),
+        }
     )
 
 
@@ -2039,11 +2327,27 @@ def mobile_token_payload() -> dict:
         return {}
 
     try:
-        payload = mobile_token_serializer().loads(token, max_age=60 * 60 * 24 * 7)
+        payload = mobile_token_serializer().loads(
+            token,
+            max_age=int(app.config.get("MOBILE_TOKEN_MAX_AGE_SECONDS", 60 * 60 * 24 * 7)),
+        )
     except (BadSignature, SignatureExpired):
         return {}
 
     return payload if isinstance(payload, dict) else {}
+
+
+def mobile_token_matches_device(payload: dict) -> bool:
+    header_device = request.headers.get("X-Wulkan-Device-Id") or request.headers.get("X-Device-Id")
+    return not header_device or not payload.get("deviceId") or hmac.compare_digest(str(payload.get("deviceId")), header_device[:120])
+
+
+def mobile_token_version_valid(subject: dict, payload: dict, version_key: str) -> bool:
+    if not mobile_token_matches_device(payload):
+        return False
+    if "sessionVersion" not in payload:
+        return not bool(app.config.get("REJECT_LEGACY_MOBILE_TOKENS"))
+    return safe_int(payload.get("sessionVersion"), -1) == safe_int(subject.get(version_key), 0)
 
 
 def mobile_token_client_id() -> str:
@@ -2061,13 +2365,15 @@ def mobile_token_admin_id() -> str:
 
 
 def require_mobile_sales_user(store: dict) -> tuple[dict | None, object | None]:
-    admin_id = mobile_token_admin_id()
+    payload = mobile_token_payload()
+    admin_id = payload.get("adminUserId") or payload.get("id", "") if payload.get("type") == "admin" else ""
     user = find_by_id(store.get("admin_users", []), admin_id)
     if (
         not user
         or user.get("status") != "active"
         or user.get("role") not in MOBILE_SALES_ROLES
         or user.get("mobileAccessEnabled", True) is False
+        or not mobile_token_version_valid(user, payload, "sessionVersion")
     ):
         return None, jsonify({"error": "Token de vendedor requerido."})
     return user, None
@@ -2079,6 +2385,20 @@ def require_mobile_client_id() -> tuple[str, object | None]:
     if require_token and not mobile_token_client_id():
         return "", jsonify({"error": "Token movil requerido."})
     return customer_id, None
+
+
+def require_mobile_client(store: dict) -> tuple[dict | None, object | None]:
+    payload = mobile_token_payload()
+    if not payload:
+        if app.config.get("REQUIRE_MOBILE_TOKEN"):
+            return None, jsonify({"error": "Token movil requerido."})
+        return None, None
+    if payload.get("type", "client") != "client":
+        return None, jsonify({"error": "Token de cliente requerido."})
+    client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
+    if not client or client.get("status") != "active" or not mobile_token_version_valid(client, payload, "mobileSessionVersion"):
+        return None, jsonify({"error": "Token movil invalido."})
+    return client, None
 
 
 def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | None]:
@@ -2096,12 +2416,13 @@ def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | No
             and user.get("status") == "active"
             and user.get("role") in MOBILE_SALES_ROLES
             and user.get("mobileAccessEnabled", True) is not False
+            and mobile_token_version_valid(user, payload, "sessionVersion")
         ):
             return user, None
         return None, jsonify({"error": "Token movil invalido."})
 
     client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
-    if client and client.get("status") == "active":
+    if client and client.get("status") == "active" and mobile_token_version_valid(client, payload, "mobileSessionVersion"):
         return client, None
     return None, jsonify({"error": "Token movil invalido."})
 
@@ -2279,12 +2600,13 @@ def mobile_profile_from_token(store: dict) -> tuple[dict | None, object | None]:
             or user.get("status") != "active"
             or user.get("role") not in MOBILE_SALES_ROLES
             or user.get("mobileAccessEnabled", True) is False
+            or not mobile_token_version_valid(user, token_payload, "sessionVersion")
         ):
             return None, jsonify({"error": "Token movil invalido."})
         return mobile_admin_payload(user, "")["customer"], None
 
     client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
-    if not client or client.get("status") != "active":
+    if not client or client.get("status") != "active" or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion"):
         return None, jsonify({"error": "Cliente no encontrado."})
     return mobile_customer_payload(client, store, "")["customer"], None
 
@@ -2625,6 +2947,12 @@ def read_tabular_upload(file_storage) -> list[dict]:
         raise BadRequest("Selecciona un archivo .xlsx, .xlsm o .csv para la carga masiva.")
 
     filename = file_storage.filename.lower()
+    if not filename.endswith((".xlsx", ".xlsm", ".csv")):
+        raise BadRequest("Formato no soportado. Usa .xlsx, .xlsm o .csv.")
+    max_bytes = int(app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024))
+    if max_bytes and stream_size(file_storage) > max_bytes:
+        raise BadRequest(f"Archivo demasiado grande. Maximo permitido: {max_bytes // (1024 * 1024)} MB.")
+
     rows: list[dict] = []
     if filename.endswith((".xlsx", ".xlsm")):
         from openpyxl import load_workbook
@@ -2644,6 +2972,8 @@ def read_tabular_upload(file_storage) -> list[dict]:
             }
             if any(str(value).strip() for value in row.values() if value is not None):
                 rows.append(row)
+                if len(rows) > int(app.config.get("MAX_IMPORT_ROWS", 5000)):
+                    raise BadRequest("La carga supera el maximo de filas permitido.")
         return rows
 
     if filename.endswith(".csv"):
@@ -2659,6 +2989,8 @@ def read_tabular_upload(file_storage) -> list[dict]:
             }
             if any(str(value).strip() for value in row.values() if value is not None):
                 rows.append(row)
+                if len(rows) > int(app.config.get("MAX_IMPORT_ROWS", 5000)):
+                    raise BadRequest("La carga supera el maximo de filas permitido.")
         return rows
 
     raise BadRequest("Formato no soportado. Usa .xlsx, .xlsm o .csv.")
@@ -4304,7 +4636,9 @@ def record_audit_event(
         "entityType": entity_type,
         "entityId": entity_id,
         "detail": detail,
-        "ipAddress": request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip(),
+        "ipAddress": request_ip_address(),
+        "userAgent": request_user_agent(),
+        "deviceHash": request_device_hash(),
         "path": request.path,
         "method": request.method,
         "createdAt": utc_now(),
@@ -4924,6 +5258,7 @@ def save_upload(file_storage, folder: str = "library") -> str:
             s3_endpoint_url=app.config.get("S3_ENDPOINT_URL", ""),
             s3_prefix=app.config.get("S3_PREFIX", "wulkan"),
             s3_acl=app.config.get("S3_ACL", ""),
+            max_bytes=int(app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)),
         )
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
@@ -7447,6 +7782,9 @@ def admin_user_revoke_sessions(user_id: str):
     if not user or user.get("role") == "sales" or user.get("status") == "deleted":
         return redirect(url_for("admin_users"))
     before = copy.deepcopy(user)
+    for active_session in user.get("activeSessions", []):
+        if not active_session.get("revokedAt"):
+            active_session["revokedAt"] = utc_now()
     bump_user_session_version(user)
     record_change_event(
         store,
@@ -10666,9 +11004,10 @@ def api_create_order():
     store = load_store()
     payload = request.get_json(silent=True) or {}
     customer_payload = payload.get("customer") or {}
-    customer_id = mobile_token_client_id() or customer_payload.get("id", "")
-    if app.config.get("REQUIRE_MOBILE_TOKEN") and not mobile_token_client_id():
-        return jsonify({"error": "Token movil requerido."}), 401
+    client, auth_error = require_mobile_client(store)
+    if auth_error:
+        return auth_error, 401
+    customer_id = (client or {}).get("id") or customer_payload.get("id", "")
     payload["customerId"] = customer_id
     order, error = build_commercial_order(
         store,
@@ -10708,9 +11047,10 @@ def api_create_order():
 @app.get("/api/mobile/orders")
 def api_orders():
     store = load_store()
-    customer_id, auth_error = require_mobile_client_id()
+    client, auth_error = require_mobile_client(store)
     if auth_error:
         return auth_error, 401
+    customer_id = (client or {}).get("id") or request.args.get("customerId", "").strip()
     orders = store.get("orders", [])
     if customer_id:
         orders = [order for order in orders if order.get("customerId") == customer_id]
@@ -11169,10 +11509,11 @@ def api_mobile_seller_activities():
 @app.get("/api/mobile/credit")
 def api_client_credit():
     store = load_store()
-    customer_id, auth_error = require_mobile_client_id()
+    client, auth_error = require_mobile_client(store)
     if auth_error:
         return auth_error, 401
-    client = find_by_id(store.get("clients", []), customer_id)
+    if not client:
+        client = find_by_id(store.get("clients", []), request.args.get("customerId", "").strip())
     if not client:
         return jsonify({"error": "Cliente no encontrado."}), 404
 
@@ -11373,6 +11714,9 @@ def api_client_login():
     if client and check_password_hash(client.get("passwordHash", ""), password):
         reset_login_attempts("mobile", email)
         client["lastLoginAt"] = utc_now()
+        client["lastMobileLoginIp"] = request_ip_address()
+        client["lastMobileDeviceId"] = mobile_device_id()
+        client["mobileSessionVersion"] = safe_int(client.get("mobileSessionVersion"), 0)
         access_token = issue_mobile_token(client)
         record_audit_event(
             store,
@@ -11381,6 +11725,7 @@ def api_client_login():
             client["id"],
             "Inicio de sesion movil.",
             actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
+            metadata={"ipAddress": client["lastMobileLoginIp"], "deviceId": client["lastMobileDeviceId"]},
         )
         save_store(store)
         return jsonify(mobile_customer_payload(client, store, access_token))
@@ -11399,6 +11744,8 @@ def api_client_login():
     if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
         reset_login_attempts("mobile", email)
         admin_user["lastMobileLoginAt"] = utc_now()
+        admin_user["lastMobileLoginIp"] = request_ip_address()
+        admin_user["lastMobileDeviceId"] = mobile_device_id()
         access_token = issue_mobile_admin_token(admin_user)
         record_audit_event(
             store,
@@ -11407,6 +11754,7 @@ def api_client_login():
             admin_user["id"],
             "Inicio de sesion movil operativo.",
             actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": admin_user.get("role", "")},
+            metadata={"ipAddress": admin_user["lastMobileLoginIp"], "deviceId": admin_user["lastMobileDeviceId"]},
         )
         save_store(store)
         return jsonify(mobile_admin_payload(admin_user, access_token))
@@ -11438,12 +11786,13 @@ def api_mobile_refresh_token():
             or user.get("status") != "active"
             or user.get("role") not in MOBILE_SALES_ROLES
             or user.get("mobileAccessEnabled", True) is False
+            or not mobile_token_version_valid(user, token_payload, "sessionVersion")
         ):
             return jsonify({"error": "Token movil invalido."}), 401
         return jsonify(mobile_admin_payload(user, issue_mobile_admin_token(user)))
 
     client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
-    if not client or client.get("status") != "active":
+    if not client or client.get("status") != "active" or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion"):
         return jsonify({"error": "Cliente no encontrado."}), 401
     return jsonify(mobile_customer_payload(client, store, issue_mobile_token(client)))
 
@@ -11497,9 +11846,10 @@ def api_client_change_password():
             or subject.get("status") != "active"
             or subject.get("role") not in MOBILE_SALES_ROLES
             or subject.get("mobileAccessEnabled", True) is False
+            or not mobile_token_version_valid(subject, token_payload, "sessionVersion")
         ):
             return jsonify({"error": "Token movil invalido."}), 401
-    elif not subject or subject.get("status") != "active":
+    elif not subject or subject.get("status") != "active" or not mobile_token_version_valid(subject, token_payload, "mobileSessionVersion"):
         return jsonify({"error": "Cliente no encontrado."}), 404
 
     payload = request.get_json(silent=True) or {}
@@ -11526,6 +11876,10 @@ def api_client_change_password():
 
     subject["passwordHash"] = generate_password_hash(new_password)
     subject["mustChangePassword"] = False
+    if subject_type == "client":
+        subject["mobileSessionVersion"] = safe_int(subject.get("mobileSessionVersion"), 0) + 1
+    else:
+        bump_user_session_version(subject)
     subject["updatedAt"] = utc_now()
     record_audit_event(
         store,
@@ -11540,7 +11894,11 @@ def api_client_change_password():
         },
     )
     save_store(store)
-    return jsonify({"status": "updated", "mustChangePassword": False})
+    if subject_type == "client":
+        access_token = issue_mobile_token(subject)
+    else:
+        access_token = issue_mobile_admin_token(subject)
+    return jsonify({"status": "updated", "mustChangePassword": False, "accessToken": access_token, "tokenType": "Bearer"})
 
 
 @app.post("/api/v1/mobile/auth/recover-password")

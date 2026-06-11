@@ -10,19 +10,67 @@ from werkzeug.utils import secure_filename
 
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
-ALLOWED_FOLDERS = {"products", "categories", "announcements", "library"}
+ALLOWED_FOLDERS = {"products", "categories", "announcements", "library", "documents"}
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif"}
+MAGIC_HEADERS = {
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "pdf": (b"%PDF-",),
+}
 
 
 def file_extension(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
-def validate_upload(file_storage: FileStorage) -> str:
+def stream_size(file_storage: FileStorage) -> int:
+    stream = file_storage.stream
+    position = stream.tell()
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(position)
+    return size
+
+
+def validate_magic_header(file_storage: FileStorage, extension: str) -> None:
+    stream = file_storage.stream
+    position = stream.tell()
+    stream.seek(0)
+    header = stream.read(16)
+    stream.seek(position)
+
+    if extension == "webp":
+        if not (header.startswith(b"RIFF") and header[8:12] == b"WEBP"):
+            raise ValueError("El archivo WEBP no tiene una firma valida.")
+        return
+
+    allowed_headers = MAGIC_HEADERS.get(extension)
+    if allowed_headers and not any(header.startswith(signature) for signature in allowed_headers):
+        raise ValueError(f"El archivo .{extension} no tiene una firma valida.")
+
+
+def validate_declared_mime(file_storage: FileStorage, extension: str) -> None:
+    content_type = (file_storage.mimetype or "").lower()
+    if not content_type or content_type == "application/octet-stream":
+        return
+    if extension in IMAGE_EXTENSIONS and not content_type.startswith("image/"):
+        raise ValueError("El tipo MIME no coincide con una imagen valida.")
+    if extension == "pdf" and content_type != "application/pdf":
+        raise ValueError("El tipo MIME no coincide con un PDF valido.")
+
+
+def validate_upload(file_storage: FileStorage, max_bytes: int = 0) -> str:
     filename = secure_filename(file_storage.filename or "")
     extension = file_extension(filename)
     if not filename or extension not in ALLOWED_EXTENSIONS:
         allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
         raise ValueError(f"Archivo no permitido. Formatos validos: {allowed}.")
+    if max_bytes and stream_size(file_storage) > max_bytes:
+        raise ValueError(f"Archivo demasiado grande. Maximo permitido: {max_bytes // (1024 * 1024)} MB.")
+    validate_declared_mime(file_storage, extension)
+    validate_magic_header(file_storage, extension)
     return filename
 
 
@@ -98,11 +146,12 @@ def save_uploaded_file(
     s3_endpoint_url: str,
     s3_prefix: str,
     s3_acl: str = "",
+    max_bytes: int = 0,
 ) -> str:
     if not file_storage or not file_storage.filename:
         return ""
 
-    filename = validate_upload(file_storage)
+    filename = validate_upload(file_storage, max_bytes=max_bytes)
     backend = storage_backend.strip().lower()
     if backend == "s3":
         return save_s3(

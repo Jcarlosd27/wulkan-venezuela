@@ -93,6 +93,7 @@ Luego de levantar:
 
 ```bash
 python backend/api/scripts/smoke_production.py --base-url https://wulkan.example.com
+python backend/api/scripts/smoke_security.py
 ```
 
 Tambien se puede ejecutar con npm desde la raiz para entorno local:

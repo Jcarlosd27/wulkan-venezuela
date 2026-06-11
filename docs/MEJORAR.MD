@@ -1505,6 +1505,25 @@ La seguridad debe validarse en backend, no solo en frontend.
 
 ---
 
+## Avance Fase 4
+
+* [x] Contrasenas hasheadas.
+* [x] CSRF en Admin Panel.
+* [x] Tokens seguros para app con expiracion, version de sesion y dispositivo.
+* [x] Bloqueo por intentos fallidos.
+* [x] Registro de IP.
+* [x] Registro de dispositivo.
+* [x] Sesiones activas en admin con huella de dispositivo e inactividad.
+* [x] Cierre remoto con invalidacion de version y marcado de sesiones.
+* [x] Permisos por endpoint en backend.
+* [x] Validacion de archivos por extension, MIME y firma.
+* [x] Limite tamano archivos y maximo de filas importadas.
+* [ ] URLs firmadas para documentos privados.
+* [ ] Sanitizacion avanzada de inputs rich text/URLs.
+* [x] Proteccion contra acciones no autorizadas.
+
+---
+
 # 5. UI/UX ADMIN PANEL
 
 El panel debe verse moderno y ordenado.
