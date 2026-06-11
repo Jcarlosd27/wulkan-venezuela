@@ -2,7 +2,7 @@
 {% set heading = "Comisiones" %}
 {% set description = "Controla comisiones por vendedor, orden, estado de venta y liquidacion comercial." %}
 
-{% block actions %}
+{% block top_action %}
 {% if can_export_commissions %}
 <a class="btn btn-light" href="{{ url_for('commissions_export') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">
   <i class="bi bi-download"></i> Exportar CSV

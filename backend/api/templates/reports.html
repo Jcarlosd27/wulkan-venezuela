@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% set heading = "Reportes" %}
+{% set description = "Exportables comerciales, financieros, inventario y vendedores para decision gerencial." %}
+
+{% block top_action %}
+{% if can_export_reports %}
+<div class="d-flex flex-wrap gap-2">
+  <a class="btn btn-light" href="{{ url_for('reports_export') }}{% if request.query_string %}?{{ request.query_string.decode() }}&format=csv{% else %}?format=csv{% endif %}">
+    <i class="bi bi-filetype-csv"></i> CSV
+  </a>
+  <a class="btn btn-light" href="{{ url_for('reports_export') }}{% if request.query_string %}?{{ request.query_string.decode() }}&format=xlsx{% else %}?format=xlsx{% endif %}">
+    <i class="bi bi-file-earmark-spreadsheet"></i> Excel
+  </a>
+  <a class="btn btn-primary" target="_blank" href="{{ url_for('reports_print') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">
+    <i class="bi bi-printer"></i> PDF
+  </a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-receipt"></i></div>
+      <span>Ordenes</span>
+      <strong>{{ metrics.orders }}</strong>
+      <em>{{ report_title }}</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+      <span>Ventas</span>
+      <strong>{{ money_usd(metrics.sales) }}</strong>
+      <em>Periodo filtrado</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
+      <span>Por cobrar</span>
+      <strong>{{ money_usd(metrics.receivable) }}</strong>
+      <em>Vencido {{ money_usd(metrics.overdue) }}</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-percent"></i></div>
+      <span>Comisiones</span>
+      <strong>{{ money_usd(metrics.commission) }}</strong>
+      <em>Stock disp. {{ metrics.stock_units }}</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Reporte</label>
+      <select class="form-select" name="type">
+        {% for value, label in report_type_options %}
+        <option value="{{ value }}" {% if filters.type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Desde</label>
+      <input class="form-control" type="date" name="date_from" value="{{ filters.date_from }}">
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Hasta</label>
+      <input class="form-control" type="date" name="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="col-12 col-md-3 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in seller_options %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-4 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Cliente</label>
+      <select class="form-select" name="client">
+        <option value="">Todos</option>
+        {% for client in client_options %}
+        <option value="{{ client.id }}" {% if filters.client == client.id %}selected{% endif %}>{{ client.businessName }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-4 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Categoria</label>
+      <select class="form-select" name="category">
+        <option value="">Todas</option>
+        {% for category in category_options %}
+        <option value="{{ category.id }}" {% if filters.category == category.id %}selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-4 col-xl-3">
+      <label class="form-label small text-secondary fw-semibold">Producto</label>
+      <select class="form-select" name="product">
+        <option value="">Todos</option>
+        {% for product in product_options %}
+        <option value="{{ product.id }}" {% if filters.product == product.id %}selected{% endif %}>{{ product.sku }} - {{ product.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-4 col-xl-2">
+      <label class="form-label small text-secondary fw-semibold">Estado orden</label>
+      <select class="form-select" name="order_status">
+        <option value="">Todos</option>
+        {% for value, label in order_status_options %}
+        <option value="{{ value }}" {% if filters.order_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-2 col-xl-1 d-grid">
+      <button class="btn btn-primary" type="submit"><i class="bi bi-funnel"></i></button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  {% set graph_items = [
+    ("Ventas por dia", charts.sales_by_day),
+    ("Ventas por vendedor", charts.seller_totals),
+    ("Ventas por categoria", charts.category_totals),
+    ("Por cobrar por cliente", charts.receivables_by_client),
+    ("Stock por categoria", charts.stock_by_category),
+    ("Comisiones por vendedor", charts.seller_commissions)
+  ] %}
+  {% for title, graph in graph_items %}
+  <div class="col-12 col-lg-6 col-xxl-4">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>{{ title }}</h2>
+          <span>Graphify</span>
+        </div>
+      </div>
+      {% set max_value = graph["values"]|max if graph["values"] else 0 %}
+      <div class="graphify-bars">
+        {% for label in graph["labels"] %}
+        {% set value = graph["values"][loop.index0] %}
+        <div class="graphify-row">
+          <span class="graphify-label">{{ label }}</span>
+          <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if max_value == 0 else (value / max_value * 100) }}%"></span></span>
+          <strong>{{ value }}</strong>
+        </div>
+        {% else %}
+        <span class="text-secondary small">Sin datos filtrados.</span>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="panel category-panel">
+  <div class="panel-header">
+    <div>
+      <h2>Reporte {{ report_title }}</h2>
+      <span>Datos reales filtrados desde el panel Wulkan.</span>
+    </div>
+    <span>{{ rows | length }} registros</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle category-table">
+      <thead>
+        <tr>
+          {% for key, label in columns %}
+          <th>{{ label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for key, label in columns %}
+          <td>{{ row.get(key, "") }}</td>
+          {% endfor %}
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="{{ columns | length }}">
+            <div class="empty-state compact">
+              <div class="empty-icon"><i class="bi bi-file-bar-graph"></i></div>
+              <strong>Sin registros</strong>
+              <span>Ajusta filtros o carga informacion operativa.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

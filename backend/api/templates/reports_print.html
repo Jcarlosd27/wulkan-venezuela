@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title>Reporte {{ report_title }} - Wulkan</title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
+      header { border-bottom: 2px solid #ff4b0b; margin-bottom: 20px; padding-bottom: 12px; }
+      h1 { margin: 0; font-size: 24px; }
+      p { margin: 6px 0 0; color: #64748b; }
+      .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+      .metric { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+      .metric span { display: block; color: #64748b; font-size: 12px; }
+      .metric strong { font-size: 18px; }
+      table { border-collapse: collapse; width: 100%; font-size: 11px; }
+      th { background: #111827; color: #fff; text-align: left; padding: 8px; }
+      td { border-bottom: 1px solid #e5e7eb; padding: 8px; vertical-align: top; }
+      @media print {
+        body { margin: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Reporte {{ report_title }} - Wulkan Venezuela</h1>
+      <p>Generado {{ now or "" }} | filtros: {{ filters }}</p>
+    </header>
+    <section class="metrics">
+      <div class="metric"><span>Ordenes</span><strong>{{ metrics.orders }}</strong></div>
+      <div class="metric"><span>Ventas</span><strong>{{ money_usd(metrics.sales) }}</strong></div>
+      <div class="metric"><span>Por cobrar</span><strong>{{ money_usd(metrics.receivable) }}</strong></div>
+      <div class="metric"><span>Comisiones</span><strong>{{ money_usd(metrics.commission) }}</strong></div>
+    </section>
+    <table>
+      <thead>
+        <tr>
+          {% for key, label in columns %}
+          <th>{{ label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for key, label in columns %}
+          <td>{{ row.get(key, "") }}</td>
+          {% endfor %}
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="{{ columns | length }}">Sin registros para los filtros seleccionados.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script>window.addEventListener("load", () => window.print());</script>
+  </body>
+</html>

@@ -301,6 +301,12 @@ COMMISSION_RULE_OPTIONS = [
     ("new_client", "Cliente nuevo"),
     ("manager_override", "Regla especial"),
 ]
+REPORT_TYPE_OPTIONS = [
+    ("commercial", "Comercial"),
+    ("finance", "Financiero"),
+    ("inventory", "Inventario"),
+    ("sellers", "Vendedores"),
+]
 ROLE_LABELS = {
     "super_admin": "Super admin",
     "general_manager": "Gerente general",
@@ -505,7 +511,8 @@ ADMIN_MENU_GROUPS = [
             {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "orders_export", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "dispatch", "endpoint": "dispatch", "label": "Despacho", "icon": "bi-truck", "active": ["dispatch", "dispatch_export", "dispatch_update"]},
             {"module": "quotes", "endpoint": "quotes", "label": "Cotizaciones", "icon": "bi-file-earmark-text", "active": ["quotes", "quote_new", "quote_edit", "quote_status_update", "quote_duplicate", "quote_convert", "quote_download", "quotes_export"]},
-            {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
+            {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update", "commissions_export"]},
+            {"module": "reports", "endpoint": "reports", "label": "Reportes", "icon": "bi-file-bar-graph", "active": ["reports", "reports_export", "reports_print"]},
         ],
     },
     {
@@ -966,6 +973,10 @@ def commission_status_label(value: str) -> str:
 
 def commission_rule_label(value: str) -> str:
     return dict(COMMISSION_RULE_OPTIONS).get(value, value or "Regla general")
+
+
+def report_type_label(value: str) -> str:
+    return dict(REPORT_TYPE_OPTIONS).get(value, "Comercial")
 
 
 def quote_status_label(value: str) -> str:
@@ -1626,6 +1637,7 @@ def security_context():
         "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
         "commission_rule_label": commission_rule_label,
+        "report_type_label": report_type_label,
         "quote_status_label": quote_status_label,
         "crm_record_type_label": crm_record_type_label,
         "crm_stage_label": crm_stage_label,
@@ -6168,6 +6180,314 @@ def commissions_page_context(store: dict, error: str = "") -> dict:
     }
 
 
+def reports_filters_from_request() -> dict[str, str]:
+    report_type = request.args.get("type", "commercial").strip() or "commercial"
+    if report_type not in dict(REPORT_TYPE_OPTIONS):
+        report_type = "commercial"
+    return {
+        "type": report_type,
+        "date_from": request.args.get("date_from", "").strip(),
+        "date_to": request.args.get("date_to", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "client": request.args.get("client", "").strip(),
+        "category": request.args.get("category", "").strip(),
+        "product": request.args.get("product", "").strip(),
+        "order_status": request.args.get("order_status", "").strip(),
+    }
+
+
+def report_orders(store: dict, filters: dict[str, str]) -> list[dict]:
+    movements = store.get("credit_movements", [])
+    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
+    dashboard_filters = {
+        "date_from": filters.get("date_from", ""),
+        "date_to": filters.get("date_to", ""),
+        "seller": filters.get("seller", ""),
+        "client": filters.get("client", ""),
+        "category": filters.get("category", ""),
+        "product": filters.get("product", ""),
+        "order_status": filters.get("order_status", ""),
+        "credit_status": "",
+        "collection_status": "",
+        "dispatch_status": "",
+        "sale_type": "",
+        "branch": "",
+    }
+    orders = [
+        enrich_order(order, movements)
+        for order in visible_orders_for_current_user(store)
+    ]
+    return [
+        order
+        for order in orders
+        if order_matches_dashboard_filters(order, dashboard_filters, products_by_id, products_by_sku)
+    ]
+
+
+def reports_product_lines(order: dict, products_by_id: dict[str, dict], products_by_sku: dict[str, dict]) -> list[dict]:
+    lines: list[dict] = []
+    for item in order.get("items") or []:
+        product = products_by_id.get(item.get("productId", "")) or products_by_sku.get(item.get("sku", "")) or {}
+        lines.append(
+            {
+                "sku": item.get("sku") or product.get("sku", ""),
+                "title": item.get("title") or product.get("title", ""),
+                "category": product.get("categoryName") or "Sin categoria",
+                "quantity": safe_int(item.get("quantity"), 0),
+                "lineTotalUsd": safe_float(item.get("lineTotalUsd"), 0),
+            }
+        )
+    return lines
+
+
+def report_columns_for(report_type: str) -> list[tuple[str, str]]:
+    columns = {
+        "commercial": [
+            ("fecha", "Fecha"),
+            ("orden", "Orden"),
+            ("cliente", "Cliente"),
+            ("vendedor", "Vendedor"),
+            ("tipo_venta", "Tipo venta"),
+            ("estado", "Estado"),
+            ("items", "Items"),
+            ("total_usd", "Total USD"),
+            ("abonado_usd", "Abonado USD"),
+            ("saldo_usd", "Saldo USD"),
+        ],
+        "finance": [
+            ("vence", "Vence"),
+            ("orden", "Orden"),
+            ("cliente", "Cliente"),
+            ("vendedor", "Vendedor"),
+            ("condicion", "Condicion"),
+            ("estado_cobranza", "Cobranza"),
+            ("total_usd", "Total USD"),
+            ("abonado_usd", "Abonado USD"),
+            ("saldo_usd", "Saldo USD"),
+            ("ultimo_abono", "Ultimo abono"),
+        ],
+        "inventory": [
+            ("sku", "SKU"),
+            ("producto", "Producto"),
+            ("categoria", "Categoria"),
+            ("estado", "Estado"),
+            ("stock", "Stock"),
+            ("reservado", "Reservado"),
+            ("disponible", "Disponible"),
+            ("rotacion", "Rotacion"),
+            ("precio_usd", "Precio USD"),
+            ("valor_stock_usd", "Valor stock USD"),
+        ],
+        "sellers": [
+            ("vendedor", "Vendedor"),
+            ("zona", "Zona"),
+            ("clientes", "Clientes"),
+            ("ordenes", "Ordenes"),
+            ("ventas_usd", "Ventas USD"),
+            ("ticket_promedio_usd", "Ticket promedio USD"),
+            ("meta_usd", "Meta USD"),
+            ("avance_meta", "Avance meta"),
+            ("comision_pendiente_usd", "Comision pendiente USD"),
+            ("comision_pagada_usd", "Comision pagada USD"),
+        ],
+    }
+    return columns.get(report_type, columns["commercial"])
+
+
+def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) -> list[dict]:
+    report_type = filters["type"]
+    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
+    if report_type == "commercial":
+        rows = []
+        for order in sorted(orders, key=lambda item: item.get("createdAt", ""), reverse=True):
+            lines = reports_product_lines(order, products_by_id, products_by_sku)
+            rows.append(
+                {
+                    "fecha": order.get("createdAt", ""),
+                    "orden": order.get("orderId", ""),
+                    "cliente": order.get("customerName", ""),
+                    "vendedor": order.get("sellerName", ""),
+                    "tipo_venta": order.get("saleTypeLabel", ""),
+                    "estado": order.get("statusLabel", ""),
+                    "items": " | ".join(f"{line['sku']} x{line['quantity']}" for line in lines),
+                    "total_usd": round(safe_float(order.get("totalUsd"), 0), 2),
+                    "abonado_usd": round(safe_float(order.get("paidUsd"), 0), 2),
+                    "saldo_usd": round(safe_float(order.get("balanceUsd"), 0), 2),
+                }
+            )
+        return rows
+    if report_type == "finance":
+        return [
+            {
+                "vence": order.get("dueDate", "") or "Sin plazo",
+                "orden": order.get("orderId", ""),
+                "cliente": order.get("customerName", ""),
+                "vendedor": order.get("sellerName", ""),
+                "condicion": order.get("saleTypeLabel", ""),
+                "estado_cobranza": order.get("collectionStatusLabel", ""),
+                "total_usd": round(safe_float(order.get("totalUsd"), 0), 2),
+                "abonado_usd": round(safe_float(order.get("paidUsd"), 0), 2),
+                "saldo_usd": round(safe_float(order.get("balanceUsd"), 0), 2),
+                "ultimo_abono": order.get("lastPaymentAt", ""),
+            }
+            for order in sorted(orders, key=lambda item: (item.get("dueDate", ""), item.get("createdAt", "")))
+            if safe_float(order.get("balanceUsd"), 0) > 0
+        ]
+    if report_type == "inventory":
+        products = [enrich_product(product) for product in store.get("products", [])]
+        if filters.get("category"):
+            products = [product for product in products if product.get("categoryId") == filters["category"]]
+        if filters.get("product"):
+            products = [product for product in products if product.get("id") == filters["product"]]
+        return [
+            {
+                "sku": product.get("sku", ""),
+                "producto": product.get("title", ""),
+                "categoria": product.get("categoryName", ""),
+                "estado": product.get("statusLabel", ""),
+                "stock": safe_int(product.get("stock"), 0),
+                "reservado": safe_int(product.get("reserved"), 0),
+                "disponible": max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)),
+                "rotacion": safe_int(product.get("rotationLast30Days"), 0),
+                "precio_usd": round(safe_float(product.get("publicPriceUsd"), 0), 2),
+                "valor_stock_usd": round(max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)) * safe_float(product.get("publicPriceUsd"), 0), 2),
+            }
+            for product in sorted(products, key=lambda item: (item.get("categoryName", ""), item.get("title", "")))
+        ]
+    sellers = [enrich_seller(store, seller) for seller in store.get("sellers", []) if seller.get("status") != "deleted"]
+    if filters.get("seller"):
+        sellers = [seller for seller in sellers if seller.get("id") == filters["seller"]]
+    return [
+        {
+            "vendedor": seller.get("name", ""),
+            "zona": seller.get("zone", ""),
+            "clientes": seller.get("clientsCount", 0),
+            "ordenes": seller.get("ordersCount", 0),
+            "ventas_usd": round(safe_float(seller.get("salesUsd"), 0), 2),
+            "ticket_promedio_usd": round(safe_float(seller.get("ticketAverageUsd"), 0), 2),
+            "meta_usd": round(safe_float(seller.get("salesGoalUsd"), 0), 2),
+            "avance_meta": f"{seller.get('goalProgressPercent', 0)}%",
+            "comision_pendiente_usd": round(safe_float(seller.get("commissionPendingUsd"), 0), 2),
+            "comision_pagada_usd": round(safe_float(seller.get("commissionPaidUsd"), 0), 2),
+        }
+        for seller in sorted(sellers, key=lambda item: safe_float(item.get("salesUsd"), 0), reverse=True)
+    ]
+
+
+def reports_page_context(store: dict) -> dict:
+    filters = reports_filters_from_request()
+    orders = report_orders(store, filters)
+    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
+    rows = build_report_rows(store, filters, orders)
+    payments = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if movement.get("movementType") == "payment"
+    ]
+    seller_totals: dict[str, float] = {}
+    category_totals: dict[str, float] = {}
+    sales_by_day: dict[str, float] = {}
+    receivables_by_client: dict[str, float] = {}
+    stock_by_category: dict[str, float] = {}
+    seller_commissions: dict[str, float] = {}
+    for order in orders:
+        value = safe_float(order.get("totalUsd"), 0)
+        seller = order.get("sellerName") or "Sin vendedor"
+        seller_totals[seller] = seller_totals.get(seller, 0) + value
+        sales_day = parse_utc_datetime(order.get("createdAt", "")).date().isoformat()
+        sales_by_day[sales_day] = sales_by_day.get(sales_day, 0) + value
+        if safe_float(order.get("balanceUsd"), 0) > 0:
+            client_name = order.get("customerName") or "Cliente Wulkan"
+            receivables_by_client[client_name] = receivables_by_client.get(client_name, 0) + safe_float(order.get("balanceUsd"), 0)
+        seller_commissions[seller] = seller_commissions.get(seller, 0) + safe_float(order.get("commissionUsd"), 0)
+        for line in reports_product_lines(order, products_by_id, products_by_sku):
+            category_totals[line["category"]] = category_totals.get(line["category"], 0) + safe_float(line.get("lineTotalUsd"), 0)
+    for product in store.get("products", []):
+        category = product.get("categoryName") or "Sin categoria"
+        available = max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0))
+        stock_by_category[category] = stock_by_category.get(category, 0) + available
+    metrics = {
+        "orders": len(orders),
+        "sales": round(sum(safe_float(order.get("totalUsd"), 0) for order in orders), 2),
+        "receivable": round(sum(safe_float(order.get("balanceUsd"), 0) for order in orders if safe_float(order.get("balanceUsd"), 0) > 0), 2),
+        "overdue": round(sum(safe_float(order.get("balanceUsd"), 0) for order in orders if order.get("dueStatus") == "overdue"), 2),
+        "payments": round(sum(safe_float(payment.get("amountUsd"), 0) for payment in payments), 2),
+        "commission": round(sum(safe_float(order.get("commissionUsd"), 0) for order in orders), 2),
+        "stock_units": sum(max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)) for product in store.get("products", [])),
+    }
+    return {
+        "filters": filters,
+        "report_type_options": REPORT_TYPE_OPTIONS,
+        "report_title": report_type_label(filters["type"]),
+        "columns": report_columns_for(filters["type"]),
+        "rows": rows,
+        "metrics": metrics,
+        "now": utc_now(),
+        "orders": orders,
+        "seller_options": sorted(store.get("sellers", []), key=lambda item: item.get("name", "")),
+        "client_options": sorted(store.get("clients", []), key=lambda item: item.get("businessName", "")),
+        "category_options": product_category_options(store),
+        "product_options": sorted(store.get("products", []), key=lambda item: item.get("title", "")),
+        "order_status_options": ORDER_STATUS_OPTIONS,
+        "charts": {
+            "sales_by_day": graphify_from_pairs(list(sales_by_day.items()), 8),
+            "seller_totals": graphify_from_pairs(list(seller_totals.items()), 8),
+            "category_totals": graphify_from_pairs(list(category_totals.items()), 8),
+            "receivables_by_client": graphify_from_pairs(list(receivables_by_client.items()), 8),
+            "stock_by_category": graphify_from_pairs(list(stock_by_category.items()), 8),
+            "seller_commissions": graphify_from_pairs(list(seller_commissions.items()), 8),
+        },
+        "can_export_reports": can_module_action("reports", "export"),
+    }
+
+
+def report_response_csv(context: dict) -> Response:
+    output = io.StringIO()
+    columns = context["columns"]
+    writer = csv.DictWriter(output, fieldnames=[key for key, _label in columns], lineterminator="\n")
+    writer.writeheader()
+    for row in context["rows"]:
+        writer.writerow({key: row.get(key, "") for key, _label in columns})
+    filename = f"reporte_{context['filters']['type']}_wulkan.csv"
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def report_response_xlsx(context: dict):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Reporte"
+    columns = context["columns"]
+    sheet.append([f"Reporte {context['report_title']}"])
+    sheet.append([f"Generado: {utc_now()}"])
+    sheet.append([])
+    sheet.append([label for _key, label in columns])
+    header_fill = PatternFill("solid", fgColor="111827")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in sheet[4]:
+        cell.fill = header_fill
+        cell.font = header_font
+    for row in context["rows"]:
+        sheet.append([row.get(key, "") for key, _label in columns])
+    for index, (_key, label) in enumerate(columns, start=1):
+        sheet.column_dimensions[sheet.cell(row=4, column=index).column_letter].width = min(max(len(label) + 8, 16), 34)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"reporte_{context['filters']['type']}_wulkan.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 def service_technician_payload(existing: dict | None = None) -> dict:
     name = request.form.get("name", "").strip()
     now = utc_now()
@@ -9221,6 +9541,50 @@ def commission_status_update(order_id: str):
     )
     save_store(store)
     return redirect(url_for("commissions"))
+
+
+@app.get("/reports")
+@require_roles(*roles_for_action("reports", "view"))
+def reports():
+    store = load_store()
+    return render_template("reports.html", **reports_page_context(store))
+
+
+@app.get("/reports/export")
+@require_roles(*roles_for_action("reports", "export"))
+def reports_export():
+    export_format = request.args.get("format", "csv").strip().lower()
+    store = load_store()
+    context = reports_page_context(store)
+    record_audit_event(
+        store,
+        "export",
+        "report",
+        context["filters"]["type"],
+        f"Reporte {context['report_title']} exportado en {export_format}.",
+        metadata={"filters": context["filters"]},
+    )
+    save_store(store)
+    if export_format == "xlsx":
+        return report_response_xlsx(context)
+    return report_response_csv(context)
+
+
+@app.get("/reports/print")
+@require_roles(*roles_for_action("reports", "export"))
+def reports_print():
+    store = load_store()
+    context = reports_page_context(store)
+    record_audit_event(
+        store,
+        "export",
+        "report",
+        context["filters"]["type"],
+        f"Reporte {context['report_title']} abierto para PDF.",
+        metadata={"filters": context["filters"], "format": "print"},
+    )
+    save_store(store)
+    return render_template("reports_print.html", **context)
 
 
 @app.route("/announcements", methods=["GET", "POST"])
