@@ -5,7 +5,7 @@ Estado actual:
 - Flutter SDK instalado en `C:\Users\sidne\development\flutter`.
 - Android package: `com.wulkan.mobile`.
 - App label: `Wulkan`.
-- Backend productivo: `https://crmwulky.com.ve/api/mobile`.
+- Backend productivo: `https://crmwulky.com.ve/api/v1/mobile`.
 - La app movil usa API Flask. No usa Firebase ni Firestore.
 
 ## PATH Recomendado
@@ -66,5 +66,5 @@ Mientras `flutter run` esta abierto, cada cambio se puede enviar al movil con `r
 
 La app instalada por APK no necesita estar conectada a la computadora. Mientras el telefono tenga internet, consulta el backend publico:
 
-- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/mobile`
-- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/mobile/orders`
+- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/v1/mobile`
+- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/v1/mobile/orders`

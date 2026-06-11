@@ -319,9 +319,19 @@ class ApiMobileRepository implements MobileRepository {
 
   @override
   Future<MobileProduct?> getProduct(String id) async {
+    try {
+      final payload = await _getPayload("/products/$id");
+      final product = payload["product"];
+      if (product is Map<String, dynamic>) {
+        return mapApiProduct(_asString(product["id"], fallback: id), product);
+      }
+    } catch (_) {
+      // Legacy backends without product-detail endpoint still work via catalog.
+    }
+
     final products = await listProducts();
     for (final product in products) {
-      if (product.id == id) {
+      if (product.id == id || product.sku == id) {
         return product;
       }
     }

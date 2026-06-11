@@ -105,9 +105,9 @@ Debe validar:
 
 - `/healthz`.
 - `/readyz`.
-- `/api/mobile/products`.
-- `/api/mobile/categories`.
-- `/api/mobile/announcements`.
+- `/api/v1/mobile/products`.
+- `/api/v1/mobile/categories`.
+- `/api/v1/mobile/announcements`.
 
 ## Backups
 
@@ -172,8 +172,8 @@ Configurar:
 {
   "WULKAN_MOBILE_DATA_SOURCE": "api",
   "WULKAN_MOBILE_AUTH_MODE": "api",
-  "WULKAN_ADMIN_API_URL": "https://wulkan.example.com/api/mobile",
-  "WULKAN_MOBILE_ORDER_API_URL": "https://wulkan.example.com/api/mobile/orders"
+  "WULKAN_ADMIN_API_URL": "https://wulkan.example.com/api/v1/mobile",
+  "WULKAN_MOBILE_ORDER_API_URL": "https://wulkan.example.com/api/v1/mobile/orders"
 }
 ```
 

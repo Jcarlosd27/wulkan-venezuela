@@ -16,7 +16,7 @@ Plataforma ecommerce B2B para Wulkan Venezuela. El sistema permite administrar c
 - Flask + Bootstrap 5.3 + UIX + Graphify.
 - PostgreSQL en DigitalOcean Managed Database.
 - DigitalOcean Spaces para fotos, banners y PDFs.
-- Flutter Android consumiendo `https://crmwulky.com.ve/api/mobile`.
+- Flutter Android consumiendo `https://crmwulky.com.ve/api/v1/mobile`.
 
 El proyecto ya no usa Next.js, Firebase, Firestore, Cloud Functions ni monorepo Node/pnpm.
 
@@ -49,5 +49,5 @@ La app movil debe compilarse con:
 
 - `WULKAN_MOBILE_DATA_SOURCE=api`
 - `WULKAN_MOBILE_AUTH_MODE=api`
-- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/mobile`
-- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/mobile/orders`
+- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/v1/mobile`
+- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/v1/mobile/orders`

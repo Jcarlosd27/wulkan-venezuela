@@ -78,11 +78,11 @@ class MobileEnvironment {
       exchangeRateUsdVes: double.tryParse(exchangeRate) ?? 38.5,
       adminApiUrl: const String.fromEnvironment(
         "WULKAN_ADMIN_API_URL",
-        defaultValue: "https://crmwulky.com.ve/api/mobile",
+        defaultValue: "https://crmwulky.com.ve/api/v1/mobile",
       ),
       orderApiUrl: const String.fromEnvironment(
         "WULKAN_MOBILE_ORDER_API_URL",
-        defaultValue: "https://crmwulky.com.ve/api/mobile/orders",
+        defaultValue: "https://crmwulky.com.ve/api/v1/mobile/orders",
       ),
     );
   }

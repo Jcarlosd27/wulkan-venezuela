@@ -8,7 +8,7 @@ App Android Flutter para clientes ferreteros y vendedores Wulkan. La app inicia 
 - Dart.
 - Riverpod.
 - GoRouter.
-- API Flask publica en `https://crmwulky.com.ve/api/mobile`.
+- API Flask publica en `https://crmwulky.com.ve/api/v1/mobile`.
 - Storage seguro local para sesion movil.
 
 La app ya no usa Firebase ni Firestore.
@@ -21,8 +21,8 @@ Produccion y DigitalOcean usan API:
 {
   "WULKAN_MOBILE_DATA_SOURCE": "api",
   "WULKAN_MOBILE_AUTH_MODE": "api",
-  "WULKAN_ADMIN_API_URL": "https://crmwulky.com.ve/api/mobile",
-  "WULKAN_MOBILE_ORDER_API_URL": "https://crmwulky.com.ve/api/mobile/orders"
+  "WULKAN_ADMIN_API_URL": "https://crmwulky.com.ve/api/v1/mobile",
+  "WULKAN_MOBILE_ORDER_API_URL": "https://crmwulky.com.ve/api/v1/mobile/orders"
 }
 ```
 

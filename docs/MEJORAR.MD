@@ -1424,11 +1424,11 @@ El backend debe conectar Admin Panel y App Móvil.
 
 ## Requisitos
 
-* API versionada.
-* Autenticación por token.
-* Validación por rol.
-* Validación de permisos.
-* Respuestas JSON consistentes.
+* [x] API versionada para app movil bajo `/api/v1/mobile`, manteniendo compatibilidad legacy con `/api/mobile`.
+* [x] Autenticación por token para ferreteros y usuarios moviles comerciales.
+* [x] Validación por rol en endpoints moviles de vendedor, gerente comercial y ferretero.
+* [x] Validación de permisos/cartera para clientes, ordenes, cotizaciones y actividades creadas desde vendedor movil.
+* [x] Respuestas JSON consistentes con `items`, objetos de dominio y `meta` de version en endpoints v1.
 * Manejo de errores.
 * Logs.
 * Paginación.
@@ -1442,27 +1442,27 @@ El backend debe conectar Admin Panel y App Móvil.
 
 ### Auth
 
-* Login.
-* Logout.
-* Refresh token.
-* Cambiar contraseña.
-* Recuperar contraseña.
+* [x] Login.
+* [x] Logout.
+* [x] Refresh token.
+* [x] Cambiar contraseña.
+* [x] Recuperar contraseña.
 
 ### Mobile
 
-* Obtener home.
-* Obtener productos.
-* Obtener detalle producto.
-* Obtener categorías.
-* Obtener banners.
-* Obtener carrito.
-* Crear orden.
-* Ver órdenes.
-* Ver crédito.
-* Ver perfil.
-* Crear cliente vendedor.
-* Crear cotización vendedor.
-* Registrar actividad vendedor.
+* [x] Obtener home.
+* [x] Obtener productos.
+* [x] Obtener detalle producto.
+* [x] Obtener categorías.
+* [x] Obtener banners.
+* [x] Obtener carrito.
+* [x] Crear orden.
+* [x] Ver órdenes.
+* [x] Ver crédito.
+* [x] Ver perfil.
+* [x] Crear cliente vendedor.
+* [x] Crear cotización vendedor.
+* [x] Registrar actividad vendedor.
 
 ### Admin
 

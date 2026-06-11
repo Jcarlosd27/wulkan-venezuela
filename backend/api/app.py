@@ -1752,7 +1752,7 @@ def security_context():
 def protect_admin_csrf():
     if request.method != "POST":
         return None
-    if request.path.startswith("/api/mobile/"):
+    if request.path.startswith(("/api/mobile/", "/api/v1/mobile/")):
         return None
 
     stored_token = session.get("_csrf_token", "")
@@ -1769,7 +1769,7 @@ def protect_admin_csrf():
 
 @app.before_request
 def require_admin_session():
-    public_prefixes = ("/api/mobile/", "/static/")
+    public_prefixes = ("/api/mobile/", "/api/v1/mobile/", "/static/")
     public_endpoints = {"login", "healthz", "readyz"}
 
     if request.path.startswith(public_prefixes) or request.endpoint in public_endpoints:
@@ -2208,6 +2208,87 @@ def mobile_admin_payload(user: dict, access_token: str) -> dict:
     }
 
 
+def mobile_api_meta() -> dict:
+    return {
+        "apiVersion": "v1",
+        "legacyPrefix": "/api/mobile",
+        "versionedPrefix": "/api/v1/mobile",
+        "service": "wulkan-mobile-api",
+    }
+
+
+def mobile_product_payload(product: dict) -> dict:
+    return {
+        "id": product["id"],
+        "sku": product["sku"],
+        "internalCode": product.get("internalCode", ""),
+        "name": product["title"],
+        "title": product["title"],
+        "description": product.get("description", ""),
+        "shortDescription": product.get("shortDescription", ""),
+        "longDescription": product.get("longDescription", ""),
+        "brand": product.get("brand", "Wulkan"),
+        "model": product.get("model", ""),
+        "unitOfSale": product.get("unitOfSale", "unidad"),
+        "productType": product.get("productType", "machine"),
+        "categoryId": product.get("categoryId", ""),
+        "verticalName": product.get("categoryName", ""),
+        "categoryName": product.get("categoryName", ""),
+        "subCategory": product.get("subCategory", ""),
+        "publicPriceUsd": float(product.get("publicPriceUsd") or 0),
+        "originalPriceUsd": float(product.get("originalPriceUsd") or product.get("publicPriceUsd") or 0),
+        "discountPercent": float(product.get("discountPercent") or 0),
+        "b2bPriceUsd": float(product.get("b2bPriceUsd") or 0),
+        "availableStock": int(product.get("availableStock") or 0),
+        "stock": int(product.get("physicalStock") or product.get("stock") or 0),
+        "reservedStock": int(product.get("committedStock") or 0),
+        "stockStatus": product.get("stockStatus", "available"),
+        "badge": "Cotizar" if product.get("requiresQuote") else "Comprar",
+        "requiresQuote": bool(product.get("requiresQuote")),
+        "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
+        "compatibilityNotes": ["Validar compatibilidad con soporte Wulkan"],
+        "imageUrl": product.get("imageUrl") or (product.get("imageUrls") or [""])[0],
+        "imageUrls": product.get("imageUrls", []),
+        "pdfUrls": product.get("pdfUrls", []),
+        "variants": product.get("variants", []),
+        "specifications": product.get("specifications", {}),
+        "relatedSkus": product.get("relatedSkus", []),
+        "featured": bool(product.get("featured")),
+        "onSale": bool(product.get("onSale") or product.get("hasDiscount")),
+        "visibleInApp": bool(product.get("visibleInApp")),
+    }
+
+
+def mobile_visible_products(store: dict) -> list[dict]:
+    return [
+        enrich_inventory_product(item, store.get("orders", []))
+        for item in store.get("products", [])
+        if item.get("status") == "active" and item.get("visibleInApp")
+    ]
+
+
+def mobile_profile_from_token(store: dict) -> tuple[dict | None, object | None]:
+    token_payload = mobile_token_payload()
+    if not token_payload:
+        return None, jsonify({"error": "Token movil requerido."})
+
+    if token_payload and token_payload.get("type") == "admin":
+        user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        if (
+            not user
+            or user.get("status") != "active"
+            or user.get("role") not in MOBILE_SALES_ROLES
+            or user.get("mobileAccessEnabled", True) is False
+        ):
+            return None, jsonify({"error": "Token movil invalido."})
+        return mobile_admin_payload(user, "")["customer"], None
+
+    client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    if not client or client.get("status") != "active":
+        return None, jsonify({"error": "Cliente no encontrado."})
+    return mobile_customer_payload(client, store, "")["customer"], None
+
+
 def seller_scope_clients(store: dict, user: dict) -> list[dict]:
     if user.get("role") != "sales":
         return store.get("clients", [])
@@ -2227,6 +2308,32 @@ def seller_scope_orders(store: dict, user: dict) -> list[dict]:
     ]
 
 
+def seller_scope_quotes(store: dict, user: dict) -> list[dict]:
+    quotes = store.get("quotes", [])
+    if user.get("role") != "sales":
+        return quotes
+    seller_id = user.get("id", "")
+    client_ids = {client.get("id", "") for client in seller_scope_clients(store, user)}
+    return [
+        quote
+        for quote in quotes
+        if quote.get("sellerId") == seller_id or quote.get("clientId") in client_ids
+    ]
+
+
+def seller_scope_crm_records(store: dict, user: dict) -> list[dict]:
+    records = store.get("crm_records", [])
+    if user.get("role") != "sales":
+        return records
+    seller_id = user.get("id", "")
+    client_ids = {client.get("id", "") for client in seller_scope_clients(store, user)}
+    return [
+        record
+        for record in records
+        if record.get("sellerId") == seller_id or record.get("clientId") in client_ids
+    ]
+
+
 def can_mobile_seller_access_client(store: dict, user: dict, client_id: str) -> bool:
     client = find_by_id(store.get("clients", []), client_id)
     if not client:
@@ -2234,6 +2341,51 @@ def can_mobile_seller_access_client(store: dict, user: dict, client_id: str) -> 
     if user.get("role") != "sales":
         return True
     return client.get("assignedSellerId") == user.get("id")
+
+
+def mobile_quote_payload(quote: dict) -> dict:
+    enriched = enrich_quote(quote)
+    return {
+        "id": enriched.get("id", ""),
+        "quoteNumber": enriched.get("quoteNumber", ""),
+        "clientId": enriched.get("clientId", ""),
+        "clientName": (enriched.get("client") or {}).get("name", enriched.get("clientName", "")),
+        "sellerId": enriched.get("sellerId", ""),
+        "sellerName": enriched.get("sellerName", ""),
+        "status": enriched.get("displayStatus", enriched.get("status", "draft")),
+        "statusLabel": enriched.get("statusLabel", ""),
+        "saleType": enriched.get("saleType", "cash"),
+        "paymentTermDays": safe_int(enriched.get("paymentTermDays"), 0),
+        "totalUsd": safe_float(enriched.get("totalUsd"), 0),
+        "totalVes": safe_float(enriched.get("totalVes"), 0),
+        "itemsCount": len(enriched.get("items") or []),
+        "validUntil": enriched.get("validUntil", ""),
+        "createdAt": enriched.get("createdAt", ""),
+        "updatedAt": enriched.get("updatedAt", ""),
+    }
+
+
+def mobile_crm_record_payload(record: dict) -> dict:
+    enriched = enrich_crm_record(record)
+    return {
+        "id": enriched.get("id", ""),
+        "title": enriched.get("title", ""),
+        "recordType": enriched.get("recordType", "lead"),
+        "recordTypeLabel": enriched.get("recordTypeLabel", ""),
+        "pipelineStage": enriched.get("pipelineStage", "new_lead"),
+        "pipelineStageLabel": enriched.get("pipelineStageLabel", ""),
+        "status": enriched.get("status", "active"),
+        "statusLabel": enriched.get("statusLabel", ""),
+        "clientId": enriched.get("clientId", ""),
+        "clientName": enriched.get("clientName", ""),
+        "sellerId": enriched.get("sellerId", ""),
+        "sellerName": enriched.get("sellerName", ""),
+        "nextActionAt": enriched.get("nextActionAt", ""),
+        "nextActionStatus": enriched.get("nextActionStatus", "without_due_date"),
+        "activitiesCount": enriched.get("activitiesCount", 0),
+        "lastActivityAt": enriched.get("lastActivityAt", ""),
+        "updatedAt": enriched.get("updatedAt", ""),
+    }
 
 
 def mobile_seller_client_payload(client: dict, store: dict) -> dict:
@@ -10508,6 +10660,7 @@ def announcement_delete(announcement_id: str):
     return redirect(url_for("announcements"))
 
 
+@app.post("/api/v1/mobile/orders")
 @app.post("/api/mobile/orders")
 def api_create_order():
     store = load_store()
@@ -10551,6 +10704,7 @@ def api_create_order():
     ), 201
 
 
+@app.get("/api/v1/mobile/orders")
 @app.get("/api/mobile/orders")
 def api_orders():
     store = load_store()
@@ -10573,6 +10727,7 @@ def api_orders():
     )
 
 
+@app.get("/api/v1/mobile/seller/summary")
 @app.get("/api/mobile/seller/summary")
 def api_mobile_seller_summary():
     store = load_store()
@@ -10637,6 +10792,7 @@ def api_mobile_seller_summary():
     )
 
 
+@app.route("/api/v1/mobile/seller/clients", methods=["GET", "POST"])
 @app.route("/api/mobile/seller/clients", methods=["GET", "POST"])
 def api_mobile_seller_clients():
     store = load_store()
@@ -10728,6 +10884,7 @@ def api_mobile_seller_clients():
     return jsonify({"items": clients})
 
 
+@app.route("/api/v1/mobile/seller/orders", methods=["GET", "POST"])
 @app.route("/api/mobile/seller/orders", methods=["GET", "POST"])
 def api_mobile_seller_orders():
     store = load_store()
@@ -10768,6 +10925,7 @@ def api_mobile_seller_orders():
     return jsonify({"items": orders})
 
 
+@app.get("/api/v1/mobile/seller/commissions")
 @app.get("/api/mobile/seller/commissions")
 def api_mobile_seller_commissions():
     store = load_store()
@@ -10782,6 +10940,232 @@ def api_mobile_seller_commissions():
     return jsonify({"items": orders})
 
 
+@app.route("/api/v1/mobile/seller/quotes", methods=["GET", "POST"])
+def api_mobile_seller_quotes():
+    store = load_store()
+    user, auth_error = require_mobile_sales_user(store)
+    if auth_error:
+        return auth_error, 401
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        customer_id = str(payload.get("customerId") or (payload.get("customer") or {}).get("id") or "").strip()
+        if not can_mobile_seller_access_client(store, user, customer_id):
+            return jsonify({"error": "Cliente fuera de tu cartera."}), 403
+        client = find_by_id(store.get("clients", []), customer_id)
+        raw_items = payload.get("items") or []
+        if not isinstance(raw_items, list) or not raw_items:
+            return jsonify({"error": "Agrega al menos un producto a la cotizacion."}), 400
+
+        items: list[dict] = []
+        gross_usd = 0.0
+        total_usd = 0.0
+        products = store.get("products", [])
+        for index, raw_item in enumerate(raw_items, start=1):
+            if not isinstance(raw_item, dict):
+                return jsonify({"error": f"Producto {index} invalido."}), 400
+            product_ref = str(raw_item.get("productId") or raw_item.get("sku") or "").strip()
+            quantity = safe_int(raw_item.get("quantity"), 0)
+            if not product_ref or quantity <= 0:
+                return jsonify({"error": f"Producto {index} requiere SKU/id y cantidad."}), 400
+            product = next(
+                (
+                    item
+                    for item in products
+                    if item.get("id") == product_ref or item.get("sku") == product_ref
+                ),
+                None,
+            )
+            if not product or product.get("status") != "active":
+                return jsonify({"error": f"Producto {product_ref} no disponible."}), 400
+            unit_price = safe_float(
+                raw_item.get("unitPriceUsd"),
+                safe_float(product.get("b2bPriceUsd"), safe_float(product.get("publicPriceUsd"), 0)),
+            )
+            discount_percent = max(0.0, min(100.0, safe_float(raw_item.get("discountPercent"), 0)))
+            line_gross = round(unit_price * quantity, 2)
+            line_discount = round(line_gross * discount_percent / 100, 2)
+            line_total = round(max(0.0, line_gross - line_discount), 2)
+            gross_usd += line_gross
+            total_usd += line_total
+            items.append(
+                {
+                    "productId": product.get("id", ""),
+                    "sku": product.get("sku", ""),
+                    "title": product.get("title", "Producto Wulkan"),
+                    "quantity": quantity,
+                    "unitPriceUsd": unit_price,
+                    "discountPercent": discount_percent,
+                    "lineGrossUsd": line_gross,
+                    "lineDiscountUsd": line_discount,
+                    "lineTotalUsd": line_total,
+                    "imageUrl": product.get("imageUrl", ""),
+                    "requiresQuote": bool(product.get("requiresQuote")),
+                    "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
+                }
+            )
+
+        exchange_rate = safe_float((payload.get("preview") or {}).get("exchangeRateUsdVes"), current_rate())
+        sale_type = str(payload.get("saleType") or "cash")
+        if sale_type not in dict(SALE_TYPE_OPTIONS):
+            sale_type = "cash"
+        payment_term_days = safe_int(payload.get("paymentTermDays"), 0)
+        if sale_type == "cash":
+            payment_term_days = 0
+        now = utc_now()
+        quote = {
+            "id": next_id("quote", client.get("businessName", "wulkan")),
+            "quoteNumber": next_quote_number(client.get("businessName", "Wulkan")),
+            "version": 1,
+            "versions": [],
+            "history": [],
+            "clientId": client["id"],
+            "client": {
+                "id": client["id"],
+                "name": client.get("businessName", ""),
+                "taxId": client.get("taxId", ""),
+                "email": client.get("email", ""),
+                "phone": client.get("phone", ""),
+                "address": client.get("address", ""),
+                "city": client.get("city", ""),
+                "state": client.get("state", ""),
+            },
+            "sellerId": user["id"],
+            "sellerName": user.get("name", "Vendedor Wulkan"),
+            "items": items,
+            "grossUsd": round(gross_usd, 2),
+            "discountUsd": round(max(0.0, gross_usd - total_usd), 2),
+            "totalUsd": round(total_usd, 2),
+            "totalVes": round(total_usd * exchange_rate, 2),
+            "exchangeRateUsdVes": exchange_rate,
+            "saleType": sale_type,
+            "paymentTermDays": payment_term_days,
+            "validUntil": str(payload.get("validUntil") or "").strip(),
+            "status": "sent" if payload.get("sendToClient") else str(payload.get("status") or "draft"),
+            "comment": str(payload.get("comment") or "").strip(),
+            "internalComment": str(payload.get("internalComment") or "").strip(),
+            "source": "seller_mobile",
+            "createdAt": now,
+            "createdById": user["id"],
+            "createdByName": user.get("name", "Vendedor Wulkan"),
+            "updatedAt": now,
+        }
+        if quote["status"] not in dict(QUOTE_STATUS_OPTIONS):
+            quote["status"] = "draft"
+        append_quote_history(quote, quote["status"], "Cotizacion creada desde app movil vendedor.")
+        store.setdefault("quotes", []).append(quote)
+        record_audit_event(
+            store,
+            "create",
+            "quote",
+            quote["id"],
+            f"Cotizacion movil creada por {user.get('name', 'Vendedor Wulkan')}.",
+            actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
+        )
+        save_store(store)
+        return jsonify({"quote": mobile_quote_payload(quote)}), 201
+
+    quotes = [
+        mobile_quote_payload(quote)
+        for quote in sorted(seller_scope_quotes(store, user), key=lambda item: item.get("updatedAt", ""), reverse=True)
+    ]
+    return jsonify({"meta": mobile_api_meta(), "items": quotes})
+
+
+@app.route("/api/v1/mobile/seller/activities", methods=["GET", "POST"])
+def api_mobile_seller_activities():
+    store = load_store()
+    user, auth_error = require_mobile_sales_user(store)
+    if auth_error:
+        return auth_error, 401
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        customer_id = str(payload.get("customerId") or payload.get("clientId") or "").strip()
+        if not can_mobile_seller_access_client(store, user, customer_id):
+            return jsonify({"error": "Cliente fuera de tu cartera."}), 403
+        client = find_by_id(store.get("clients", []), customer_id)
+        note = str(payload.get("note") or payload.get("activityNote") or "").strip()
+        if not note:
+            return jsonify({"error": "La actividad requiere una nota."}), 400
+        activity_type = str(payload.get("activityType") or "note")
+        if activity_type not in dict(CRM_ACTIVITY_TYPE_OPTIONS):
+            activity_type = "note"
+        record_id = str(payload.get("recordId") or "").strip()
+        record = find_by_id(store.get("crm_records", []), record_id) if record_id else None
+        if record and record not in seller_scope_crm_records(store, user):
+            return jsonify({"error": "Registro CRM fuera de tu cartera."}), 403
+        if not record:
+            now = utc_now()
+            record = {
+                "id": next_id("crm", client.get("businessName", "seguimiento")),
+                "title": str(payload.get("title") or f"Seguimiento {client.get('businessName', 'cliente')}").strip(),
+                "recordType": str(payload.get("recordType") or "opportunity"),
+                "pipelineStage": str(payload.get("pipelineStage") or "contacted"),
+                "status": "active",
+                "clientId": client["id"],
+                "clientName": client.get("businessName", ""),
+                "sellerId": user["id"],
+                "sellerName": user.get("name", "Vendedor Wulkan"),
+                "contactName": client.get("contactName", ""),
+                "phone": client.get("phone", ""),
+                "email": client.get("email", ""),
+                "state": client.get("state", ""),
+                "city": client.get("city", ""),
+                "source": "seller_mobile",
+                "estimatedValueUsd": safe_float(payload.get("estimatedValueUsd"), 0),
+                "probabilityPercent": max(0, min(100, safe_int(payload.get("probabilityPercent"), 0))),
+                "expectedCloseAt": str(payload.get("expectedCloseAt") or "").strip(),
+                "nextActionAt": str(payload.get("nextActionAt") or "").strip(),
+                "description": str(payload.get("description") or "").strip(),
+                "lossReason": "",
+                "activities": [],
+                "createdAt": now,
+                "createdById": user["id"],
+                "createdByName": user.get("name", "Vendedor Wulkan"),
+                "updatedAt": now,
+            }
+            if record["recordType"] not in dict(CRM_RECORD_TYPE_OPTIONS):
+                record["recordType"] = "opportunity"
+            if record["pipelineStage"] not in dict(CRM_PIPELINE_STAGE_OPTIONS):
+                record["pipelineStage"] = "contacted"
+            store.setdefault("crm_records", []).append(record)
+
+        now = utc_now()
+        activity = {
+            "id": next_id("crm-act", record.get("title", "actividad")),
+            "type": activity_type,
+            "typeLabel": crm_activity_type_label(activity_type),
+            "note": note,
+            "nextActionAt": str(payload.get("nextActionAt") or "").strip(),
+            "createdById": user["id"],
+            "createdByName": user.get("name", "Vendedor Wulkan"),
+            "createdAt": now,
+        }
+        record.setdefault("activities", []).append(activity)
+        record["lastActivityAt"] = now
+        if activity["nextActionAt"]:
+            record["nextActionAt"] = activity["nextActionAt"]
+        record["updatedAt"] = now
+        record_audit_event(
+            store,
+            "crm_activity",
+            "crm",
+            record["id"],
+            f"Actividad CRM movil registrada: {crm_activity_type_label(activity_type)}.",
+            actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
+        )
+        save_store(store)
+        return jsonify({"record": mobile_crm_record_payload(record), "activity": activity}), 201
+
+    records = [
+        mobile_crm_record_payload(record)
+        for record in sorted(seller_scope_crm_records(store, user), key=lambda item: item.get("updatedAt", ""), reverse=True)
+    ]
+    return jsonify({"meta": mobile_api_meta(), "items": records})
+
+
+@app.get("/api/v1/mobile/credit")
 @app.get("/api/mobile/credit")
 def api_client_credit():
     store = load_store()
@@ -10823,6 +11207,103 @@ def api_client_credit():
     )
 
 
+@app.get("/api/v1/mobile/meta")
+def api_mobile_meta():
+    store = load_store()
+    return jsonify(
+        {
+            "meta": mobile_api_meta(),
+            "capabilities": {
+                "auth": ["login", "logout", "refresh", "change_password", "recover_password"],
+                "mobile": ["home", "products", "product_detail", "categories", "banners", "cart", "orders", "credit", "profile"],
+                "seller": ["summary", "clients", "orders", "quotes", "activities", "commissions"],
+                "storage": app.config.get("STORAGE_BACKEND"),
+                "data": app.config.get("DATA_BACKEND"),
+                "tokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
+            },
+            "counts": {
+                "products": len(store.get("products", [])),
+                "categories": len(store.get("categories", [])),
+                "announcements": len(store.get("announcements", [])),
+                "serviceTechnicians": len(store.get("service_technicians", [])),
+            },
+        }
+    )
+
+
+@app.get("/api/v1/mobile/home")
+def api_mobile_home():
+    store = load_store()
+    profile, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
+
+    products = sorted(
+        mobile_visible_products(store),
+        key=lambda product: product.get("createdAt", ""),
+        reverse=True,
+    )
+    featured_products = [product for product in products if product.get("featured")][:8] or products[:8]
+    sale_products = [product for product in products if product.get("onSale") or product.get("hasDiscount")][:8]
+    categories = [
+        {
+            "id": category.get("id", ""),
+            "name": category.get("name", ""),
+            "slug": category.get("slug", ""),
+            "description": category.get("description", ""),
+            "imageUrl": category.get("imageUrl", ""),
+            "icon": category.get("icon", "bi-tags"),
+            "sortOrder": category.get("sortOrder", 0),
+            "parentId": category.get("parentId", ""),
+            "productsCount": category.get("productsCount", 0),
+        }
+        for category in sorted(
+            [enrich_category(item, store) for item in store.get("categories", []) if item.get("status", "active") == "active"],
+            key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", "")),
+        )
+        if category.get("visibleInApp")
+    ]
+    payload = {
+        "meta": mobile_api_meta(),
+        "home": {
+            "banners": active_announcements("home", store),
+            "categories": categories[:10],
+            "featuredProducts": [mobile_product_payload(product) for product in featured_products],
+            "saleProducts": [mobile_product_payload(product) for product in sale_products],
+            "recentProducts": [mobile_product_payload(product) for product in products[:8]],
+        },
+    }
+    if isinstance(profile, dict):
+        payload["home"]["role"] = profile.get("role", profile.get("accountRole", "client"))
+    return jsonify(payload)
+
+
+@app.get("/api/v1/mobile/profile")
+def api_mobile_profile():
+    store = load_store()
+    profile, auth_error = mobile_profile_from_token(store)
+    if auth_error:
+        return auth_error, 401
+    return jsonify({"meta": mobile_api_meta(), "profile": profile})
+
+
+@app.get("/api/v1/mobile/cart")
+def api_mobile_cart():
+    store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
+    return jsonify(
+        {
+            "meta": mobile_api_meta(),
+            "items": [],
+            "mode": "local_persistent",
+            "message": "El carrito se mantiene en almacenamiento seguro del dispositivo y las ordenes se sincronizan al confirmar.",
+        }
+    )
+
+
+@app.get("/api/v1/mobile/categories")
 @app.get("/api/mobile/categories")
 def api_categories():
     store = load_store()
@@ -10847,9 +11328,10 @@ def api_categories():
         )
         if category.get("visibleInApp")
     ]
-    return jsonify({"items": categories})
+    return jsonify({"meta": mobile_api_meta(), "items": categories})
 
 
+@app.post("/api/v1/mobile/auth/login")
 @app.post("/api/mobile/auth/login")
 def api_client_login():
     store = load_store()
@@ -10942,6 +11424,60 @@ def api_client_login():
     return jsonify({"error": "Credenciales invalidas."}), 401
 
 
+@app.post("/api/v1/mobile/auth/refresh")
+def api_mobile_refresh_token():
+    store = load_store()
+    token_payload = mobile_token_payload()
+    if not token_payload:
+        return jsonify({"error": "Token movil requerido."}), 401
+
+    if token_payload and token_payload.get("type") == "admin":
+        user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        if (
+            not user
+            or user.get("status") != "active"
+            or user.get("role") not in MOBILE_SALES_ROLES
+            or user.get("mobileAccessEnabled", True) is False
+        ):
+            return jsonify({"error": "Token movil invalido."}), 401
+        return jsonify(mobile_admin_payload(user, issue_mobile_admin_token(user)))
+
+    client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    if not client or client.get("status") != "active":
+        return jsonify({"error": "Cliente no encontrado."}), 401
+    return jsonify(mobile_customer_payload(client, store, issue_mobile_token(client)))
+
+
+@app.post("/api/v1/mobile/auth/logout")
+def api_mobile_logout():
+    store = load_store()
+    token_payload = mobile_token_payload()
+    subject_id = token_payload.get("id", "") if token_payload else ""
+    subject_type = "mobile_user"
+    subject_name = "App movil"
+    subject_role = token_payload.get("role", "mobile") if token_payload else "mobile"
+    if token_payload and token_payload.get("type") == "admin":
+        subject_type = "admin_user"
+        user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        subject_name = (user or {}).get("name", subject_id)
+    elif token_payload:
+        subject_type = "client"
+        client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+        subject_name = (client or {}).get("businessName", subject_id)
+
+    record_audit_event(
+        store,
+        "logout",
+        subject_type,
+        subject_id,
+        "Cierre de sesion desde app movil.",
+        actor={"id": subject_id, "name": subject_name, "role": subject_role},
+    )
+    save_store(store)
+    return jsonify({"status": "logged_out"})
+
+
+@app.post("/api/v1/mobile/auth/change-password")
 @app.post("/api/mobile/auth/change-password")
 def api_client_change_password():
     store = load_store()
@@ -11007,6 +11543,7 @@ def api_client_change_password():
     return jsonify({"status": "updated", "mustChangePassword": False})
 
 
+@app.post("/api/v1/mobile/auth/recover-password")
 @app.post("/api/mobile/auth/recover-password")
 def api_mobile_recover_password():
     store = load_store()
@@ -11073,58 +11610,50 @@ def api_mobile_recover_password():
     )
 
 
+@app.get("/api/v1/mobile/products")
 @app.get("/api/mobile/products")
 def api_products():
     store = load_store()
     _, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
-    products = [
+    products = [mobile_product_payload(product) for product in mobile_visible_products(store)]
+    return jsonify({"meta": mobile_api_meta(), "items": products})
+
+
+@app.get("/api/v1/mobile/products/<product_id>")
+@app.get("/api/mobile/products/<product_id>")
+def api_mobile_product_detail(product_id: str):
+    store = load_store()
+    _, auth_error = require_mobile_catalog_access(store)
+    if auth_error:
+        return auth_error, 401
+    product = next(
+        (
+            item
+            for item in mobile_visible_products(store)
+            if item.get("id") == product_id or item.get("sku") == product_id
+        ),
+        None,
+    )
+    if not product:
+        return jsonify({"error": "Producto no encontrado."}), 404
+    related_skus = {str(sku) for sku in product.get("relatedSkus", [])}
+    related_products = [
+        mobile_product_payload(item)
+        for item in mobile_visible_products(store)
+        if item.get("sku") in related_skus and item.get("id") != product.get("id")
+    ][:8]
+    return jsonify(
         {
-            "id": product["id"],
-            "sku": product["sku"],
-            "internalCode": product.get("internalCode", ""),
-            "name": product["title"],
-            "title": product["title"],
-            "description": product.get("description", ""),
-            "shortDescription": product.get("shortDescription", ""),
-            "longDescription": product.get("longDescription", ""),
-            "brand": product.get("brand", "Wulkan"),
-            "model": product.get("model", ""),
-            "unitOfSale": product.get("unitOfSale", "unidad"),
-            "productType": product.get("productType", "machine"),
-            "categoryId": product.get("categoryId", ""),
-            "verticalName": product.get("categoryName", ""),
-            "categoryName": product.get("categoryName", ""),
-            "subCategory": product.get("subCategory", ""),
-            "publicPriceUsd": float(product.get("publicPriceUsd") or 0),
-            "originalPriceUsd": float(product.get("originalPriceUsd") or product.get("publicPriceUsd") or 0),
-            "discountPercent": float(product.get("discountPercent") or 0),
-            "b2bPriceUsd": float(product.get("b2bPriceUsd") or 0),
-            "availableStock": int(product.get("availableStock") or 0),
-            "stock": int(product.get("physicalStock") or product.get("stock") or 0),
-            "reservedStock": int(product.get("committedStock") or 0),
-            "stockStatus": product.get("stockStatus", "available"),
-            "badge": "Cotizar" if product.get("requiresQuote") else "Comprar",
-            "requiresQuote": bool(product.get("requiresQuote")),
-            "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
-            "compatibilityNotes": ["Validar compatibilidad con soporte Wulkan"],
-            "imageUrl": product.get("imageUrl") or (product.get("imageUrls") or [""])[0],
-            "imageUrls": product.get("imageUrls", []),
-            "pdfUrls": product.get("pdfUrls", []),
-            "variants": product.get("variants", []),
-            "specifications": product.get("specifications", {}),
-            "relatedSkus": product.get("relatedSkus", []),
-            "featured": bool(product.get("featured")),
-            "onSale": bool(product.get("onSale") or product.get("hasDiscount")),
-            "visibleInApp": bool(product.get("visibleInApp")),
+            "meta": mobile_api_meta(),
+            "product": mobile_product_payload(product),
+            "relatedProducts": related_products,
         }
-        for product in [enrich_inventory_product(item, store.get("orders", [])) for item in store["products"]]
-        if product.get("status") == "active" and product.get("visibleInApp")
-    ]
-    return jsonify({"items": products})
+    )
 
 
+@app.get("/api/v1/mobile/announcements")
 @app.get("/api/mobile/announcements")
 def api_announcements():
     store = load_store()
@@ -11132,9 +11661,10 @@ def api_announcements():
     if auth_error:
         return auth_error, 401
     placement = request.args.get("placement")
-    return jsonify({"items": active_announcements(placement, store)})
+    return jsonify({"meta": mobile_api_meta(), "items": active_announcements(placement, store)})
 
 
+@app.get("/api/v1/mobile/service-technicians")
 @app.get("/api/mobile/service-technicians")
 def api_service_technicians():
     store = load_store()
@@ -11146,9 +11676,10 @@ def api_service_technicians():
         for technician in store.get("service_technicians", [])
         if technician.get("status") == "active" and technician.get("visibleInApp")
     ]
-    return jsonify({"items": technicians})
+    return jsonify({"meta": mobile_api_meta(), "items": technicians})
 
 
+@app.get("/api/v1/mobile/locations")
 @app.get("/api/mobile/locations")
 def api_locations():
     store = load_store()
@@ -11162,6 +11693,7 @@ def api_locations():
     ]
     return jsonify(
         {
+            "meta": mobile_api_meta(),
             "items": [
                 {
                     "id": technician.get("id", ""),

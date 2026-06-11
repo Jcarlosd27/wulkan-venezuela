@@ -10,9 +10,10 @@ from urllib.request import Request, urlopen
 CHECKS = [
     ("/healthz", "health", False),
     ("/readyz", "readiness", False),
-    ("/api/mobile/products", "mobile products", True),
-    ("/api/mobile/categories", "mobile categories", True),
-    ("/api/mobile/announcements?placement=home", "mobile announcements", False),
+    ("/api/v1/mobile/meta", "mobile api v1", False),
+    ("/api/v1/mobile/products", "mobile products", False),
+    ("/api/v1/mobile/categories", "mobile categories", False),
+    ("/api/v1/mobile/announcements?placement=home", "mobile announcements", False),
 ]
 
 

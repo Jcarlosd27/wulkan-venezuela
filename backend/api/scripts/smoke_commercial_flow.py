@@ -203,6 +203,8 @@ def main() -> int:
     )
     imported_product = state["products"][0]
     assert len(imported_product["imageUrls"]) == 2
+    api_meta = assert_status(client.get("/api/v1/mobile/meta"), 200, "api v1 meta")
+    assert api_meta["meta"]["apiVersion"] == "v1"
 
     seller_login = assert_status(
         client.post(
@@ -214,6 +216,24 @@ def main() -> int:
     )
     seller_token = seller_login["accessToken"]
     assert seller_login["customer"]["accountRole"] == "sales"
+    seller_login_v1 = assert_status(
+        client.post(
+            "/api/v1/mobile/auth/login",
+            json={"email": SELLER_EMAIL, "password": SELLER_PASSWORD},
+        ),
+        200,
+        "login vendedor v1",
+    )
+    assert seller_login_v1["customer"]["accountRole"] == "sales"
+    seller_refresh_v1 = assert_status(
+        client.post(
+            "/api/v1/mobile/auth/refresh",
+            headers={"Authorization": f"Bearer {seller_login_v1['accessToken']}"},
+        ),
+        200,
+        "refresh vendedor v1",
+    )
+    assert seller_refresh_v1["customer"]["accountRole"] == "sales"
 
     new_client = assert_status(
         client.post(
@@ -241,6 +261,70 @@ def main() -> int:
     client_id = new_client["client"]["id"]
     assert new_client["client"]["assignedSeller"]["id"] == "admin-seller-flow"
     assert new_client["client"]["creditRequestStatus"] == "pending"
+    mobile_quote = assert_status(
+        client.post(
+            "/api/v1/mobile/seller/quotes",
+            headers={"Authorization": f"Bearer {seller_token}"},
+            json={
+                "customerId": client_id,
+                "saleType": "term_credit",
+                "paymentTermDays": 15,
+                "items": [
+                    {
+                        "productId": "prod-flow-motosierra",
+                        "quantity": 1,
+                        "discountPercent": 5,
+                    }
+                ],
+                "comment": "Cotizacion creada desde smoke v1.",
+            },
+        ),
+        201,
+        "crear cotizacion vendedor v1",
+    )
+    assert mobile_quote["quote"]["totalUsd"] == 153.9
+    seller_quotes = assert_status(
+        client.get(
+            "/api/v1/mobile/seller/quotes",
+            headers={"Authorization": f"Bearer {seller_token}"},
+        ),
+        200,
+        "listar cotizaciones vendedor v1",
+    )
+    assert seller_quotes["items"]
+    mobile_activity = assert_status(
+        client.post(
+            "/api/v1/mobile/seller/activities",
+            headers={"Authorization": f"Bearer {seller_token}"},
+            json={
+                "clientId": client_id,
+                "activityType": "call",
+                "note": "Cliente contactado para validar credito y despacho.",
+                "nextActionAt": "2026-06-15",
+            },
+        ),
+        201,
+        "crear actividad vendedor v1",
+    )
+    assert mobile_activity["activity"]["type"] == "call"
+    seller_activities = assert_status(
+        client.get(
+            "/api/v1/mobile/seller/activities",
+            headers={"Authorization": f"Bearer {seller_token}"},
+        ),
+        200,
+        "listar actividades vendedor v1",
+    )
+    assert seller_activities["items"]
+    seller_logout_v1 = assert_status(
+        client.post(
+            "/api/v1/mobile/auth/logout",
+            headers={"Authorization": f"Bearer {seller_login_v1['accessToken']}"},
+        ),
+        200,
+        "logout vendedor v1",
+    )
+    assert seller_logout_v1["status"] == "logged_out"
 
     with client.session_transaction() as session:
         session["admin_authenticated"] = True
@@ -296,6 +380,42 @@ def main() -> int:
         "login ferretero final",
     )
     customer_token = customer_login["accessToken"]
+    customer_profile_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/profile",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "perfil ferretero v1",
+    )
+    assert customer_profile_v1["profile"]["accountRole"] == "client"
+    customer_home_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/home",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "home ferretero v1",
+    )
+    assert customer_home_v1["home"]["banners"]
+    product_detail_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/products/prod-flow-motosierra",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "detalle producto v1",
+    )
+    assert product_detail_v1["product"]["sku"] == "WUL-FLOW-45CC"
+    cart_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/cart",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "carrito v1",
+    )
+    assert cart_v1["mode"] == "local_persistent"
 
     order = assert_status(
         client.post(
@@ -328,6 +448,15 @@ def main() -> int:
     assert created_order["creditAfterUsd"] == 176
     assert created_order["commissionUsd"] == 16.2
     assert created_order["inventoryStatus"] == "reserved"
+    orders_v1 = assert_status(
+        client.get(
+            "/api/v1/mobile/orders",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "ordenes ferretero v1",
+    )
+    assert orders_v1["items"]
 
     cash_order_response = assert_status(
         client.post(
