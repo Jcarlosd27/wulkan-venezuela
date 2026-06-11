@@ -12,7 +12,7 @@
 - [x] Fase 1.6 - Productos / Catalogo: ficha comercial completa, importacion Excel ampliada, filtros compactos, export CSV, duplicado como borrador oculto, validaciones de precio/stock/estado, galeria y PDFs, publicacion movil controlada por estado/visibleInApp, Graphify de stock/media y bloqueo de mock movil en produccion.
 - [x] Fase 1.7 - Categorias: CRUD profesional con slug, imagen, icono, orden, jerarquia, visibilidad app, import/export, borrado seguro y API movil filtrada por categorias activas.
 - [x] Fase 1.8 - Inventario / Stock: fisico, reservado, disponible real, minimo/maximo, reposicion, ubicacion, ultimo movimiento, importacion con preview, export CSV, filtros y trazabilidad before/after.
-- [ ] Fase 1.9 - Ordenes.
+- [x] Fase 1.9 - Ordenes: filtros operativos, export CSV, detalle con productos/abonos/historial, estados con motivo obligatorio para rechazo/anulacion, trazabilidad credito-stock-comision y campos de despacho.
 - [ ] Fase 1.10 - Credito B2B.
 - [ ] Fase 1.11 - Cobranza.
 - [ ] Fase 1.12 - Despacho / Logistica.
@@ -588,6 +588,17 @@ El módulo de órdenes debe ser el corazón operativo.
 * No cerrar si no está entregada.
 * No pagar comisión si la orden fue anulada.
 * Motivo obligatorio para rechazo/anulación.
+
+### Check implementado
+
+* [x] Vista de ordenes con KPIs, filtros por estado, tipo de venta, vendedor, pago y vencimiento.
+* [x] Exportacion CSV de ordenes respetando filtros del modulo.
+* [x] Detalle por orden con productos, totales, direccion de despacho, abonos externos e historial.
+* [x] Pedido asistido registra direccion de despacho, comentario cliente y observacion interna.
+* [x] Orden guarda bruto, descuento, neto, canal, despacho, facturacion, responsable actual y comision.
+* [x] Rechazar o anular exige motivo, libera inventario reservado, cancela credito operativo y cancela comision.
+* [x] Cambios de estado y abonos externos conservan auditoria before/after y statusHistory.
+* [x] Graphify resume ordenes por estado, condicion de venta y vendedor.
 
 ---
 

@@ -74,6 +74,7 @@ ORDER_STATUS_OPTIONS = [
     ("payment_under_review", "Pago por validar"),
     ("approved_with_credit", "Aprobada con credito"),
     ("preparing", "Preparando"),
+    ("rejected", "Rechazada"),
     ("delivered", "Entregada"),
     ("partial_paid", "Pagada parcialmente"),
     ("paid", "Pagada"),
@@ -93,6 +94,21 @@ SALE_TYPE_OPTIONS = [
     ("credit_line", "Linea de credito"),
     ("phone_request", "Solicitud telefonica"),
 ]
+SALES_CHANNEL_LABELS = {
+    "mobile": "App ferretero",
+    "seller_mobile": "App vendedor",
+    "seller_assisted": "Pedido asistido",
+    "admin": "Admin",
+    "phone": "Telefono",
+}
+DISPATCH_STATUS_LABELS = {
+    "pending": "Pendiente",
+    "preparing": "Preparando",
+    "ready": "Listo para despacho",
+    "dispatched": "Despachado",
+    "delivered": "Entregado",
+    "cancelled": "Cancelado",
+}
 PAYMENT_TERM_OPTIONS = [0, 10, 15, 20, 30, 40]
 CLIENT_STATUS_OPTIONS = [
     ("prospect", "Prospecto"),
@@ -381,7 +397,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
             {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "client_status_update", "clients_import", "client_delete"]},
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
-            {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "order_new", "order_status_update", "order_payment_create"]},
+            {"module": "orders", "endpoint": "orders", "label": "Ordenes", "icon": "bi-receipt", "active": ["orders", "orders_export", "order_new", "order_status_update", "order_payment_create"]},
             {"module": "commissions", "endpoint": "commissions", "label": "Comisiones", "icon": "bi-percent", "active": ["commissions", "commission_status_update"]},
         ],
     },
@@ -776,6 +792,14 @@ def category_status_label(value: str) -> str:
 
 def order_status_label(value: str) -> str:
     return dict(ORDER_STATUS_OPTIONS).get(value, value or "Sin estado")
+
+
+def sales_channel_label(value: str) -> str:
+    return SALES_CHANNEL_LABELS.get(value, value or "Sin canal")
+
+
+def dispatch_status_label(value: str) -> str:
+    return DISPATCH_STATUS_LABELS.get(value, value or "Sin despacho")
 
 
 def credit_status_label(value: str) -> str:
@@ -1385,6 +1409,8 @@ def security_context():
         "seller_status_label": seller_status_label,
         "product_status_label": product_status_label,
         "commission_status_label": commission_status_label,
+        "sales_channel_label": sales_channel_label,
+        "dispatch_status_label": dispatch_status_label,
     }
 
 
@@ -3244,6 +3270,8 @@ def build_commercial_order(
         return None, "La orden no tiene productos validos."
 
     total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or calculated_total_usd)
+    gross_usd = float(preview.get("grossUsd") or preview.get("subtotalUsd") or calculated_total_usd)
+    discount_usd = max(0.0, float(preview.get("discountUsd") or max(gross_usd - total_usd, 0)))
     exchange_rate = float(preview.get("exchangeRateUsdVes") or current_rate())
     total_ves = float(preview.get("totalVes") or round(total_usd * exchange_rate, 2))
     movements = store.get("credit_movements", [])
@@ -3314,6 +3342,9 @@ def build_commercial_order(
             "sellerName": seller_name,
         },
         "items": items,
+        "grossUsd": gross_usd,
+        "discountUsd": discount_usd,
+        "netUsd": total_usd,
         "totalUsd": total_usd,
         "totalVes": total_ves,
         "exchangeRateUsdVes": exchange_rate,
@@ -3337,6 +3368,12 @@ def build_commercial_order(
         "paidUsd": 0.0,
         "balanceUsd": total_usd,
         "paymentStatus": "pending",
+        "dispatchStatus": "pending",
+        "invoiceStatus": "pending",
+        "shippingAddress": str(payload.get("shippingAddress") or client.get("shippingAddress") or client.get("address") or "").strip(),
+        "customerComment": str(payload.get("customerComment") or "").strip(),
+        "internalComment": str(payload.get("internalComment") or payload.get("notes") or "").strip(),
+        "currentOwner": "Comercial",
         "status": status,
         "statusHistory": [
             {
@@ -3593,6 +3630,13 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     order_id = enriched.get("orderId") or enriched.get("id", "")
     paid = order_paid_usd(enriched, movements)
     balance = order_balance_usd(enriched, movements)
+    total_usd = float(enriched.get("totalUsd") or enriched.get("netUsd") or 0)
+    gross_usd = float(enriched.get("grossUsd") or total_usd)
+    discount_usd = max(0.0, float(enriched.get("discountUsd") or max(gross_usd - total_usd, 0)))
+    enriched["grossUsd"] = gross_usd
+    enriched["discountUsd"] = discount_usd
+    enriched["netUsd"] = total_usd
+    enriched["totalUsd"] = total_usd
     enriched["paidUsd"] = paid
     enriched["balanceUsd"] = balance
     enriched["paymentStatus"] = "paid" if balance <= 0 else ("partial" if paid > 0 else "pending")
@@ -3611,6 +3655,12 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["statusLabel"] = order_status_label(enriched.get("status", ""))
     enriched["creditStatusLabel"] = credit_status_label(enriched.get("creditStatus", ""))
     enriched["paymentStatusLabel"] = payment_status_label(enriched.get("paymentStatus", ""))
+    enriched["salesChannel"] = enriched.get("salesChannel") or "mobile"
+    enriched["salesChannelLabel"] = sales_channel_label(enriched["salesChannel"])
+    enriched["dispatchStatus"] = enriched.get("dispatchStatus", "pending")
+    enriched["dispatchStatusLabel"] = dispatch_status_label(enriched["dispatchStatus"])
+    enriched["invoiceStatus"] = enriched.get("invoiceStatus", "pending")
+    enriched["currentOwner"] = enriched.get("currentOwner") or "Comercial"
     if not enriched.get("dueDate") and enriched["paymentTermDays"] > 0:
         enriched["dueDate"] = add_days_iso(enriched.get("createdAt"), enriched["paymentTermDays"])
     due_status, due_days = order_due_status(enriched)
@@ -3624,6 +3674,7 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     customer = enriched.get("customer") or {}
     enriched["customerName"] = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
     enriched["itemsCount"] = len(enriched.get("items") or [])
+    enriched["statusHistory"] = sorted(enriched.get("statusHistory") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
     return enriched
 
 
@@ -5032,8 +5083,126 @@ def assisted_order_payload_from_form() -> dict:
         "saleType": request.form.get("saleType", "cash"),
         "paymentTermDays": request.form.get("paymentTermDays", "0"),
         "salesChannel": "seller_assisted",
-        "notes": request.form.get("notes", "").strip(),
+        "shippingAddress": request.form.get("shippingAddress", "").strip(),
+        "customerComment": request.form.get("customerComment", "").strip(),
+        "internalComment": request.form.get("internalComment", "").strip(),
+        "notes": (request.form.get("notes", "") or request.form.get("internalComment", "")).strip(),
         "preview": {"exchangeRateUsdVes": current_rate()},
+    }
+
+
+def orders_page_context(store: dict, error: str = "") -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip().lower(),
+        "status": request.args.get("status", "").strip(),
+        "sale_type": request.args.get("sale_type", "").strip(),
+        "credit_status": request.args.get("credit_status", "").strip(),
+        "inventory_status": request.args.get("inventory_status", "").strip(),
+        "payment_status": request.args.get("payment_status", "").strip(),
+        "seller": request.args.get("seller", "").strip(),
+        "channel": request.args.get("channel", "").strip(),
+        "due": request.args.get("due", "").strip(),
+    }
+    movements = store.get("credit_movements", [])
+    all_orders = [
+        enrich_order(order, movements)
+        for order in sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
+    ]
+    orders_list = all_orders
+    if filters["q"]:
+        orders_list = [
+            order
+            for order in orders_list
+            if filters["q"] in " ".join(
+                [
+                    order.get("orderId", ""),
+                    order.get("customerName", ""),
+                    order.get("customerId", ""),
+                    order.get("sellerName", ""),
+                    order.get("saleTypeLabel", ""),
+                    order.get("shippingAddress", ""),
+                    order.get("internalComment", ""),
+                    " ".join(item.get("sku", "") for item in order.get("items") or []),
+                ]
+            ).lower()
+        ]
+    if filters["status"]:
+        orders_list = [order for order in orders_list if order.get("status") == filters["status"]]
+    if filters["sale_type"]:
+        orders_list = [order for order in orders_list if order.get("saleType") == filters["sale_type"]]
+    if filters["credit_status"]:
+        orders_list = [order for order in orders_list if order.get("creditStatus") == filters["credit_status"]]
+    if filters["inventory_status"]:
+        orders_list = [order for order in orders_list if order.get("inventoryStatus") == filters["inventory_status"]]
+    if filters["payment_status"]:
+        orders_list = [order for order in orders_list if order.get("paymentStatus") == filters["payment_status"]]
+    if filters["seller"]:
+        orders_list = [order for order in orders_list if order.get("sellerId") == filters["seller"]]
+    if filters["channel"]:
+        orders_list = [order for order in orders_list if order.get("salesChannel") == filters["channel"]]
+    if filters["due"]:
+        orders_list = [order for order in orders_list if order.get("dueStatus") == filters["due"]]
+
+    status_counts: dict[str, int] = {}
+    sale_type_totals: dict[str, float] = {}
+    seller_totals: dict[str, float] = {}
+    for order in all_orders:
+        status_counts[order.get("statusLabel", "Sin estado")] = status_counts.get(order.get("statusLabel", "Sin estado"), 0) + 1
+        sale_label = order.get("saleTypeLabel", "Sin tipo")
+        sale_type_totals[sale_label] = sale_type_totals.get(sale_label, 0.0) + float(order.get("totalUsd") or 0)
+        seller = order.get("sellerName") or "Sin vendedor"
+        seller_totals[seller] = seller_totals.get(seller, 0.0) + float(order.get("totalUsd") or 0)
+
+    sellers = [
+        seller
+        for seller in store.get("admin_users", [])
+        if seller.get("role") == "sales" and seller.get("status") != "deleted"
+    ]
+    metrics = {
+        "orders": len(all_orders),
+        "filtered": len(orders_list),
+        "total": round(sum(float(order.get("totalUsd") or 0) for order in orders_list), 2),
+        "balance": round(sum(float(order.get("balanceUsd") or 0) for order in orders_list), 2),
+        "review": sum(1 for order in orders_list if order.get("status") in {"credit_review", "payment_under_review"}),
+        "overdue": sum(1 for order in orders_list if order.get("dueStatus") == "overdue"),
+        "commission_pending": round(
+            sum(
+                float(order.get("commissionUsd") or 0)
+                for order in orders_list
+                if order.get("commissionStatus") == "commission_pending"
+            ),
+            2,
+        ),
+    }
+    return {
+        "orders": orders_list,
+        "all_orders": all_orders,
+        "metrics": metrics,
+        "filters": filters,
+        "status_options": ORDER_STATUS_OPTIONS,
+        "payment_methods": PAYMENT_METHOD_OPTIONS,
+        "sale_type_options": SALE_TYPE_OPTIONS,
+        "seller_options": sorted(sellers, key=lambda item: item.get("name", "")),
+        "channel_options": sorted(SALES_CHANNEL_LABELS.items(), key=lambda item: item[1]),
+        "credit_status_options": sorted({(order.get("creditStatus", ""), order.get("creditStatusLabel", "")) for order in all_orders if order.get("creditStatus")}),
+        "inventory_status_options": sorted({order.get("inventoryStatus", "") for order in all_orders if order.get("inventoryStatus")}),
+        "payment_status_options": [("pending", "Pendiente"), ("partial", "Pago parcial"), ("paid", "Pagado")],
+        "due_status_options": [
+            ("without_due_date", "Sin plazo"),
+            ("current", "Vigente"),
+            ("due_soon", "Por vencer"),
+            ("overdue", "Vencida"),
+            ("paid", "Pagada"),
+        ],
+        "order_charts": {
+            "status": graphify_from_pairs([(label, float(value)) for label, value in status_counts.items()], 6),
+            "sale_type": graphify_from_pairs(list(sale_type_totals.items()), 6),
+            "seller": graphify_from_pairs(list(seller_totals.items()), 6),
+        },
+        "can_manage_orders": role_allowed(ORDER_MANAGEMENT_ROLES),
+        "can_create_assisted_order": role_allowed(SALES_ROLES),
+        "can_export_orders": can_module_action("orders", "export"),
+        "error": error,
     }
 
 
@@ -6589,31 +6758,71 @@ def audit():
 @require_roles(*roles_for_action("orders", "view"))
 def orders():
     store = load_store()
-    movements = store.get("credit_movements", [])
-    enriched_orders = [
-        enrich_order(order, movements)
-        for order in sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
+    return render_template("orders.html", **orders_page_context(store))
+
+
+@app.get("/orders/export")
+@require_roles(*roles_for_action("orders", "export"))
+def orders_export():
+    store = load_store()
+    context = orders_page_context(store)
+    output = io.StringIO()
+    fieldnames = [
+        "orden",
+        "fecha",
+        "cliente",
+        "vendedor",
+        "canal",
+        "tipo_venta",
+        "plazo_dias",
+        "estado",
+        "estado_credito",
+        "estado_inventario",
+        "estado_pago",
+        "estado_despacho",
+        "total_usd",
+        "abonado_usd",
+        "saldo_usd",
+        "vence",
+        "items",
+        "direccion_despacho",
+        "comision_usd",
+        "estado_comision",
     ]
-    metrics = {
-        "orders": len(enriched_orders),
-        "total": sum(float(order.get("totalUsd") or 0) for order in enriched_orders),
-        "balance": sum(float(order.get("balanceUsd") or 0) for order in enriched_orders),
-        "review": sum(1 for order in enriched_orders if order.get("status") == "credit_review"),
-        "commission_pending": sum(
-            float(order.get("commissionUsd") or 0)
-            for order in enriched_orders
-            if order.get("commissionStatus") == "commission_pending"
-        ),
-    }
-    return render_template(
-        "orders.html",
-        orders=enriched_orders,
-        status_options=ORDER_STATUS_OPTIONS,
-        payment_methods=PAYMENT_METHOD_OPTIONS,
-        sale_type_options=SALE_TYPE_OPTIONS,
-        can_manage_orders=role_allowed(ORDER_MANAGEMENT_ROLES),
-        can_create_assisted_order=role_allowed(SALES_ROLES),
-        metrics=metrics,
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for order in context["orders"]:
+        writer.writerow(
+            {
+                "orden": order.get("orderId", ""),
+                "fecha": order.get("createdAt", ""),
+                "cliente": order.get("customerName", ""),
+                "vendedor": order.get("sellerName", ""),
+                "canal": order.get("salesChannelLabel", ""),
+                "tipo_venta": order.get("saleTypeLabel", ""),
+                "plazo_dias": order.get("paymentTermDays", 0),
+                "estado": order.get("statusLabel", ""),
+                "estado_credito": order.get("creditStatusLabel", ""),
+                "estado_inventario": order.get("stockStatus", ""),
+                "estado_pago": order.get("paymentStatusLabel", ""),
+                "estado_despacho": order.get("dispatchStatusLabel", ""),
+                "total_usd": order.get("totalUsd", 0),
+                "abonado_usd": order.get("paidUsd", 0),
+                "saldo_usd": order.get("balanceUsd", 0),
+                "vence": order.get("dueDate", ""),
+                "items": "|".join(
+                    f"{item.get('sku', '')}:{item.get('quantity', 0)}"
+                    for item in order.get("items") or []
+                ),
+                "direccion_despacho": order.get("shippingAddress", ""),
+                "comision_usd": order.get("commissionUsd", 0),
+                "estado_comision": order.get("commissionStatusLabel", ""),
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=ordenes_wulkan.csv"},
     )
 
 
@@ -6666,6 +6875,11 @@ def order_status_update(order_id: str):
     movements = store.get("credit_movements", [])
     balance = order_balance_usd(order, movements)
     note = request.form.get("note", "").strip()
+    if target_status in {"cancelled", "rejected"} and not note:
+        return render_template(
+            "orders.html",
+            **orders_page_context(store, "Motivo obligatorio para rechazar o anular una orden."),
+        ), 400
 
     sale_type = order.get("saleType", "cash")
     if target_status in ORDER_CREDIT_RESERVING_STATUSES and sale_type == "credit_line":
@@ -6684,20 +6898,31 @@ def order_status_update(order_id: str):
     elif target_status in ORDER_CREDIT_RESERVING_STATUSES:
         order["creditStatus"] = "approved" if sale_type == "term_credit" else "without_credit"
 
-    if target_status != "credit_review" and not apply_inventory_transition(store, order, target_status):
+    if target_status in {"cancelled", "rejected"}:
+        release_stock_for_order(store, order)
+    elif target_status != "credit_review" and not apply_inventory_transition(store, order, target_status):
         target_status = "credit_review"
         if sale_type == "credit_line":
             order["creditStatus"] = "manual_review"
         note = note or "Stock insuficiente para reservar o entregar esta orden."
 
-    if target_status == "cancelled":
+    if target_status in {"cancelled", "rejected"}:
         order["creditStatus"] = "cancelled"
         order["commissionStatus"] = "commission_cancelled"
+        order["dispatchStatus"] = "cancelled"
     elif target_status == "paid" and balance > 0:
         target_status = "partial_paid"
         note = note or "La orden tiene saldo pendiente; registra el abono para cerrarla como pagada."
     elif target_status in {"delivered", "paid"} and float(order.get("commissionUsd") or 0) > 0:
         order["commissionStatus"] = "commission_approved"
+    if target_status == "preparing":
+        order["dispatchStatus"] = "preparing"
+        order["currentOwner"] = "Inventario"
+    elif target_status == "delivered":
+        order["dispatchStatus"] = "delivered"
+        order["currentOwner"] = "Cobranza" if balance > 0 else "Comercial"
+    elif target_status in {"paid", "cancelled", "rejected"}:
+        order["currentOwner"] = "Cierre"
 
     order["status"] = target_status
     order["managedBy"] = session.get("admin_name", "Admin")
@@ -6765,6 +6990,10 @@ def order_payment_create(order_id: str):
     if balance_after <= 0 and float(order.get("commissionUsd") or 0) > 0:
         order["commissionStatus"] = "commission_approved"
     apply_inventory_transition(store, order, order["status"])
+    if balance_after <= 0:
+        order["currentOwner"] = "Cierre" if order.get("status") == "delivered" else "Despacho"
+    else:
+        order["currentOwner"] = "Cobranza"
     order["managedBy"] = session.get("admin_name", "Admin")
     order["managedAt"] = utc_now()
     order["updatedAt"] = utc_now()

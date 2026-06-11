@@ -1,44 +1,96 @@
 {% extends "base.html" %}
 {% set heading = "Ordenes B2B" %}
-{% set description = "Gestiona compras de ferreteros, aprobacion de credito, despacho y abonos externos." %}
+{% set description = "Gestiona compras de ferreteros, aprobacion comercial, credito, inventario, despacho y abonos externos." %}
+
+{% macro order_graph(title, chart, empty_text) -%}
+<article class="panel order-chart">
+  <div class="panel-header">
+    <h2>{{ title }}</h2>
+    <span>Graphify</span>
+  </div>
+  {% if chart.values %}
+  <div
+    class="graphify-bars"
+    data-labels='{{ chart["labels"] | tojson }}'
+    data-values='{{ chart["values"] | tojson }}'
+  ></div>
+  {% else %}
+  <div class="empty-state compact">
+    <div class="empty-icon"><i class="bi bi-bar-chart"></i></div>
+    <strong>Sin datos</strong>
+    <span>{{ empty_text }}</span>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}
 
 {% block top_action %}
-{% if can_create_assisted_order %}
-<a class="btn btn-primary" href="{{ url_for('order_new') }}">
-  <i class="bi bi-plus-lg"></i> Pedido asistido
-</a>
-{% endif %}
+<div class="d-flex flex-wrap gap-2">
+  {% if can_export_orders %}
+  <a class="btn btn-light" href="{{ url_for('orders_export', **request.args.to_dict()) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+  {% endif %}
+  {% if can_create_assisted_order %}
+  <a class="btn btn-primary" href="{{ url_for('order_new') }}">
+    <i class="bi bi-plus-lg"></i> Pedido asistido
+  </a>
+  {% endif %}
+</div>
 {% endblock %}
 
 {% block content %}
+{% if error %}
+<div class="alert alert-warning border-0 d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
 <section class="row g-3 mb-3">
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-receipt"></i></div>
       <span>Total ordenes</span>
       <strong>{{ metrics.orders }}</strong>
-      <em>B2B</em>
+      <em>{{ metrics.filtered }} vista</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
-      <span>Venta emitida</span>
+      <span>Venta filtrada</span>
       <strong>{{ money_usd(metrics.total) }}</strong>
       <em>USD</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
       <span>Saldo pendiente</span>
       <strong>{{ money_usd(metrics.balance) }}</strong>
-      <em>Credito</em>
+      <em>Cobranza</em>
     </article>
   </div>
-  <div class="col-12 col-md-3">
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
+      <span>En revision</span>
+      <strong>{{ metrics.review }}</strong>
+      <em>Operativo</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
+      <span>Vencidas</span>
+      <strong>{{ metrics.overdue }}</strong>
+      <em>Cobro</em>
+    </article>
+  </div>
+  <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
-      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <div class="metric-icon"><i class="bi bi-percent"></i></div>
       <span>Comision pend.</span>
       <strong>{{ money_usd(metrics.commission_pending) }}</strong>
       <em>Ventas</em>
@@ -46,28 +98,92 @@
   </div>
 </section>
 
-<section class="panel category-panel">
+<section class="panel product-filter-panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-3">
+      <label class="form-label">Buscar orden</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Orden, cliente, vendedor, SKU o direccion">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Estado</label>
+      <select class="form-select" name="status">
+        <option value="">Todos</option>
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Tipo venta</label>
+      <select class="form-select" name="sale_type">
+        <option value="">Todos</option>
+        {% for value, label in sale_type_options %}
+        <option value="{{ value }}" {% if filters.sale_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label">Vendedor</label>
+      <select class="form-select" name="seller">
+        <option value="">Todos</option>
+        {% for seller in seller_options %}
+        <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-1">
+      <label class="form-label">Pago</label>
+      <select class="form-select" name="payment_status">
+        <option value="">Todos</option>
+        {% for value, label in payment_status_options %}
+        <option value="{{ value }}" {% if filters.payment_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-1">
+      <label class="form-label">Vence</label>
+      <select class="form-select" name="due">
+        <option value="">Todos</option>
+        {% for value, label in due_status_options %}
+        <option value="{{ value }}" {% if filters.due == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-1 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </form>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-4">{{ order_graph("Ordenes por estado", order_charts.status, "Los estados apareceran al crear ordenes.") }}</div>
+  <div class="col-12 col-xl-4">{{ order_graph("Venta por condicion", order_charts.sale_type, "Las condiciones de pago apareceran aqui.") }}</div>
+  <div class="col-12 col-xl-4">{{ order_graph("Venta por vendedor", order_charts.seller, "Las ventas se agruparan por cartera.") }}</div>
+</section>
+
+<section class="panel order-panel">
   <div class="panel-header">
     <div>
       <h2>Gestion operativa de ordenes</h2>
-      <span>Estado, saldo, abonos y credito consumido por cada compra.</span>
+      <span>Estado, saldo, credito, inventario, despacho, comision e historial por compra.</span>
     </div>
     <span>{{ orders | length }} registros</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table">
+    <table class="table align-middle order-table">
       <thead>
         <tr>
           <th>Orden</th>
           <th>Cliente</th>
+          <th>Canal</th>
           <th>Vendedor</th>
-          <th>Tipo</th>
-          <th>Total</th>
-          <th>Abonado</th>
-          <th>Saldo</th>
-          <th>Vence</th>
-          <th>Credito</th>
-          <th>Inventario</th>
+          <th>Condicion</th>
+          <th>Total / saldo</th>
+          <th>Credito / stock</th>
+          <th>Despacho</th>
           <th>Estado</th>
           <th class="text-end">Acciones</th>
         </tr>
@@ -78,10 +194,18 @@
           <td>
             <strong class="d-block">{{ order.orderId }}</strong>
             <small class="text-secondary">{{ order.createdAt }}</small>
+            <small class="d-block text-secondary">{{ order.itemsCount }} items</small>
           </td>
           <td>
             <strong class="d-block">{{ order.customerName }}</strong>
             <small class="text-secondary">{{ order.customerId or 'Sin cliente vinculado' }}</small>
+            {% if order.shippingAddress %}
+            <small class="d-block text-secondary">{{ order.shippingAddress }}</small>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge text-bg-light">{{ order.salesChannelLabel }}</span>
+            <small class="d-block text-secondary">{{ order.currentOwner }}</small>
           </td>
           <td>
             <strong class="d-block">{{ order.sellerName }}</strong>
@@ -90,34 +214,22 @@
           <td>
             <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
             <small class="d-block text-secondary">{{ order.paymentTermDays }} dias</small>
+            {% if order.dueDate %}
+            <small class="d-block text-secondary">{{ order.dueDate }}</small>
+            {% endif %}
           </td>
           <td>
             <strong>{{ money_usd(order.totalUsd) }}</strong>
-            <small class="d-block text-secondary">{{ order.itemsCount }} items</small>
-          </td>
-          <td>{{ money_usd(order.paidUsd) }}</td>
-          <td><strong>{{ money_usd(order.balanceUsd) }}</strong></td>
-          <td>
-            {% if order.dueDate %}
-            <span class="badge {{ order.dueStatus | badge_class }}">{{ order.dueStatus }}</span>
-            <small class="d-block text-secondary">{{ order.dueDate }}</small>
-            {% else %}
-            <span class="badge text-bg-secondary">Sin plazo</span>
-            {% endif %}
+            <small class="d-block text-secondary">Abonado {{ money_usd(order.paidUsd) }}</small>
+            <small class="d-block text-secondary">Saldo {{ money_usd(order.balanceUsd) }}</small>
           </td>
           <td>
             <span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatusLabel }}</span>
-            {% if order.saleType == 'credit_line' %}
-            <small class="d-block text-secondary">Reserva {{ money_usd(order.creditReservedUsd) }}</small>
-            {% elif order.saleType == 'term_credit' %}
-            <small class="d-block text-secondary">Credito por plazo</small>
-            {% else %}
-            <small class="d-block text-secondary">No consume linea</small>
-            {% endif %}
+            <small class="d-block text-secondary">{{ order.inventoryStatus }} / {{ order.stockStatus }}</small>
           </td>
           <td>
-            <span class="badge {{ order.stockStatus | badge_class }}">{{ order.stockStatus }}</span>
-            <small class="d-block text-secondary">{{ order.inventoryStatus }}</small>
+            <span class="badge {{ order.dispatchStatus | badge_class }}">{{ order.dispatchStatusLabel }}</span>
+            <small class="d-block text-secondary">{{ order.invoiceStatus }}</small>
           </td>
           <td>
             <span class="badge {{ order.status | badge_class }}">{{ order.statusLabel }}</span>
@@ -125,27 +237,28 @@
             <small class="d-block text-secondary">{{ order.commissionStatusLabel }}</small>
           </td>
           <td class="text-end">
-            {% if can_manage_orders %}
             <div class="btn-group btn-group-sm">
-              <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#statusModal{{ loop.index }}">
+              <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#detailModal{{ loop.index }}">
+                <i class="bi bi-eye"></i> Detalle
+              </button>
+              {% if can_manage_orders %}
+              <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#statusModal{{ loop.index }}">
                 <i class="bi bi-arrow-repeat"></i> Estado
               </button>
-              <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#paymentModal{{ loop.index }}" {% if order.balanceUsd <= 0 or order.status == 'cancelled' %}disabled{% endif %}>
+              <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#paymentModal{{ loop.index }}" {% if order.balanceUsd <= 0 or order.status in ['cancelled', 'rejected'] %}disabled{% endif %}>
                 <i class="bi bi-cash-coin"></i> Abono
               </button>
+              {% endif %}
             </div>
-            {% else %}
-            <span class="text-secondary small">Seguimiento</span>
-            {% endif %}
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="12">
+          <td colspan="10">
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-receipt"></i></div>
               <strong>Sin ordenes B2B todavia</strong>
-              <span>Las compras creadas por ferreteros desde la app apareceran aqui.</span>
+              <span>Las compras creadas desde la app o por vendedores apareceran aqui.</span>
             </div>
           </td>
         </tr>
@@ -156,6 +269,91 @@
 </section>
 
 {% for order in orders %}
+<div class="modal fade" id="detailModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5">Detalle de orden</h2>
+          <p class="mb-0 text-secondary">{{ order.orderId }} - {{ order.customerName }}</p>
+        </div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-xl-7">
+            <h3 class="h6 fw-bold">Productos</h3>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th>Cant.</th>
+                    <th>Precio</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in order["items"] %}
+                  <tr>
+                    <td><span class="sku-badge">{{ item.sku }}</span></td>
+                    <td>{{ item.title }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>{{ money_usd(item.unitPriceUsd) }}</td>
+                    <td>{{ money_usd(item.lineTotalUsd) }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-12 col-xl-5">
+            <h3 class="h6 fw-bold">Resumen comercial</h3>
+            <dl class="detail-list">
+              <div><dt>Total bruto</dt><dd>{{ money_usd(order.grossUsd) }}</dd></div>
+              <div><dt>Descuento</dt><dd>{{ money_usd(order.discountUsd) }}</dd></div>
+              <div><dt>Total neto</dt><dd>{{ money_usd(order.totalUsd) }}</dd></div>
+              <div><dt>Abonado</dt><dd>{{ money_usd(order.paidUsd) }}</dd></div>
+              <div><dt>Saldo</dt><dd>{{ money_usd(order.balanceUsd) }}</dd></div>
+              <div><dt>Direccion despacho</dt><dd>{{ order.shippingAddress or "Sin direccion" }}</dd></div>
+            </dl>
+          </div>
+          <div class="col-12 col-xl-6">
+            <h3 class="h6 fw-bold">Abonos externos</h3>
+            <div class="order-timeline">
+              {% for payment in order.payments %}
+              <div>
+                <strong>{{ money_usd(payment.amountUsd) }} - {{ payment.method }}</strong>
+                <span>{{ payment.reference or "Sin referencia" }} - {{ payment.createdAt }}</span>
+              </div>
+              {% else %}
+              <div><strong>Sin abonos</strong><span>Los pagos externos se registran desde el admin.</span></div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="col-12 col-xl-6">
+            <h3 class="h6 fw-bold">Historial</h3>
+            <div class="order-timeline">
+              {% for event in order.statusHistory %}
+              <div>
+                <strong>{{ order_status_label(event.status) }}</strong>
+                <span>{{ event.note or "Sin observacion" }} - {{ event.adminName }} - {{ event.createdAt }}</span>
+              </div>
+              {% else %}
+              <div><strong>Sin historial</strong><span>Los cambios de estado apareceran aqui.</span></div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% if can_manage_orders %}
 <div class="modal fade" id="statusModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -177,6 +375,7 @@
         </select>
         <label class="form-label fw-semibold mt-3">Observacion interna</label>
         <textarea class="form-control" name="note" rows="3" placeholder="Motivo del cambio, coordinacion de despacho o revision comercial"></textarea>
+        <small class="text-secondary d-block mt-2">Rechazar o anular exige motivo. La orden libera inventario y cancela comision.</small>
       </div>
       <div class="modal-footer">
         <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>

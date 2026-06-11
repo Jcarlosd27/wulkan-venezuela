@@ -256,6 +256,9 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         order.setdefault("customerId", "")
         order.setdefault("customer", {"name": "Cliente Wulkan"})
         order.setdefault("items", [])
+        order.setdefault("grossUsd", order.get("totalUsd", 0.0))
+        order.setdefault("discountUsd", 0.0)
+        order.setdefault("netUsd", order.get("totalUsd", 0.0))
         order.setdefault("totalUsd", 0.0)
         order.setdefault("totalVes", 0.0)
         order.setdefault("exchangeRateUsdVes", 38.5)
@@ -279,6 +282,12 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         order.setdefault("paidUsd", 0.0)
         order.setdefault("balanceUsd", order.get("totalUsd", 0.0))
         order.setdefault("paymentStatus", "pending")
+        order.setdefault("dispatchStatus", "pending")
+        order.setdefault("invoiceStatus", "pending")
+        order.setdefault("shippingAddress", "")
+        order.setdefault("customerComment", "")
+        order.setdefault("internalComment", order.get("notes", ""))
+        order.setdefault("currentOwner", "Comercial")
         order.setdefault("status", "credit_review")
         if "inventoryStatus" not in order:
             order["inventoryStatus"] = "reserved" if order.get("status") in {"approved_with_credit", "preparing", "partial_paid", "paid"} else "pending"

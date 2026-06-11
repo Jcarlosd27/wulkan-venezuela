@@ -18,6 +18,8 @@ STATUS_BADGES = {
     "approved_with_credit": "text-bg-success",
     "created": "text-bg-primary",
     "preparing": "text-bg-primary",
+    "ready": "text-bg-info",
+    "dispatched": "text-bg-primary",
     "delivered": "text-bg-info",
     "partial_paid": "text-bg-warning",
     "paid": "text-bg-success",
