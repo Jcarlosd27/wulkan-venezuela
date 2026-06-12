@@ -2700,6 +2700,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
   Timer? _searchDebounce;
   _CatalogFilter _filter = _CatalogFilter.all;
   String _searchText = "";
+  String? _selectedCategoryId;
+  String _selectedCategoryLabel = "Todas";
   String? _nextCursor;
   String? _errorMessage;
   bool _hasMore = true;
@@ -2740,6 +2742,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
         _CatalogFilter.spareParts => "repuesto",
         _ => null,
       },
+      categoryId: _selectedCategoryId,
       onlyAvailable: _filter == _CatalogFilter.available,
       onlyNeedsValidation: _filter == _CatalogFilter.validation,
       limit: 18,
@@ -2830,6 +2833,20 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _loadFirstPage();
   }
 
+  void _onCategoryChanged(MobileCategory? category) {
+    final nextId = category?.id.trim();
+    final normalizedId = nextId == null || nextId.isEmpty ? null : nextId;
+    if (_selectedCategoryId == normalizedId) {
+      return;
+    }
+
+    setState(() {
+      _selectedCategoryId = normalizedId;
+      _selectedCategoryLabel = category?.name ?? "Todas";
+    });
+    _loadFirstPage();
+  }
+
   bool _addToCart(MobileProduct product, {int quantity = 1}) {
     if (!_canAddProductQuantity(context, product, quantity)) {
       return false;
@@ -2880,25 +2897,48 @@ class _CatalogScreenState extends State<CatalogScreen> {
             loadedCount: _products.length,
             hasMore: _hasMore,
             isLoading: _isLoading,
+            categoryLabel: _selectedCategoryLabel,
           ),
           const SizedBox(height: 12),
           _CatalogFilterBar(
             selected: _filter,
             onChanged: _onFilterChanged,
           ),
+          const SizedBox(height: 10),
+          _CategoryFilterStrip(
+            selectedCategoryId: _selectedCategoryId,
+            onChanged: _onCategoryChanged,
+          ),
           const SizedBox(height: 14),
           const _AnnouncementsStrip(placement: 'catalog'),
           const SizedBox(height: 16),
           const _SectionTitle(title: 'Catalogo Wulkan'),
           if (_errorMessage != null)
-            _InfoPanel(
+            _ErrorState(
               title: 'No pudimos cargar el catalogo',
-              lines: [_errorMessage!],
+              message: _friendlyMobileError(_errorMessage),
+              onRetry: _loadFirstPage,
             )
           else if (_isLoading)
-            const _LoadingState()
+            const _LoadingState(message: 'Sincronizando catalogo Wulkan')
           else if (_products.isEmpty)
-            const _EmptyState(message: 'Sin productos para este filtro')
+            _EmptyState(
+              icon: Icons.inventory_2_outlined,
+              title: 'Sin productos visibles',
+              message:
+                  'No hay productos para esta busqueda o categoria. Revisa stock, estado y publicacion desde el admin.',
+              actionLabel: 'Limpiar filtros',
+              onAction: () {
+                _searchController.clear();
+                _searchText = "";
+                setState(() {
+                  _filter = _CatalogFilter.all;
+                  _selectedCategoryId = null;
+                  _selectedCategoryLabel = "Todas";
+                });
+                _loadFirstPage();
+              },
+            )
           else
             GridView.builder(
               shrinkWrap: true,
@@ -2931,7 +2971,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 );
               },
             ),
-          if (_isLoadingMore) const _LoadingState(),
+          if (_isLoadingMore)
+            const _LoadingState(
+              compact: true,
+              message: 'Cargando mas productos',
+            ),
           if (!_isLoading &&
               !_isLoadingMore &&
               _hasMore &&
@@ -2952,11 +2996,13 @@ class _CatalogSummary extends StatelessWidget {
     required this.loadedCount,
     required this.hasMore,
     required this.isLoading,
+    required this.categoryLabel,
   });
 
   final int loadedCount;
   final bool hasMore;
   final bool isLoading;
+  final String categoryLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -3002,6 +3048,16 @@ class _CatalogSummary extends StatelessWidget {
                       .bodySmall
                       ?.copyWith(color: _wulkanMuted),
                 ),
+                if (categoryLabel != "Todas")
+                  Text(
+                    'Categoria: $categoryLabel',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _wulkanOrange,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
               ],
             ),
           ),
@@ -3027,8 +3083,6 @@ class _CatalogFilterBar extends StatelessWidget {
       (_CatalogFilter.all, 'Todos'),
       (_CatalogFilter.available, 'Disponibles'),
       (_CatalogFilter.validation, 'Revision'),
-      (_CatalogFilter.machinery, 'Maquinaria'),
-      (_CatalogFilter.spareParts, 'Repuestos'),
     ];
 
     return SingleChildScrollView(
@@ -3055,6 +3109,115 @@ class _CatalogFilterBar extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _CategoryFilterStrip extends StatelessWidget {
+  const _CategoryFilterStrip({
+    required this.selectedCategoryId,
+    required this.onChanged,
+  });
+
+  final String? selectedCategoryId;
+  final ValueChanged<MobileCategory?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<MobileCategory>>(
+      future: mobileRepository.listCategories(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const _LoadingState(
+            compact: true,
+            message: 'Cargando familias',
+          );
+        }
+
+        if (snapshot.hasError) {
+          return const _InlineNotice(
+            icon: Icons.cloud_off_outlined,
+            title: 'Categorias no disponibles',
+            message:
+                'El catalogo sigue operativo, pero no pudimos leer las familias desde el admin.',
+            color: _wulkanOrange,
+          );
+        }
+
+        final categories = snapshot.data ?? [];
+        if (categories.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Familias',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: _wulkanMuted,
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: const Text('Todas'),
+                      avatar: const Icon(Icons.apps_outlined, size: 17),
+                      selected: selectedCategoryId == null,
+                      onSelected: (_) => onChanged(null),
+                      selectedColor: _wulkanBlack,
+                      backgroundColor: Colors.white,
+                      labelStyle: TextStyle(
+                        color: selectedCategoryId == null
+                            ? Colors.white
+                            : _wulkanInk,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      side: BorderSide(
+                        color: selectedCategoryId == null
+                            ? _wulkanBlack
+                            : _wulkanLine,
+                      ),
+                    ),
+                  ),
+                  for (var index = 0; index < categories.length; index++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(categories[index].name),
+                        avatar: Icon(
+                          _categoryIcon(categories[index].icon, index),
+                          size: 17,
+                        ),
+                        selected: selectedCategoryId == categories[index].id,
+                        onSelected: (_) => onChanged(categories[index]),
+                        selectedColor: _wulkanBlack,
+                        backgroundColor: Colors.white,
+                        labelStyle: TextStyle(
+                          color: selectedCategoryId == categories[index].id
+                              ? Colors.white
+                              : _wulkanInk,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        side: BorderSide(
+                          color: selectedCategoryId == categories[index].id
+                              ? _wulkanBlack
+                              : _wulkanLine,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -3553,6 +3716,16 @@ class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
                     ),
                   ],
                 ),
+                if (snapshot.hasError) ...[
+                  const SizedBox(height: 12),
+                  const _InlineNotice(
+                    icon: Icons.cloud_off_outlined,
+                    title: 'Credito no sincronizado',
+                    message:
+                        'Puedes enviar la solicitud como efectivo o revision. Wulkan validara credito, saldo y condiciones en el admin.',
+                    color: _wulkanOrange,
+                  ),
+                ],
                 if (_saleType == "term_credit" && terms.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Wrap(
@@ -3679,7 +3852,7 @@ class _CreateOrderButtonState extends State<_CreateOrderButton> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
+        SnackBar(content: Text(_friendlyMobileError(error))),
       );
     } finally {
       if (mounted) {
@@ -5422,6 +5595,13 @@ class _AsyncList<T> extends StatelessWidget {
           return const _LoadingState();
         }
 
+        if (snapshot.hasError) {
+          return _ErrorState(
+            title: 'No pudimos cargar la informacion',
+            message: _friendlyMobileError(snapshot.error),
+          );
+        }
+
         final items = snapshot.data ?? [];
 
         if (items.isEmpty) {
@@ -5588,29 +5768,214 @@ class _ServiceLocationCard extends StatelessWidget {
 }
 
 class _LoadingState extends StatelessWidget {
-  const _LoadingState();
+  const _LoadingState({
+    this.message = 'Sincronizando con Wulkan',
+    this.compact = false,
+  });
+
+  final String message;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 24),
-      child: Center(child: CircularProgressIndicator()),
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              message,
+              style: const TextStyle(
+                color: _wulkanMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+        child: Row(
+          children: [
+            const _SoftIcon(icon: Icons.sync_outlined),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Leyendo datos publicados desde el admin.',
+                    style: TextStyle(
+                      color: _wulkanMuted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.4),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message});
+  const _EmptyState({
+    required this.message,
+    this.title = 'Sin informacion',
+    this.icon = Icons.inbox_outlined,
+    this.actionLabel,
+    this.onAction,
+  });
 
   final String message;
+  final String title;
+  final IconData icon;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Center(child: Text(message)),
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _SoftIcon(icon: icon),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _wulkanMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.refresh_outlined),
+                label: Text(actionLabel!),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({
+    required this.title,
+    required this.message,
+    this.onRetry,
+  });
+
+  final String title;
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SoftIcon(
+                  icon: Icons.cloud_off_outlined,
+                  color: Color(0xFFC83232),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        message,
+                        style: const TextStyle(
+                          color: _wulkanMuted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_outlined),
+                label: const Text('Reintentar'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _friendlyMobileError(Object? error) {
+  final raw = (error ?? 'Error desconocido').toString().trim();
+  if (raw.isEmpty) {
+    return 'No se pudo completar la operacion.';
+  }
+  return raw
+      .replaceFirst('Bad state: ', '')
+      .replaceFirst('Exception: ', '')
+      .replaceFirst('ClientException: ', '');
 }
 
 class _MapPreview extends StatelessWidget {

@@ -28,7 +28,7 @@
 - [x] Fase 3 - Backend API versionada y endpoints faltantes.
 - [x] Fase 4 - Seguridad avanzada.
 - [x] Fase 5 - UI/UX Admin Panel.
-- [ ] Fase 6 - UI/UX App Movil.
+- [x] Fase 6 - UI/UX App Movil.
 - [ ] Fase 7 - Notificaciones.
 - [ ] Fase 8 - Reglas de negocio criticas.
 - [ ] Fase 9 - Escalabilidad y mantenimiento.
@@ -1584,6 +1584,15 @@ La app debe ser simple, rápida y profesional.
 * Mensajes de error claros.
 * Modo sin datos demo.
 * Diseño alineado a Wulkan.
+
+## Avance Fase 6
+
+* [x] Catalogo movil con filtros compactos por estado y familias reales sincronizadas desde categorias del admin (`categoryId`).
+* [x] Busqueda, paginacion y limpieza de filtros con mensajes claros para productos no visibles.
+* [x] Estados de carga, vacio y error profesionalizados para evitar pantallas pobres o errores crudos al usuario.
+* [x] Checkout ferretero con alerta clara cuando no se puede sincronizar credito, manteniendo validacion posterior en Wulkan Admin.
+* [x] App cliente/vendedor mantiene homes diferenciadas por rol, carrito persistente, galeria/carrusel de producto y modo produccion sin datos demo por validacion runtime.
+* [x] Validado con `flutter analyze` y `flutter test`.
 
 ---
 
