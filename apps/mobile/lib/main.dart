@@ -1480,7 +1480,7 @@ class _SellerOrdersPreview extends StatelessWidget {
       future: mobileRepository.listSellerOrders(),
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const _LoadingState();
+          return const _SellerCommissionsLoadingView();
         }
 
         final orders = snapshot.data ?? [];
@@ -2448,6 +2448,236 @@ class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+class _SellerCommissionsLoadingView extends StatelessWidget {
+  const _SellerCommissionsLoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        _SectionTitle(title: 'Comisiones'),
+        _SellerCommissionsSyncHero(),
+        SizedBox(height: 12),
+        _CommissionFilterSkeletonBar(),
+        SizedBox(height: 12),
+        _CommissionSkeletonCard(),
+        _CommissionSkeletonCard(),
+      ],
+    );
+  }
+}
+
+class _SellerCommissionsSyncHero extends StatelessWidget {
+  const _SellerCommissionsSyncHero();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          colors: [_wulkanBlack, Color(0xFF2C1A12)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _wulkanBlack.withValues(alpha: 0.14),
+            blurRadius: 22,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: _wulkanOrange.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.6,
+                    color: _wulkanOrange,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Actualizando comisiones',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Leyendo ordenes, saldos y estados de liquidacion.',
+                      style: TextStyle(
+                        color: Color(0xFFD4D4D4),
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const _DarkSkeletonBox(width: 170, height: 24, radius: 10),
+          const SizedBox(height: 8),
+          const _DarkSkeletonBox(width: 220, height: 12, radius: 8),
+          const SizedBox(height: 14),
+          const Row(
+            children: [
+              Expanded(child: _DarkSkeletonMetric()),
+              SizedBox(width: 10),
+              Expanded(child: _DarkSkeletonMetric()),
+              SizedBox(width: 10),
+              Expanded(child: _DarkSkeletonMetric()),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommissionFilterSkeletonBar extends StatelessWidget {
+  const _CommissionFilterSkeletonBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _SkeletonBox(width: 92, height: 36, radius: 999),
+          SizedBox(width: 8),
+          _SkeletonBox(width: 118, height: 36, radius: 999),
+          SizedBox(width: 8),
+          _SkeletonBox(width: 112, height: 36, radius: 999),
+          SizedBox(width: 8),
+          _SkeletonBox(width: 96, height: 36, radius: 999),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommissionSkeletonCard extends StatelessWidget {
+  const _CommissionSkeletonCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      margin: EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SkeletonBox(width: 46, height: 46, radius: 16),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SkeletonBox(width: 170, height: 16, radius: 8),
+                      SizedBox(height: 8),
+                      _SkeletonBox(width: 210, height: 12, radius: 8),
+                    ],
+                  ),
+                ),
+                SizedBox(width: 10),
+                _SkeletonBox(width: 78, height: 30, radius: 999),
+              ],
+            ),
+            SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _SkeletonBox(width: double.infinity, height: 62),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: _SkeletonBox(width: double.infinity, height: 62),
+                ),
+              ],
+            ),
+            SizedBox(height: 12),
+            _SkeletonBox(width: double.infinity, height: 44, radius: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DarkSkeletonMetric extends StatelessWidget {
+  const _DarkSkeletonMetric();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.08),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DarkSkeletonBox(width: 68, height: 10, radius: 8),
+          SizedBox(height: 8),
+          _DarkSkeletonBox(width: 92, height: 16, radius: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _DarkSkeletonBox extends StatelessWidget {
+  const _DarkSkeletonBox({
+    required this.width,
+    required this.height,
+    this.radius = 12,
+  });
+
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        color: Colors.white.withValues(alpha: 0.16),
+      ),
     );
   }
 }
