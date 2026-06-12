@@ -29,6 +29,7 @@ from store import (
     next_id,
     save_store,
     utc_now,
+    use_sql_backend,
 )
 from uix import badge_class, money_usd, usd_to_ves
 
@@ -7071,6 +7072,42 @@ def category_descendant_ids(store: dict, category_id: str) -> set[str]:
     return descendants
 
 
+def product_count_for_categories(store: dict, category_ids: set[str]) -> int:
+    return sum(1 for product in store.get("products", []) if product.get("categoryId") in category_ids)
+
+
+def persist_category_action(
+    store: dict,
+    changed_categories: list[dict],
+    audit_events_start: int,
+    fallback_detail: str,
+) -> bool:
+    try:
+        save_store(store)
+        return True
+    except Exception:
+        app.logger.exception("No se pudo sincronizar el store completo para categorias: %s", fallback_detail)
+        if use_sql_backend() and changed_categories:
+            try:
+                from sql_store import sync_category_records
+
+                sync_category_records(changed_categories, store.get("audit_events", [])[audit_events_start:])
+                push_admin_toast(
+                    "El cambio se aplico en categorias, pero se detecto una inconsistencia pendiente en otra tabla.",
+                    "warning",
+                    "Categoria actualizada",
+                )
+                return True
+            except Exception:
+                app.logger.exception("No se pudo aplicar fallback puntual de categorias: %s", fallback_detail)
+        push_admin_toast(
+            "No se pudo guardar la categoria. Revisa los registros relacionados o intenta nuevamente.",
+            "danger",
+            "Accion no aplicada",
+        )
+        return False
+
+
 def category_form_error(store: dict, existing: dict | None = None) -> str:
     name = request.form.get("name", "").strip()
     slug = category_slug(request.form.get("slug", "").strip() or name)
@@ -10275,6 +10312,7 @@ def category_status(category_id: str):
     category = find_by_id(store.get("categories", []), category_id)
     target_status = request.form.get("status", "").strip()
     if category and target_status in {key for key, _label in CATEGORY_STATUS_OPTIONS}:
+        audit_events_start = len(store.get("audit_events", []))
         before = copy.deepcopy(category)
         category["status"] = target_status
         category["visibleInApp"] = request.form.get("visibleInApp") == "on" and target_status == "active"
@@ -10288,7 +10326,12 @@ def category_status(category_id: str):
             before,
             category,
         )
-        save_store(store)
+        persist_category_action(
+            store,
+            [category],
+            audit_events_start,
+            f"status {category_id} -> {target_status}",
+        )
     return redirect(url_for("categories"))
 
 
@@ -10299,26 +10342,43 @@ def category_delete(category_id: str):
     category = find_by_id(store["categories"], category_id)
     if not category:
         return redirect(url_for("categories"))
+    audit_events_start = len(store.get("audit_events", []))
     before = copy.deepcopy(category)
-    is_referenced = any(product.get("categoryId") == category_id for product in store["products"]) or any(
-        item.get("parentId") == category_id for item in store["categories"]
-    )
-    if is_referenced:
-        category["status"] = "deleted"
-        category["visibleInApp"] = False
-        category["deletedAt"] = utc_now()
+    affected_ids = {category_id, *category_descendant_ids(store, category_id)}
+    product_references = product_count_for_categories(store, affected_ids)
+    if product_references:
         record_change_event(
             store,
-            "logical_delete",
+            "delete_blocked",
             "category",
             category_id,
-            f"Categoria eliminada logicamente: {category.get('name', category_id)}.",
+            f"Eliminacion bloqueada por productos asociados: {category.get('name', category_id)}.",
             before,
             category,
         )
-        push_admin_toast("Categoria desactivada porque tiene referencias.", "warning", "Categoria actualizada")
+        push_admin_toast(
+            f"No se elimino: tiene {product_references} producto(s) asociado(s). Reasigna esos productos primero.",
+            "warning",
+            "Categoria protegida",
+        )
+        persist_category_action(
+            store,
+            [category],
+            audit_events_start,
+            f"blocked delete {category_id}",
+        )
+        return redirect(url_for("categories"))
     else:
-        store["categories"] = [category for category in store["categories"] if category["id"] != category_id]
+        deleted_at = utc_now()
+        changed_categories = []
+        for item in store.get("categories", []):
+            if item.get("id") in affected_ids:
+                item["status"] = "deleted"
+                item["visibleInApp"] = False
+                item["deletedAt"] = deleted_at
+                item["updatedAt"] = deleted_at
+                changed_categories.append(item)
+        store["categories"] = [item for item in store["categories"] if item.get("id") not in affected_ids]
         record_change_event(
             store,
             "delete",
@@ -10329,7 +10389,12 @@ def category_delete(category_id: str):
             None,
         )
         push_admin_toast("Categoria eliminada correctamente.", "warning", "Categoria eliminada")
-    save_store(store)
+    persist_category_action(
+        store,
+        changed_categories,
+        audit_events_start,
+        f"delete {category_id}",
+    )
     return redirect(url_for("categories"))
 
 

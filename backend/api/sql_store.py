@@ -619,6 +619,31 @@ def sync_categories(session, store: dict[str, Any]) -> None:
     soft_prune(session, Category, live_ids)
 
 
+def sync_category_records(categories: list[dict[str, Any]], audit_events: list[dict[str, Any]] | None = None) -> None:
+    init_database()
+    with SessionLocal() as session:
+        for category in categories:
+            object_id = category["id"]
+            upsert(
+                session,
+                Category,
+                object_id,
+                {
+                    "id": object_id,
+                    "name": category.get("name", ""),
+                    "description": category.get("description", ""),
+                    "image_url": category.get("imageUrl", ""),
+                    "status": category.get("status", "active"),
+                    "created_at": parse_dt(category.get("createdAt")),
+                    "updated_at": parse_dt(category.get("updatedAt")),
+                    "payload": category,
+                },
+            )
+        if audit_events:
+            sync_audit_events(session, {"audit_events": audit_events})
+        session.commit()
+
+
 def ensure_category_for_product(session, product: dict[str, Any]) -> None:
     category_id = product.get("categoryId", "uncategorized") or "uncategorized"
     if session.get(Category, category_id):
