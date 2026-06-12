@@ -591,6 +591,52 @@ def assert_category_delete_preserves_children(app, state_holder: dict, failures:
         failures.append("La subcategoria conservada no fue promovida a categoria raiz.")
 
 
+def assert_product_seed_creates_mobile_catalog(app, state_holder: dict, failures: list[str]) -> None:
+    state_holder["state"] = base_store()
+    starter_skus = {item["sku"] for item in wulkan_app.WULKAN_STARTER_PRODUCTS}
+    with app.test_client() as client:
+        authenticate(client)
+        response = client.post(
+            "/products/starter-wulkan",
+            data={"_csrf_token": CSRF},
+            follow_redirects=False,
+        )
+        if not safe_status_code(response):
+            failures.append(f"POST /products/starter-wulkan: HTTP {response.status_code}")
+            return
+
+    products = state_holder["state"].get("products", [])
+    seeded = [product for product in products if product.get("sku") in starter_skus]
+    seeded_skus = {product.get("sku") for product in seeded}
+    missing = sorted(starter_skus - seeded_skus)
+    if missing:
+        failures.append(f"Productos base Wulkan no creados: {', '.join(missing[:5])}")
+    if len(seeded) != len(seeded_skus):
+        failures.append("Productos base Wulkan quedaron duplicados por SKU.")
+    if any(product.get("status") != "active" or not product.get("visibleInApp") for product in seeded):
+        failures.append("Productos base Wulkan no quedaron publicados para la app movil.")
+    if any(not product.get("imageUrl") for product in seeded):
+        failures.append("Productos base Wulkan quedaron sin imagen principal.")
+
+    mobile_skus = {product.get("sku") for product in wulkan_app.mobile_visible_products(state_holder["state"])}
+    if not starter_skus.issubset(mobile_skus):
+        failures.append("La API movil no expone todos los productos base Wulkan visibles.")
+
+    product_count = len(products)
+    with app.test_client() as client:
+        authenticate(client)
+        response = client.post(
+            "/products/starter-wulkan",
+            data={"_csrf_token": CSRF},
+            follow_redirects=False,
+        )
+        if not safe_status_code(response):
+            failures.append(f"POST /products/starter-wulkan segunda ejecucion: HTTP {response.status_code}")
+            return
+    if len(state_holder["state"].get("products", [])) != product_count:
+        failures.append("Productos base Wulkan se duplicaron al ejecutar el seed por segunda vez.")
+
+
 def main() -> int:
     failures: list[str] = []
     collected_forms: list[tuple[str, dict]] = []
@@ -646,6 +692,7 @@ def main() -> int:
                 )
 
     assert_category_delete_preserves_children(app, state_holder, failures)
+    assert_product_seed_creates_mobile_catalog(app, state_holder, failures)
 
     seen_links: set[str] = set()
     for page, href in collected_links:

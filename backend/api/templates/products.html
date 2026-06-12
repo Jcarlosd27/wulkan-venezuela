@@ -38,6 +38,12 @@
   </button>
   {% endif %}
   {% if can_create_products %}
+  <form method="post" action="{{ url_for('products_starter_wulkan') }}">
+    {{ csrf_field() }}
+    <button class="btn btn-light" type="submit" data-confirm="Se cargaran productos base Wulkan sin duplicar SKU existentes.">
+      <i class="bi bi-boxes"></i> Productos base Wulkan
+    </button>
+  </form>
   <a class="btn btn-primary" href="{{ url_for('product_new') }}"><i class="bi bi-plus-lg"></i> Crear producto</a>
   {% endif %}
 </div>
