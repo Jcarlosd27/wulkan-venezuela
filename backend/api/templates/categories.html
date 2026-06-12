@@ -113,6 +113,12 @@
   </button>
   {% endif %}
   {% if can_create_categories %}
+  <form method="post" action="{{ url_for('categories_starter_wulkan') }}" data-confirm="Se crearan las categorias base Wulkan sin productos ni stock.">
+    {{ csrf_field() }}
+    <button class="btn btn-outline-dark" type="submit">
+      <i class="bi bi-diagram-3"></i> Categorias base Wulkan
+    </button>
+  </form>
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
     <i class="bi bi-plus-lg"></i> Nueva categoria
   </button>
@@ -331,7 +337,20 @@
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-tags"></i></div>
               <strong>Sin categorias registradas</strong>
-              <span>Crea familias reales o importa la plantilla oficial antes de publicar productos en la app.</span>
+              <span>Primero crea familias reales del catalogo. Luego cada producto podra asociarse a una categoria y aparecer ordenado en la app.</span>
+              {% if can_create_categories %}
+              <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
+                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
+                  <i class="bi bi-plus-lg"></i> Crear manual
+                </button>
+                <form method="post" action="{{ url_for('categories_starter_wulkan') }}" data-confirm="Se crearan las categorias base Wulkan sin productos ni stock.">
+                  {{ csrf_field() }}
+                  <button class="btn btn-sm btn-outline-dark" type="submit">
+                    <i class="bi bi-diagram-3"></i> Usar base Wulkan
+                  </button>
+                </form>
+              </div>
+              {% endif %}
             </div>
           </td>
         </tr>

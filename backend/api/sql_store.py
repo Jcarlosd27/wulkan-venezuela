@@ -1000,23 +1000,22 @@ def sync_service_technicians(session, store: dict[str, Any]) -> None:
 def sync_audit_events(session, store: dict[str, Any]) -> None:
     for event in store.get("audit_events", [])[-1000:]:
         object_id = event["id"]
-        upsert(
-            session,
-            AuditEvent,
-            object_id,
-            {
-                "id": object_id,
-                "actor_id": event.get("actorId", ""),
-                "actor_name": event.get("actorName", ""),
-                "actor_role": event.get("actorRole", ""),
-                "action": event.get("action", ""),
-                "entity_type": event.get("entityType", ""),
-                "entity_id": event.get("entityId", ""),
-                "detail": event.get("detail", ""),
-                "ip_address": event.get("ipAddress", ""),
-                "path": event.get("path", ""),
-                "method": event.get("method", ""),
-                "created_at": parse_dt(event.get("createdAt")),
-                "payload": event,
-            },
+        if session.get(AuditEvent, object_id):
+            continue
+        session.add(
+            AuditEvent(
+                id=object_id,
+                actor_id=event.get("actorId", ""),
+                actor_name=event.get("actorName", ""),
+                actor_role=event.get("actorRole", ""),
+                action=event.get("action", ""),
+                entity_type=event.get("entityType", ""),
+                entity_id=event.get("entityId", ""),
+                detail=event.get("detail", ""),
+                ip_address=event.get("ipAddress", ""),
+                path=event.get("path", ""),
+                method=event.get("method", ""),
+                created_at=parse_dt(event.get("createdAt")),
+                payload=copy_payload(event),
+            )
         )

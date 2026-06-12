@@ -209,6 +209,41 @@ CATEGORY_STATUS_OPTIONS = [
     ("inactive", "Inactiva"),
     ("hidden", "Oculta en app"),
 ]
+WULKAN_STARTER_CATEGORY_TREE = [
+    {
+        "name": "Jardin y Bosque",
+        "slug": "jardin-bosque",
+        "description": "Equipos para jardin, bosque y mantenimiento de espacios verdes.",
+        "icon": "bi-tree",
+        "children": [
+            ("Ahoyadores", "Perforacion de suelo y trabajo agricola.", "bi-bullseye"),
+            ("Chipeadoras", "Reduccion de ramas, poda y material vegetal.", "bi-recycle"),
+            ("Cortacesped", "Corte y mantenimiento de cesped.", "bi-scissors"),
+            ("Cortasetos", "Corte fino para setos y cercos vivos.", "bi-flower1"),
+            ("Motocultivadores", "Preparacion de suelo y labores de cultivo.", "bi-gear-wide-connected"),
+            ("Desmalezadoras", "Control de maleza y limpieza de terreno.", "bi-tree"),
+            ("Fumigacion", "Equipos para aplicacion agricola y control sanitario.", "bi-droplet"),
+            ("Motosierras", "Corte forestal, poda y faena de madera.", "bi-tools"),
+            ("Partelenas", "Equipos para partir lena y trabajo forestal.", "bi-diagram-3"),
+            ("Sopladores", "Limpieza de hojas, polvo y residuos livianos.", "bi-wind"),
+            ("Trituradores", "Trituracion de restos vegetales y material organico.", "bi-boxes"),
+        ],
+    },
+    {
+        "name": "Industrial",
+        "slug": "industrial",
+        "description": "Equipos Wulkan para faena, industria, obra y trabajo pesado.",
+        "icon": "bi-building-gear",
+        "children": [],
+    },
+    {
+        "name": "Repuestos",
+        "slug": "repuestos",
+        "description": "Piezas, consumibles y repuestos compatibles por SKU.",
+        "icon": "bi-tools",
+        "children": [],
+    },
+]
 CLIENT_TYPE_OPTIONS = [
     ("ferretero", "Ferretero"),
     ("distribuidor", "Distribuidor"),
@@ -632,7 +667,7 @@ ADMIN_MENU_GROUPS = [
         "icon": "bi-box-seam",
         "items": [
             {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "products_export", "product_duplicate", "product_delete"]},
-            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "categories_export", "category_status", "category_delete"]},
+            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "categories_export", "categories_starter_wulkan", "category_status", "category_delete"]},
             {"module": "media_library", "endpoint": "media_library", "label": "Biblioteca tecnica", "icon": "bi-folder2-open", "active": ["media_library", "media_library_import", "media_asset_delete"]},
             {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import", "stock_export"]},
         ],
@@ -697,6 +732,7 @@ ENDPOINT_UI_LABELS = {
     "category_edit": "Editar categoria",
     "categories_import": "Importar categorias",
     "categories_export": "Exportar categorias",
+    "categories_starter_wulkan": "Categorias base Wulkan",
     "seller_edit": "Editar vendedor",
     "sellers_import": "Importar vendedores",
     "client_edit": "Editar cliente",
@@ -784,6 +820,7 @@ ENDPOINT_ACTION_OVERRIDES = {
     "categories": {"GET": "view", "POST": "create"},
     "categories_export": "export",
     "categories_import": "import",
+    "categories_starter_wulkan": "create",
     "category_edit": "edit",
     "category_status": "edit",
     "category_delete": "delete",
@@ -2477,17 +2514,20 @@ def account_password():
         elif password_errors(new_password):
             error = " ".join(password_errors(new_password))
         else:
+            before = copy.deepcopy(admin_user)
             admin_user["passwordHash"] = generate_password_hash(new_password)
             admin_user["mustChangePassword"] = False
             bump_user_session_version(admin_user)
             session["must_change_password"] = False
             session["admin_session_version"] = user_session_version(admin_user)
-            record_audit_event(
+            record_change_event(
                 store,
                 "password_change",
                 "admin_user",
                 admin_user["id"],
                 "Contrasena admin actualizada por el usuario.",
+                before,
+                admin_user,
             )
             save_store(store)
             success = "Contrasena actualizada correctamente."
@@ -5453,7 +5493,7 @@ def record_audit_event(
         "path": request.path,
         "method": request.method,
         "createdAt": utc_now(),
-        "metadata": metadata or {},
+        "metadata": audit_snapshot(metadata or {}),
     }
     store.setdefault("audit_events", []).append(event)
     store["audit_events"] = store["audit_events"][-1000:]
@@ -5461,20 +5501,33 @@ def record_audit_event(
 
 AUDIT_REDACTED_KEYS = {
     "password",
-    "passwordHash",
-    "currentPassword",
-    "newPassword",
-    "accessToken",
+    "passwordhash",
+    "currentpassword",
+    "newpassword",
+    "accesstoken",
     "secret",
     "token",
+    "apikey",
+    "api_key",
+    "authorization",
 }
+
+
+def audit_key_is_sensitive(key: str) -> bool:
+    normalized = str(key or "").lower()
+    return (
+        normalized in AUDIT_REDACTED_KEYS
+        or "password" in normalized
+        or normalized.endswith("secret")
+        or normalized.endswith("token")
+    )
 
 
 def audit_snapshot(value):
     if isinstance(value, dict):
         snapshot = {}
         for key, item in value.items():
-            if key in AUDIT_REDACTED_KEYS or key.lower().endswith("secret"):
+            if audit_key_is_sensitive(key):
                 snapshot[key] = "[redacted]"
             else:
                 snapshot[key] = audit_snapshot(item)
@@ -5514,6 +5567,17 @@ def record_change_event(
         },
         actor=actor,
     )
+
+
+def record_create_event(
+    store: dict,
+    entity_type: str,
+    entity_id: str,
+    detail: str,
+    after: dict | None,
+    actor: dict | None = None,
+) -> None:
+    record_change_event(store, "create", entity_type, entity_id, detail, None, after, actor=actor)
 
 
 NOTIFICATION_TYPE_LABELS = {
@@ -7036,6 +7100,56 @@ def category_form_error(store: dict, existing: dict | None = None) -> str:
         if not find_by_id(store.get("categories", []), parent_id):
             return "Selecciona una categoria padre valida."
     return ""
+
+
+def create_wulkan_starter_categories(store: dict) -> dict:
+    created: list[dict] = []
+    existing: list[dict] = []
+    root_ids: dict[str, str] = {}
+
+    def create_or_get(entry: dict, parent_id: str = "", order: int = 0) -> dict:
+        slug = category_slug(entry["slug"])
+        category = find_category_by_slug(store, slug) or find_category_by_name(store, entry["name"])
+        if category and category.get("status") != "deleted":
+            existing.append({"id": category.get("id", ""), "name": category.get("name", ""), "slug": slug})
+            return category
+
+        now = utc_now()
+        category = {
+            "id": next_id("cat", slug),
+            "name": entry["name"],
+            "slug": slug,
+            "description": entry.get("description", ""),
+            "imageUrl": "",
+            "icon": entry.get("icon", "bi-tags") or "bi-tags",
+            "sortOrder": order,
+            "status": "active",
+            "visibleInApp": True,
+            "parentId": parent_id,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        store.setdefault("categories", []).append(category)
+        created.append({"id": category["id"], "name": category["name"], "slug": slug, "parentId": parent_id})
+        return category
+
+    for index, root in enumerate(WULKAN_STARTER_CATEGORY_TREE, start=1):
+        root_category = create_or_get(root, "", index * 10)
+        root_ids[root["slug"]] = root_category.get("id", "")
+        child_parent_id = root_ids[root["slug"]]
+        for child_index, (name, description, icon) in enumerate(root.get("children", []), start=1):
+            create_or_get(
+                {
+                    "name": name,
+                    "slug": name,
+                    "description": description,
+                    "icon": icon,
+                },
+                child_parent_id,
+                (index * 10) + child_index,
+            )
+
+    return {"created": created, "existing": existing}
 
 
 def category_page_context(store: dict, error: str = "") -> dict:
@@ -9141,7 +9255,7 @@ def admin_users():
             return render_template("admin_users.html", **admin_users_page_context(store, error))
         user = admin_user_payload()
         store["admin_users"].append(user)
-        record_audit_event(store, "create", "admin_user", user["id"], f"Usuario admin creado: {email}.")
+        record_create_event(store, "admin_user", user["id"], f"Usuario admin creado: {email}.", user)
         save_store(store)
         return redirect(url_for("admin_users"))
 
@@ -9303,7 +9417,7 @@ def sellers():
         if not seller.get("sellerCode"):
             seller["sellerCode"] = seller["id"].replace("admin-", "VEN-").upper()[:24]
         store["admin_users"].append(seller)
-        record_audit_event(store, "create", "seller", seller["id"], f"Vendedor creado: {seller['name']}.")
+        record_create_event(store, "seller", seller["id"], f"Vendedor creado: {seller['name']}.", seller)
         save_store(store)
         return redirect(url_for("sellers"))
 
@@ -9400,7 +9514,7 @@ def clients():
             return render_template("clients.html", **clients_page_context(store, error))
         client = client_payload()
         store["clients"].append(client)
-        record_audit_event(store, "create", "client", client["id"], f"Cliente creado: {client['businessName']}.")
+        record_create_event(store, "client", client["id"], f"Cliente creado: {client['businessName']}.", client)
         notify_credit_requested(store, client)
         notify_seller(
             store,
@@ -10019,6 +10133,35 @@ def categories():
     return render_template("categories.html", **category_page_context(store))
 
 
+@app.post("/categories/starter-wulkan")
+@require_roles(*roles_for_action("categories", "create"))
+def categories_starter_wulkan():
+    store = load_store()
+    before = {"total": len([category for category in store.get("categories", []) if category.get("status") != "deleted"])}
+    result = create_wulkan_starter_categories(store)
+    created_count = len(result["created"])
+    if created_count:
+        after = {
+            "total": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
+            "created": result["created"],
+            "existing": result["existing"],
+        }
+        record_change_event(
+            store,
+            "create",
+            "category_seed",
+            "wulkan-base",
+            f"Categorias base Wulkan creadas: {created_count}.",
+            before,
+            after,
+        )
+        save_store(store)
+        push_admin_toast(f"Se crearon {created_count} categorias base Wulkan.", "success", "Categorias listas")
+    else:
+        push_admin_toast("Las categorias base Wulkan ya existen. Puedes editarlas o agregar imagenes.", "info", "Sin cambios")
+    return redirect(url_for("categories"))
+
+
 @app.get("/categories/export")
 @require_roles(*roles_for_action("categories", "export"))
 def categories_export():
@@ -10220,7 +10363,7 @@ def media_library():
                     product.setdefault("imageUrls", []).append(asset_url)
                     if not product.get("imageUrl"):
                         product["imageUrl"] = asset_url
-            record_audit_event(store, "create", "media_asset", asset["id"], f"Recurso tecnico creado: {title}.")
+            record_create_event(store, "media_asset", asset["id"], f"Recurso tecnico creado: {title}.", asset)
         save_store(store)
         return redirect(url_for("media_library"))
 
@@ -10491,12 +10634,12 @@ def service_technicians():
             )
         technician = service_technician_payload()
         store.setdefault("service_technicians", []).append(technician)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "service_technician",
             technician["id"],
             f"Servicio tecnico creado: {technician['name']}.",
+            technician,
         )
         save_store(store)
         return redirect(url_for("service_technicians"))
@@ -11772,14 +11915,21 @@ def audit_page_context(store: dict) -> dict:
         entity_counts[entity] = entity_counts.get(entity, 0) + 1
         actor_counts[actor] = actor_counts.get(actor, 0) + 1
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
+    write_events = [event for event in filtered_events if event.get("severity") == "write"]
+    write_snapshots = sum(1 for event in write_events if event.get("hasSnapshot"))
+    snapshot_gap = max(0, len(write_events) - write_snapshots)
+    snapshot_rate = round((write_snapshots / len(write_events)) * 100) if write_events else 100
     metrics = {
         "total": len(all_events),
         "filtered": len(filtered_events),
         "actors": len({event.get("actorId") or event.get("actorName") for event in filtered_events}),
-        "writes": sum(1 for event in filtered_events if event.get("severity") == "write"),
+        "writes": len(write_events),
         "security": sum(1 for event in filtered_events if event.get("severity") in {"security", "critical"}),
         "exports": sum(1 for event in filtered_events if event.get("severity") == "export"),
         "snapshots": sum(1 for event in filtered_events if event.get("hasSnapshot")),
+        "writeSnapshots": write_snapshots,
+        "snapshotGap": snapshot_gap,
+        "snapshotRate": snapshot_rate,
     }
     graphify_summary = f"{metrics['writes']} cambios / {metrics['actors']} actores"
     return {
@@ -11958,12 +12108,12 @@ def crm():
             return render_template("crm.html", **crm_page_context(store, error)), 400
         append_crm_activity(record, "note", "Registro CRM creado.")
         store.setdefault("crm_records", []).append(record)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "crm_record",
             record["id"],
             f"CRM creado: {record.get('title', '')}.",
+            record,
         )
         save_store(store)
         return redirect(url_for("crm"))
@@ -12183,12 +12333,12 @@ def quote_new():
             return render_template("quote_form.html", **quote_form_context(store, None, error)), 400
         append_quote_history(quote, quote.get("status", "draft"), "Cotizacion creada.")
         store.setdefault("quotes", []).append(quote)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "quote",
             quote["id"],
             f"Cotizacion {quote['quoteNumber']} creada para {quote['client'].get('name', 'cliente')}.",
+            quote,
         )
         save_store(store)
         return redirect(url_for("quotes"))
@@ -12286,12 +12436,12 @@ def quote_duplicate(quote_id: str):
     quote["history"] = []
     append_quote_history(quote, "draft", f"Duplicada desde {source.get('quoteNumber', source.get('id', ''))}.")
     store.setdefault("quotes", []).append(quote)
-    record_audit_event(
+    record_create_event(
         store,
-        "create",
         "quote",
         quote["id"],
         f"Cotizacion {quote['quoteNumber']} duplicada desde {source.get('quoteNumber', '')}.",
+        quote,
     )
     save_store(store)
     return redirect(url_for("quotes"))
@@ -12336,12 +12486,12 @@ def quote_convert(quote_id: str):
         before,
         quote,
     )
-    record_audit_event(
+    record_create_event(
         store,
-        "create",
         "order",
         order["orderId"],
         f"Orden creada desde cotizacion {quote.get('quoteNumber', '')}.",
+        order,
     )
     notify_quote_accepted(store, quote, order)
     notify_order_created(store, order)
@@ -12456,12 +12606,12 @@ def order_new():
         if error:
             return render_template("order_form.html", **assisted_order_page_context(store, error))
         store["orders"].append(order)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "order",
             order["orderId"],
             f"Pedido asistido creado para {order['customer'].get('name', 'Cliente Wulkan')}.",
+            order,
         )
         notify_order_created(store, order)
         save_store(store)
@@ -13281,7 +13431,7 @@ def announcements():
             "updatedAt": utc_now(),
         }
         store["announcements"].append(announcement)
-        record_audit_event(store, "create", "announcement", announcement["id"], f"Anuncio creado: {title}.")
+        record_create_event(store, "announcement", announcement["id"], f"Anuncio creado: {title}.", announcement)
         save_store(store)
         return redirect(url_for("announcements"))
 
@@ -13379,12 +13529,12 @@ def api_create_order():
     if error:
         return jsonify({"error": error}), 400
     store["orders"].append(order)
-    record_audit_event(
+    record_create_event(
         store,
-        "create",
         "order",
         order["orderId"],
         f"Orden movil creada por {order['customer'].get('name', 'Cliente Wulkan')}.",
+        order,
         actor={"id": customer_id, "name": order["customer"].get("name", ""), "role": "client"},
     )
     notify_order_created(store, order)
@@ -13599,12 +13749,12 @@ def api_mobile_seller_clients():
             "updatedAt": utc_now(),
         }
         store["clients"].append(client)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "client",
             client["id"],
             f"Cliente creado desde app movil vendedor: {client['businessName']}.",
+            client,
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
         create_notification(
@@ -13671,12 +13821,12 @@ def api_mobile_seller_orders():
         if error:
             return jsonify({"error": error}), 400
         store["orders"].append(order)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "order",
             order["orderId"],
             f"Pedido asistido movil creado por {user.get('name', 'Vendedor Wulkan')}.",
+            order,
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
         notify_order_created(store, order)
@@ -13825,12 +13975,12 @@ def api_mobile_seller_quotes():
             quote["status"] = "draft"
         append_quote_history(quote, quote["status"], "Cotizacion creada desde app movil vendedor.")
         store.setdefault("quotes", []).append(quote)
-        record_audit_event(
+        record_create_event(
             store,
-            "create",
             "quote",
             quote["id"],
             f"Cotizacion movil creada por {user.get('name', 'Vendedor Wulkan')}.",
+            quote,
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
         save_store(store)
@@ -13866,6 +14016,7 @@ def api_mobile_seller_activities():
         record = find_by_id(store.get("crm_records", []), record_id) if record_id else None
         if record and record not in seller_scope_crm_records(store, user):
             return jsonify({"error": "Registro CRM fuera de tu cartera."}), 403
+        before_record = copy.deepcopy(record) if record else None
         if not record:
             now = utc_now()
             record = {
@@ -13918,12 +14069,14 @@ def api_mobile_seller_activities():
         if activity["nextActionAt"]:
             record["nextActionAt"] = activity["nextActionAt"]
         record["updatedAt"] = now
-        record_audit_event(
+        record_change_event(
             store,
             "crm_activity",
-            "crm",
+            "crm_record",
             record["id"],
             f"Actividad CRM movil registrada: {crm_activity_type_label(activity_type)}.",
+            before_record,
+            record,
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
         save_store(store)
@@ -14306,6 +14459,7 @@ def api_client_change_password():
     if errors:
         return jsonify({"error": " ".join(errors)}), 400
 
+    before = copy.deepcopy(subject)
     subject["passwordHash"] = generate_password_hash(new_password)
     subject["mustChangePassword"] = False
     if subject_type == "client":
@@ -14313,12 +14467,14 @@ def api_client_change_password():
     else:
         bump_user_session_version(subject)
     subject["updatedAt"] = utc_now()
-    record_audit_event(
+    record_change_event(
         store,
         "password_change",
         subject_type,
         subject["id"],
         "Contrasena movil actualizada por el usuario.",
+        before,
+        subject,
         actor={
             "id": subject["id"],
             "name": subject.get(subject_name_key, ""),
@@ -14378,19 +14534,30 @@ def api_mobile_recover_password():
             subject_role = subject.get("role", "mobile")
 
     if subject:
+        before = copy.deepcopy(subject)
         subject["passwordRecoveryRequestedAt"] = utc_now()
         subject["passwordRecoveryStatus"] = "pending"
         subject["updatedAt"] = utc_now()
-
-    record_audit_event(
-        store,
-        "password_reset_request",
-        subject_type,
-        subject_id,
-        "Solicitud de recuperacion de contrasena desde app movil.",
-        metadata={"email": email, "status": "received"},
-        actor={"id": subject_id, "name": subject_name, "role": subject_role},
-    )
+        record_change_event(
+            store,
+            "password_reset_request",
+            subject_type,
+            subject_id,
+            "Solicitud de recuperacion de contrasena desde app movil.",
+            before,
+            subject,
+            actor={"id": subject_id, "name": subject_name, "role": subject_role},
+        )
+    else:
+        record_audit_event(
+            store,
+            "password_reset_request",
+            subject_type,
+            subject_id,
+            "Solicitud de recuperacion de contrasena desde app movil.",
+            metadata={"email": email, "status": "received"},
+            actor={"id": subject_id, "name": subject_name, "role": subject_role},
+        )
     save_store(store)
     return jsonify(
         {
