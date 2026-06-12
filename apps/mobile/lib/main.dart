@@ -2058,7 +2058,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
       future: _clientsFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const _LoadingState();
+          return const _SellerClientsLoadingView();
         }
 
         final clients = snapshot.data ?? [];
@@ -2091,6 +2091,166 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
           ],
         );
       },
+    );
+  }
+}
+
+class _SellerClientsLoadingView extends StatelessWidget {
+  const _SellerClientsLoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        Row(
+          children: [
+            Expanded(child: _SectionTitle(title: 'Clientes')),
+            _SkeletonBox(width: 92, height: 44, radius: 14),
+          ],
+        ),
+        SizedBox(height: 8),
+        _SellerClientsSyncCard(),
+        SizedBox(height: 12),
+        _SellerClientSkeletonCard(),
+        _SellerClientSkeletonCard(),
+        _SellerClientSkeletonCard(),
+      ],
+    );
+  }
+}
+
+class _SellerClientsSyncCard extends StatelessWidget {
+  const _SellerClientsSyncCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _wulkanLine),
+        boxShadow: [
+          BoxShadow(
+            color: _wulkanBlack.withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _wulkanOrange.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(10),
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: _wulkanOrange,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Actualizando cartera',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: _wulkanBlack,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Sincronizando clientes asignados, cupo y estado comercial.',
+                  style: TextStyle(
+                    color: _wulkanMuted,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerClientSkeletonCard extends StatelessWidget {
+  const _SellerClientSkeletonCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      margin: EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SkeletonBox(width: 46, height: 46, radius: 16),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SkeletonBox(width: 160, height: 16, radius: 8),
+                  SizedBox(height: 8),
+                  _SkeletonBox(width: 120, height: 12, radius: 8),
+                  SizedBox(height: 14),
+                  _SkeletonBox(width: 150, height: 14, radius: 8),
+                  SizedBox(height: 8),
+                  _SkeletonBox(width: 190, height: 12, radius: 8),
+                ],
+              ),
+            ),
+            SizedBox(width: 10),
+            _SkeletonBox(width: 72, height: 30, radius: 999),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonBox extends StatelessWidget {
+  const _SkeletonBox({
+    required this.width,
+    required this.height,
+    this.radius = 12,
+  });
+
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFFEDE8E4),
+            Color(0xFFF8FAFD),
+            Color(0xFFEDE8E4),
+          ],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+      ),
     );
   }
 }
