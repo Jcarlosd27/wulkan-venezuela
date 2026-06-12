@@ -2268,7 +2268,7 @@ def protect_admin_csrf():
 @app.before_request
 def require_admin_session():
     public_prefixes = ("/api/mobile/", "/api/v1/mobile/", "/static/")
-    public_endpoints = {"login", "healthz", "readyz"}
+    public_endpoints = {"login", "privacy_policy", "healthz", "readyz"}
 
     if request.path.startswith(public_prefixes) or request.endpoint in public_endpoints:
         return None
@@ -2532,6 +2532,12 @@ def healthz():
             "buildSha": app.config.get("BUILD_SHA", ""),
         }
     )
+
+
+@app.get("/privacy")
+@app.get("/privacidad")
+def privacy_policy():
+    return render_template("privacy_policy.html")
 
 
 @app.get("/readyz")
