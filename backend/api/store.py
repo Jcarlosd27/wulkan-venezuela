@@ -82,6 +82,7 @@ DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
     "admin_users": [],
     "clients": [],
     "credit_movements": [],
+    "notifications": [],
     "service_technicians": [],
     "audit_events": [],
     "media_assets": [],
@@ -246,6 +247,28 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     store.setdefault("admin_users", default_collection("admin_users"))
     store.setdefault("clients", default_collection("clients"))
     store.setdefault("credit_movements", [])
+    store.setdefault("notifications", [])
+    for notification in store.get("notifications", []):
+        notification.setdefault("title", "Notificacion Wulkan")
+        notification.setdefault("body", "")
+        notification.setdefault("type", notification.get("notificationType", "info"))
+        notification.setdefault("notificationType", notification.get("type", "info"))
+        notification.setdefault("channel", "web")
+        notification.setdefault("priority", "normal")
+        notification.setdefault("status", "unread")
+        notification.setdefault("recipientType", "admin")
+        notification.setdefault("recipientId", "")
+        notification.setdefault("recipientRole", "")
+        notification.setdefault("module", "dashboard")
+        notification.setdefault("entityType", "")
+        notification.setdefault("entityId", "")
+        notification.setdefault("href", "")
+        notification.setdefault("deepLink", "")
+        notification.setdefault("readAt", "")
+        notification.setdefault("expiresAt", "")
+        notification.setdefault("metadata", {})
+        notification.setdefault("createdAt", utc_now())
+        notification.setdefault("updatedAt", notification.get("createdAt", utc_now()))
     store.setdefault("service_technicians", [])
     store.setdefault("audit_events", [])
     for admin_user in store.get("admin_users", []):

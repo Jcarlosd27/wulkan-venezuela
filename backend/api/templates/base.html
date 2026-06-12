@@ -62,8 +62,14 @@
             {% if can_access_module('announcements') %}
             <a class="btn btn-light btn-sm" href="{{ url_for('announcements') }}"><i class="bi bi-megaphone"></i> Anuncios</a>
             {% endif %}
-            {% if can_access_module('stock') %}
-            <a class="icon-btn" href="{{ url_for('stock') }}" aria-label="Stock"><i class="bi bi-bell"></i></a>
+            {% if can_access_module('notifications') %}
+            {% set unread_notifications = admin_notification_count() %}
+            <a class="icon-btn position-relative" href="{{ url_for('notifications') }}" aria-label="Notificaciones">
+              <i class="bi bi-bell"></i>
+              {% if unread_notifications %}
+              <span class="notification-dot">{{ unread_notifications }}</span>
+              {% endif %}
+            </a>
             {% endif %}
             <div class="user-pill">
               <span>{{ session.get('admin_name', 'Admin') }}</span>

@@ -239,6 +239,29 @@ class CreditMovement(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class Notification(TimestampMixin, Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    body: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    notification_type: Mapped[str] = mapped_column(String(60), default="info", nullable=False)
+    channel: Mapped[str] = mapped_column(String(40), default="web", nullable=False)
+    priority: Mapped[str] = mapped_column(String(30), default="normal", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="unread", nullable=False)
+    recipient_type: Mapped[str] = mapped_column(String(40), default="admin", nullable=False)
+    recipient_id: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    recipient_role: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    module: Mapped[str] = mapped_column(String(80), default="dashboard", nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    href: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    deep_link: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    read_at: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    expires_at: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class ServiceTechnician(TimestampMixin, Base):
     __tablename__ = "service_technicians"
 

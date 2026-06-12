@@ -14,6 +14,7 @@ from models import (
     CrmRecord,
     CreditMovement,
     MediaAsset,
+    Notification,
     Order,
     Product,
     Quote,
@@ -365,6 +366,35 @@ def credit_movement_to_dict(row: CreditMovement) -> dict[str, Any]:
     return payload
 
 
+def notification_to_dict(row: Notification) -> dict[str, Any]:
+    payload = copy_payload(row.payload)
+    payload.update(
+        {
+            "id": row.id,
+            "title": row.title,
+            "body": row.body,
+            "type": row.notification_type,
+            "notificationType": row.notification_type,
+            "channel": row.channel,
+            "priority": row.priority,
+            "status": row.status,
+            "recipientType": row.recipient_type,
+            "recipientId": row.recipient_id,
+            "recipientRole": row.recipient_role,
+            "module": row.module,
+            "entityType": row.entity_type,
+            "entityId": row.entity_id,
+            "href": row.href,
+            "deepLink": row.deep_link,
+            "readAt": row.read_at,
+            "expiresAt": row.expires_at,
+            "createdAt": iso_dt(row.created_at),
+            "updatedAt": iso_dt(row.updated_at),
+        }
+    )
+    return payload
+
+
 def service_technician_to_dict(row: ServiceTechnician) -> dict[str, Any]:
     payload = copy_payload(row.payload)
     payload.update(
@@ -449,6 +479,10 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
                 for row in session.query(CrmRecord).filter(CrmRecord.status != "deleted").all()
             ],
             "credit_movements": [credit_movement_to_dict(row) for row in session.query(CreditMovement).all()],
+            "notifications": [
+                notification_to_dict(row)
+                for row in session.query(Notification).order_by(Notification.created_at.desc()).limit(1000).all()
+            ],
             "service_technicians": [
                 service_technician_to_dict(row)
                 for row in session.query(ServiceTechnician).filter(ServiceTechnician.status != "deleted").all()
@@ -481,6 +515,7 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
         sync_crm_records(session, store)
         session.flush()
         sync_credit_movements(session, store)
+        sync_notifications(session, store)
         sync_service_technicians(session, store)
         sync_audit_events(session, store)
         sync_business_settings(session, store)
@@ -889,6 +924,44 @@ def sync_credit_movements(session, store: dict[str, Any]) -> None:
                 "payload": movement,
             },
         )
+
+
+def sync_notifications(session, store: dict[str, Any]) -> None:
+    live_ids: set[str] = set()
+    for notification in store.get("notifications", []):
+        object_id = notification["id"]
+        live_ids.add(object_id)
+        notification_type = notification.get("notificationType") or notification.get("type", "info")
+        upsert(
+            session,
+            Notification,
+            object_id,
+            {
+                "id": object_id,
+                "title": notification.get("title", ""),
+                "body": notification.get("body", ""),
+                "notification_type": notification_type,
+                "channel": notification.get("channel", "web"),
+                "priority": notification.get("priority", "normal"),
+                "status": notification.get("status", "unread"),
+                "recipient_type": notification.get("recipientType", "admin"),
+                "recipient_id": notification.get("recipientId", ""),
+                "recipient_role": notification.get("recipientRole", ""),
+                "module": notification.get("module", "dashboard"),
+                "entity_type": notification.get("entityType", ""),
+                "entity_id": notification.get("entityId", ""),
+                "href": notification.get("href", ""),
+                "deep_link": notification.get("deepLink", ""),
+                "read_at": notification.get("readAt", ""),
+                "expires_at": notification.get("expiresAt", ""),
+                "created_at": parse_dt(notification.get("createdAt")),
+                "updated_at": parse_dt(notification.get("updatedAt")),
+                "payload": notification,
+            },
+        )
+    for row in session.query(Notification).all():
+        if row.id not in live_ids:
+            session.delete(row)
 
 
 def sync_service_technicians(session, store: dict[str, Any]) -> None:

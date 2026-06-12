@@ -29,7 +29,7 @@
 - [x] Fase 4 - Seguridad avanzada.
 - [x] Fase 5 - UI/UX Admin Panel.
 - [x] Fase 6 - UI/UX App Movil.
-- [ ] Fase 7 - Notificaciones.
+- [x] Fase 7 - Notificaciones.
 - [ ] Fase 8 - Reglas de negocio criticas.
 - [ ] Fase 9 - Escalabilidad y mantenimiento.
 
@@ -1631,6 +1631,19 @@ Crear notificaciones internas y móviles.
 * Crédito aprobado.
 * Crédito rechazado.
 * Saldo vencido.
+
+## Avance Fase 7
+
+* [x] Tabla SQL `notifications` con migracion Alembic y soporte JSON/SQL.
+* [x] Modulo admin de Notificaciones con KPIs, filtros compactos, contador en campana y marcar leido/todo leido.
+* [x] Permisos por rol para consultar y gestionar notificaciones desde Sistema.
+* [x] Notificaciones admin: nueva orden, credito solicitado, orden pendiente aprobacion, cliente bloqueado, stock critico, producto agotado, abono registrado, cotizacion aceptada y cliente nuevo por vendedor.
+* [x] Notificaciones vendedor: cliente asignado, orden aprobada/rechazada, comision aprobada/pagada, cliente con deuda, cliente sin compra reciente y meta pendiente.
+* [x] Notificaciones cliente: orden recibida/aprobada/entregada, credito aprobado/rechazado y saldo vencido.
+* [x] API movil `/api/v1/mobile/notifications` y legacy `/api/mobile/notifications`, filtrada por token de vendedor o ferretero.
+* [x] App movil con campana, contador de pendientes y pantalla profesional de notificaciones.
+* [x] Deduplicacion por evento para evitar alertas repetidas de stock, credito, ordenes y seguimiento comercial.
+* [x] Validado con `python backend/api/scripts/smoke_commercial_flow.py`, `python backend/api/scripts/smoke_security.py`, `flutter analyze` y `flutter test`.
 
 ---
 

@@ -231,6 +231,39 @@ class MobileAnnouncement {
   }
 }
 
+class MobileNotification {
+  const MobileNotification({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.type,
+    required this.typeLabel,
+    required this.priority,
+    required this.status,
+    required this.createdAt,
+    this.module = "",
+    this.entityType = "",
+    this.entityId = "",
+    this.deepLink = "",
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String type;
+  final String typeLabel;
+  final String priority;
+  final String status;
+  final DateTime createdAt;
+  final String module;
+  final String entityType;
+  final String entityId;
+  final String deepLink;
+
+  bool get isUnread => status == "unread";
+  bool get isCritical => priority == "critical" || priority == "high";
+}
+
 class MobileCartItem {
   const MobileCartItem({
     required this.productId,

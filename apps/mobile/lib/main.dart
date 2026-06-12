@@ -586,6 +586,7 @@ class _WulkanShellState extends State<WulkanShell> {
         centerTitle: false,
         toolbarHeight: 64,
         actions: [
+          const _NotificationsButton(),
           ValueListenableBuilder<List<MobileCartItem>>(
             valueListenable: mobileCartController,
             builder: (context, items, _) {
@@ -827,6 +828,7 @@ class _SellerShellState extends State<_SellerShell> {
         centerTitle: false,
         toolbarHeight: 64,
         actions: [
+          const _NotificationsButton(),
           ValueListenableBuilder<List<MobileCartItem>>(
             valueListenable: mobileCartController,
             builder: (context, items, _) {
@@ -868,6 +870,248 @@ class _SellerShellState extends State<_SellerShell> {
           NavigationDestination(
               icon: Icon(Icons.payments_outlined), label: 'Comisiones'),
         ],
+      ),
+    );
+  }
+}
+
+class _NotificationsButton extends StatelessWidget {
+  const _NotificationsButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<MobileNotification>>(
+      future: mobileRepository.listNotifications(),
+      builder: (context, snapshot) {
+        final count = (snapshot.data ?? const <MobileNotification>[])
+            .where((notification) => notification.isUnread)
+            .length;
+        return IconButton(
+          tooltip: 'Notificaciones',
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+          ),
+          icon: Badge(
+            isLabelVisible: count > 0,
+            backgroundColor: _wulkanOrange,
+            label: Text(count.toString()),
+            child: const Icon(Icons.notifications_none),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class NotificationsScreen extends StatelessWidget {
+  const NotificationsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Notificaciones'),
+      ),
+      body: SafeArea(
+        child: FutureBuilder<List<MobileNotification>>(
+          future: mobileRepository.listNotifications(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const _LoadingState();
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(
+                title: 'No pudimos cargar las notificaciones',
+                message: _friendlyMobileError(snapshot.error),
+              );
+            }
+            final notifications = snapshot.data ?? const <MobileNotification>[];
+            if (notifications.isEmpty) {
+              return const _EmptyState(
+                message: 'Sin notificaciones por ahora',
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(18),
+              itemCount: notifications.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) => _NotificationCard(
+                notification: notifications[index],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _NotificationCard extends StatelessWidget {
+  const _NotificationCard({required this.notification});
+
+  final MobileNotification notification;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _notificationColor(notification);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _wulkanSurface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: notification.isUnread
+              ? color.withValues(alpha: .28)
+              : _wulkanLine,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            blurRadius: 18,
+            offset: Offset(0, 10),
+            color: Color(0x10000000),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(_notificationIcon(notification), color: color),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        notification.title,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: _wulkanBlack,
+                        ),
+                      ),
+                    ),
+                    if (notification.isUnread)
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: _wulkanOrange,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  notification.body.isEmpty
+                      ? notification.typeLabel
+                      : notification.body,
+                  style: const TextStyle(
+                    color: _wulkanMuted,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _MiniChip(
+                      label: notification.typeLabel,
+                      color: color,
+                    ),
+                    _MiniChip(
+                      label: _shortDate(notification.createdAt),
+                      color: _wulkanInk,
+                    ),
+                    if (notification.entityId.isNotEmpty)
+                      _MiniChip(
+                        label: notification.entityId,
+                        color: _wulkanMuted,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Color _notificationColor(MobileNotification notification) {
+  if (notification.priority == 'critical') {
+    return const Color(0xFFDC3545);
+  }
+  if (notification.priority == 'high') {
+    return const Color(0xFFFFB020);
+  }
+  if (notification.type.contains('credit')) {
+    return const Color(0xFF0D6EFD);
+  }
+  return _wulkanOrange;
+}
+
+IconData _notificationIcon(MobileNotification notification) {
+  if (notification.type.contains('order')) {
+    return Icons.receipt_long_outlined;
+  }
+  if (notification.type.contains('credit')) {
+    return Icons.credit_card_outlined;
+  }
+  if (notification.type.contains('stock') ||
+      notification.type.contains('out')) {
+    return Icons.inventory_2_outlined;
+  }
+  if (notification.type.contains('commission')) {
+    return Icons.payments_outlined;
+  }
+  return Icons.notifications_none;
+}
+
+String _shortDate(DateTime value) {
+  return '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}';
+}
+
+class _MiniChip extends StatelessWidget {
+  const _MiniChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }

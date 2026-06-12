@@ -455,6 +455,7 @@ PERMISSION_MODULES = [
     ("collections", "Cobranza", "bi-cash-coin", "Cuentas por cobrar, abonos y mora."),
     ("dispatch", "Despacho", "bi-truck", "Preparacion, ruta y evidencia de entrega."),
     ("reports", "Reportes", "bi-file-bar-graph", "Exportables comerciales, inventario y finanzas."),
+    ("notifications", "Notificaciones", "bi-bell", "Alertas internas y moviles por evento comercial."),
     ("admin_users", "Usuarios admin", "bi-people", "Accesos internos al panel."),
     ("permissions", "Roles y permisos", "bi-shield-lock", "Matriz granular por rol y accion."),
     ("settings", "Configuracion", "bi-gear", "Parametros generales del negocio."),
@@ -494,6 +495,7 @@ ROLE_MODULE_PERMISSIONS = {
         "collections": set(ACTION_READ | {"edit"}),
         "dispatch": set(ACTION_READ),
         "reports": set(ACTION_AUDIT),
+        "notifications": set(ACTION_READ | {"edit"}),
         "import_templates": set(ACTION_READ),
         "audit": set(ACTION_AUDIT),
         "documents": set(ACTION_READ),
@@ -516,6 +518,7 @@ ROLE_MODULE_PERMISSIONS = {
         "collections": set(ACTION_READ),
         "dispatch": set(ACTION_READ | {"edit"}),
         "reports": set(ACTION_READ),
+        "notifications": set(ACTION_READ | {"edit"}),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_WORK),
     },
@@ -527,6 +530,7 @@ ROLE_MODULE_PERMISSIONS = {
         "stock": {"view", "create", "edit", "annul", "export", "import", "audit"},
         "orders": set(ACTION_READ),
         "dispatch": set(ACTION_READ),
+        "notifications": set(ACTION_READ | {"edit"}),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_WORK),
     },
@@ -538,6 +542,7 @@ ROLE_MODULE_PERMISSIONS = {
         "orders": set(ACTION_READ | {"edit"}),
         "collections": {"view", "create", "edit", "export", "audit"},
         "reports": set(ACTION_READ),
+        "notifications": set(ACTION_READ | {"edit"}),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_READ),
     },
@@ -548,6 +553,7 @@ ROLE_MODULE_PERMISSIONS = {
         "dispatch": {"view", "create", "edit", "annul", "export", "audit"},
         "service_technicians": set(ACTION_READ),
         "reports": set(ACTION_READ),
+        "notifications": set(ACTION_READ | {"edit"}),
         "documents": set(ACTION_READ),
     },
     "auditor": {
@@ -572,6 +578,7 @@ ROLE_MODULE_PERMISSIONS = {
             "collections",
             "dispatch",
             "reports",
+            "notifications",
             "import_templates",
             "documents",
         ]
@@ -631,6 +638,7 @@ ADMIN_MENU_GROUPS = [
         "items": [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
             {"module": "documents", "endpoint": "documents", "label": "Documentos", "icon": "bi-folder2", "active": ["documents", "documents_import", "documents_export", "document_delete"]},
+            {"module": "notifications", "endpoint": "notifications", "label": "Notificaciones", "icon": "bi-bell", "active": ["notifications", "notification_read", "notifications_read_all"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit", "audit_export"]},
             {"module": "settings", "endpoint": "settings", "label": "Configuracion", "icon": "bi-gear", "active": ["settings"]},
             {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
@@ -686,6 +694,7 @@ ENDPOINT_UI_LABELS = {
     "quote_edit": "Editar cotizacion",
     "documents_import": "Importar documentos",
     "document_open": "Abrir documento",
+    "notifications": "Notificaciones",
     "audit_export": "Exportar auditoria",
 }
 
@@ -781,6 +790,9 @@ ENDPOINT_ACTION_OVERRIDES = {
     "document_open": "view",
     "document_private_file": "view",
     "document_delete": "delete",
+    "notifications": "view",
+    "notification_read": "edit",
+    "notifications_read_all": "edit",
     "audit": "view",
     "audit_export": "export",
     "settings": {"GET": "view", "POST": "edit"},
@@ -2180,6 +2192,7 @@ def security_context():
         "current_admin_role": current_admin_role,
         "admin_menu_groups": admin_menu_groups,
         "admin_breadcrumbs": admin_breadcrumbs,
+        "admin_notification_count": admin_notification_count,
         "admin_toasts": consume_admin_toasts,
         "permission_actions": PERMISSION_ACTIONS,
         "role_labels": ROLE_LABELS,
@@ -2206,6 +2219,9 @@ def security_context():
         "sales_channel_label": sales_channel_label,
         "dispatch_status_label": dispatch_status_label,
         "due_status_label": due_status_label,
+        "notification_type_label": notification_type_label,
+        "notification_priority_label": notification_priority_label,
+        "notification_status_label": notification_status_label,
     }
 
 
@@ -5458,6 +5474,655 @@ def record_change_event(
     )
 
 
+NOTIFICATION_TYPE_LABELS = {
+    "order_created": "Nueva orden",
+    "order_pending_approval": "Orden pendiente aprobacion",
+    "order_received": "Orden recibida",
+    "order_approved": "Orden aprobada",
+    "order_rejected": "Orden rechazada",
+    "order_dispatched": "Orden despachada",
+    "order_delivered": "Orden entregada",
+    "credit_requested": "Credito solicitado",
+    "credit_approved": "Credito aprobado",
+    "credit_rejected": "Credito rechazado",
+    "client_blocked": "Cliente bloqueado",
+    "client_assigned": "Cliente asignado",
+    "client_created_by_seller": "Cliente nuevo por vendedor",
+    "stock_low": "Stock critico",
+    "product_out": "Producto agotado",
+    "payment_registered": "Abono registrado",
+    "quote_accepted": "Cotizacion aceptada",
+    "commission_approved": "Comision aprobada",
+    "commission_paid": "Comision pagada",
+    "client_debt": "Cliente con deuda",
+    "inactive_client": "Cliente sin compra reciente",
+    "overdue_balance": "Saldo vencido",
+    "goal_pending": "Meta pendiente",
+    "info": "Informacion",
+}
+NOTIFICATION_PRIORITY_LABELS = {
+    "low": "Baja",
+    "normal": "Normal",
+    "high": "Alta",
+    "critical": "Critica",
+}
+NOTIFICATION_STATUS_LABELS = {
+    "unread": "Pendiente",
+    "read": "Leida",
+    "archived": "Archivada",
+}
+
+
+def notification_type_label(value: str) -> str:
+    return NOTIFICATION_TYPE_LABELS.get(value, str(value or "info").replace("_", " ").title())
+
+
+def notification_priority_label(value: str) -> str:
+    return NOTIFICATION_PRIORITY_LABELS.get(value, "Normal")
+
+
+def notification_status_label(value: str) -> str:
+    return NOTIFICATION_STATUS_LABELS.get(value, "Pendiente")
+
+
+def notification_priority_class(value: str) -> str:
+    return {
+        "low": "text-bg-secondary",
+        "normal": "text-bg-primary",
+        "high": "text-bg-warning",
+        "critical": "text-bg-danger",
+    }.get(value, "text-bg-primary")
+
+
+def notification_url(endpoint: str, **values) -> str:
+    try:
+        return url_for(endpoint, **values)
+    except RuntimeError:
+        return ""
+    except Exception:
+        return ""
+
+
+def notification_is_expired(notification: dict) -> bool:
+    expires_at = notification.get("expiresAt") or ""
+    if not expires_at:
+        return False
+    return parse_utc_datetime(expires_at) < datetime.now(timezone.utc)
+
+
+def create_notification(
+    store: dict,
+    *,
+    title: str,
+    body: str = "",
+    notification_type: str = "info",
+    channel: str = "web",
+    priority: str = "normal",
+    recipient_type: str = "admin",
+    recipient_id: str = "",
+    recipient_role: str = "",
+    module: str = "dashboard",
+    entity_type: str = "",
+    entity_id: str = "",
+    href: str = "",
+    deep_link: str = "",
+    metadata: dict | None = None,
+    dedupe_key: str = "",
+) -> dict:
+    now = utc_now()
+    metadata = dict(metadata or {})
+    if dedupe_key:
+        metadata["dedupeKey"] = dedupe_key
+        for existing in store.setdefault("notifications", []):
+            existing_payload = existing.get("payload") or existing.get("metadata") or {}
+            if (
+                existing.get("status", "unread") == "unread"
+                and existing_payload.get("dedupeKey") == dedupe_key
+            ):
+                existing.update(
+                    {
+                        "title": title,
+                        "body": body,
+                        "notificationType": notification_type,
+                        "type": notification_type,
+                        "channel": channel,
+                        "priority": priority,
+                        "module": module,
+                        "href": href,
+                        "deepLink": deep_link,
+                        "payload": metadata,
+                        "metadata": metadata,
+                        "updatedAt": now,
+                    }
+                )
+                return existing
+
+    notification = {
+        "id": next_id("ntf", f"{notification_type}-{recipient_type}-{recipient_id}-{recipient_role}-{entity_id}-{now}"),
+        "title": title.strip() or "Notificacion Wulkan",
+        "body": body.strip(),
+        "notificationType": notification_type,
+        "type": notification_type,
+        "channel": channel,
+        "priority": priority if priority in NOTIFICATION_PRIORITY_LABELS else "normal",
+        "status": "unread",
+        "recipientType": recipient_type,
+        "recipientId": recipient_id,
+        "recipientRole": recipient_role,
+        "module": module,
+        "entityType": entity_type,
+        "entityId": entity_id,
+        "href": href,
+        "deepLink": deep_link,
+        "readAt": "",
+        "expiresAt": "",
+        "payload": metadata,
+        "metadata": metadata,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    notifications = store.setdefault("notifications", [])
+    notifications.append(notification)
+    store["notifications"] = sorted(notifications, key=lambda item: item.get("createdAt", ""))[-1000:]
+    return notification
+
+
+def notify_admin(store: dict, title: str, body: str, **kwargs) -> dict:
+    return create_notification(store, title=title, body=body, recipient_type="admin", channel="web", **kwargs)
+
+
+def notify_role(store: dict, role: str, title: str, body: str, **kwargs) -> dict:
+    return create_notification(store, title=title, body=body, recipient_type="role", recipient_role=role, channel="web", **kwargs)
+
+
+def notify_seller(store: dict, seller_id: str, title: str, body: str, **kwargs) -> dict | None:
+    if not seller_id:
+        return None
+    return create_notification(store, title=title, body=body, recipient_type="seller", recipient_id=seller_id, channel="mobile", **kwargs)
+
+
+def notify_client(store: dict, client_id: str, title: str, body: str, **kwargs) -> dict | None:
+    if not client_id:
+        return None
+    return create_notification(store, title=title, body=body, recipient_type="client", recipient_id=client_id, channel="mobile", **kwargs)
+
+
+def notification_visible_to_current_admin(notification: dict) -> bool:
+    if notification.get("status") == "archived" or notification_is_expired(notification):
+        return False
+    role = current_admin_role()
+    if role == "super_admin":
+        return True
+    module = notification.get("module") or ""
+    if module and module in ALL_MODULE_KEYS and not can_access_module(module):
+        return False
+    recipient_type = notification.get("recipientType", "admin")
+    recipient_id = notification.get("recipientId", "")
+    recipient_role = notification.get("recipientRole", "")
+    if recipient_type in {"admin", "internal"}:
+        return not recipient_id or recipient_id == session.get("admin_user_id", "")
+    if recipient_type == "role":
+        return not recipient_role or recipient_role == role
+    if recipient_type in {"user", "admin_user"}:
+        return recipient_id == session.get("admin_user_id", "")
+    return False
+
+
+def visible_admin_notifications(store: dict) -> list[dict]:
+    notifications = [
+        enrich_notification(notification)
+        for notification in store.get("notifications", [])
+        if notification_visible_to_current_admin(notification)
+    ]
+    return sorted(notifications, key=lambda item: item.get("createdAt", ""), reverse=True)
+
+
+def admin_notification_count() -> int:
+    if not session.get("admin_authenticated") or not can_access_module("notifications"):
+        return 0
+    try:
+        store = load_store()
+    except Exception:
+        return 0
+    return sum(1 for item in visible_admin_notifications(store) if item.get("status") == "unread")
+
+
+def enrich_notification(notification: dict) -> dict:
+    enriched = dict(notification)
+    notification_type = enriched.get("notificationType") or enriched.get("type") or "info"
+    enriched["notificationType"] = notification_type
+    enriched["type"] = notification_type
+    enriched["typeLabel"] = notification_type_label(notification_type)
+    enriched["priorityLabel"] = notification_priority_label(enriched.get("priority", "normal"))
+    enriched["priorityClass"] = notification_priority_class(enriched.get("priority", "normal"))
+    enriched["statusLabel"] = notification_status_label(enriched.get("status", "unread"))
+    enriched["payload"] = enriched.get("payload") or enriched.get("metadata") or {}
+    return enriched
+
+
+def mobile_notification_payload(notification: dict) -> dict:
+    enriched = enrich_notification(notification)
+    return {
+        "id": enriched["id"],
+        "title": enriched["title"],
+        "body": enriched.get("body", ""),
+        "type": enriched["notificationType"],
+        "typeLabel": enriched["typeLabel"],
+        "channel": enriched.get("channel", "mobile"),
+        "priority": enriched.get("priority", "normal"),
+        "priorityLabel": enriched["priorityLabel"],
+        "status": enriched.get("status", "unread"),
+        "statusLabel": enriched["statusLabel"],
+        "module": enriched.get("module", ""),
+        "entityType": enriched.get("entityType", ""),
+        "entityId": enriched.get("entityId", ""),
+        "href": enriched.get("href", ""),
+        "deepLink": enriched.get("deepLink", ""),
+        "createdAt": enriched.get("createdAt", ""),
+        "readAt": enriched.get("readAt", ""),
+        "metadata": enriched.get("payload", {}),
+    }
+
+
+def mobile_notifications_for_subject(store: dict, subject_type: str, subject_id: str, role: str = "") -> list[dict]:
+    visible = []
+    for notification in store.get("notifications", []):
+        if notification.get("status") == "archived" or notification_is_expired(notification):
+            continue
+        recipient_type = notification.get("recipientType", "")
+        recipient_id = notification.get("recipientId", "")
+        recipient_role = notification.get("recipientRole", "")
+        if recipient_type == subject_type and recipient_id == subject_id:
+            visible.append(notification)
+        elif recipient_type == "role" and role and recipient_role == role:
+            visible.append(notification)
+    return sorted(visible, key=lambda item: item.get("createdAt", ""), reverse=True)
+
+
+def mobile_notification_subject(store: dict) -> tuple[str, str, str, object | None]:
+    payload = mobile_token_payload()
+    if payload.get("type") == "admin":
+        user, auth_error = require_mobile_sales_user(store)
+        if auth_error:
+            return "", "", "", auth_error
+        return "seller", user["id"], user.get("role", ""), None
+    client, auth_error = require_mobile_client(store)
+    if auth_error or not client:
+        return "", "", "", auth_error or jsonify({"error": "Token movil requerido."})
+    return "client", client["id"], "client", None
+
+
+def generate_mobile_subject_notifications(store: dict, subject_type: str, subject_id: str, role: str = "") -> bool:
+    before_count = len(store.setdefault("notifications", []))
+    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    orders = store.get("orders", [])
+    movements = store.get("credit_movements", [])
+
+    if subject_type == "seller":
+        user = find_by_id(store.get("admin_users", []), subject_id)
+        if not user:
+            return False
+        seller_snapshot = enrich_seller(store, user)
+        if safe_float(seller_snapshot.get("salesGoalUsd"), 0) > 0 and safe_float(seller_snapshot.get("goalProgressPercent"), 0) < 100:
+            notify_seller(
+                store,
+                subject_id,
+                "Meta pendiente",
+                f"Avance {seller_snapshot.get('goalProgressPercent', 0)}% de meta mensual {money_usd(seller_snapshot.get('salesGoalUsd', 0))}.",
+                notification_type="goal_pending",
+                priority="low",
+                module="sellers",
+                entity_type="seller",
+                entity_id=subject_id,
+                deep_link="wulkan://seller/home",
+                metadata={"month": current_month, "goalProgressPercent": seller_snapshot.get("goalProgressPercent", 0)},
+                dedupe_key=f"seller-goal-{subject_id}-{current_month}",
+            )
+        for client in seller_scope_clients(store, user):
+            enriched = enrich_client(client, orders, movements)
+            client_id = enriched.get("id", "")
+            client_name = enriched.get("businessName") or enriched.get("commercialName") or "Cliente"
+            overdue = safe_float(enriched.get("overdueBalanceUsd"), 0)
+            if overdue > 0:
+                notify_seller(
+                    store,
+                    subject_id,
+                    "Cliente con deuda",
+                    f"{client_name} mantiene {money_usd(overdue)} vencidos.",
+                    notification_type="client_debt",
+                    priority="high",
+                    module="clients",
+                    entity_type="client",
+                    entity_id=client_id,
+                    deep_link=f"wulkan://seller/clients/{client_id}",
+                    metadata={"clientId": client_id, "overdueBalanceUsd": overdue},
+                    dedupe_key=f"seller-client-debt-{subject_id}-{client_id}-{current_month}",
+                )
+            last_activity = enriched.get("lastOrderAt") or enriched.get("createdAt") or ""
+            if last_activity:
+                inactive_days = (datetime.now(timezone.utc) - parse_utc_datetime(last_activity)).days
+                if inactive_days >= 45:
+                    notify_seller(
+                        store,
+                        subject_id,
+                        "Cliente sin compra reciente",
+                        f"{client_name} lleva {inactive_days} dias sin compra registrada.",
+                        notification_type="inactive_client",
+                        priority="low",
+                        module="clients",
+                        entity_type="client",
+                        entity_id=client_id,
+                        deep_link=f"wulkan://seller/clients/{client_id}",
+                        metadata={"clientId": client_id, "inactiveDays": inactive_days},
+                        dedupe_key=f"seller-client-inactive-{subject_id}-{client_id}-{current_month}",
+                    )
+
+    if subject_type == "client":
+        client = find_by_id(store.get("clients", []), subject_id)
+        if client:
+            enriched = enrich_client(client, orders, movements)
+            overdue = safe_float(enriched.get("overdueBalanceUsd"), 0)
+            if overdue > 0:
+                notify_client(
+                    store,
+                    subject_id,
+                    "Saldo vencido",
+                    f"Tienes {money_usd(overdue)} vencidos. Contacta a tu vendedor Wulkan.",
+                    notification_type="overdue_balance",
+                    priority="high",
+                    module="credit",
+                    entity_type="client",
+                    entity_id=subject_id,
+                    deep_link="wulkan://credit",
+                    metadata={"clientId": subject_id, "overdueBalanceUsd": overdue},
+                    dedupe_key=f"client-overdue-{subject_id}-{current_month}",
+                )
+
+    return len(store.get("notifications", [])) != before_count
+
+
+def notify_order_created(store: dict, order: dict) -> None:
+    order_id = order.get("orderId") or order.get("id", "")
+    customer = order.get("customer") or {}
+    customer_name = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
+    total = money_usd(order.get("totalUsd") or order.get("netUsd") or 0)
+    sale_label = sale_type_label(order.get("saleType", "cash"))
+    status = order.get("status", "credit_review")
+    notification_type = "order_pending_approval" if status in {"credit_review", "payment_under_review"} else "order_created"
+    priority = "high" if notification_type == "order_pending_approval" else "normal"
+    notify_admin(
+        store,
+        "Nueva orden de compra",
+        f"{customer_name} genero {total} bajo condicion {sale_label}.",
+        notification_type=notification_type,
+        priority=priority,
+        module="orders",
+        entity_type="order",
+        entity_id=order_id,
+        href=notification_url("orders", q=order_id),
+        deep_link=f"wulkan://orders/{order_id}",
+        metadata={"orderId": order_id, "saleType": order.get("saleType", ""), "status": status},
+        dedupe_key=f"admin-order-created-{order_id}",
+    )
+    notify_client(
+        store,
+        order.get("customerId", ""),
+        "Orden recibida",
+        f"Wulkan recibio tu orden {order_id} por {total}.",
+        notification_type="order_received",
+        priority="normal",
+        module="orders",
+        entity_type="order",
+        entity_id=order_id,
+        deep_link=f"wulkan://orders/{order_id}",
+        metadata={"orderId": order_id, "status": status},
+        dedupe_key=f"client-order-received-{order_id}",
+    )
+    notify_seller(
+        store,
+        order.get("sellerId", ""),
+        "Nueva orden de tu cartera",
+        f"{customer_name} creo una orden por {total}.",
+        notification_type="order_created",
+        priority=priority,
+        module="orders",
+        entity_type="order",
+        entity_id=order_id,
+        deep_link=f"wulkan://seller/orders/{order_id}",
+        metadata={"orderId": order_id, "customerId": order.get("customerId", "")},
+        dedupe_key=f"seller-order-created-{order_id}",
+    )
+
+
+def notify_order_status_change(store: dict, order: dict, before_status: str) -> None:
+    after_status = order.get("status", "")
+    if not after_status or before_status == after_status:
+        return
+    order_id = order.get("orderId") or order.get("id", "")
+    total = money_usd(order.get("totalUsd") or 0)
+    status_label = order_status_label(after_status)
+    type_by_status = {
+        "approved_with_credit": "order_approved",
+        "preparing": "order_approved",
+        "rejected": "order_rejected",
+        "cancelled": "order_rejected",
+        "delivered": "order_delivered",
+        "paid": "order_delivered",
+        "partial_paid": "order_approved",
+    }
+    notification_type = type_by_status.get(after_status, "info")
+    if notification_type == "info":
+        return
+    title_by_type = {
+        "order_approved": "Orden aprobada",
+        "order_rejected": "Orden rechazada",
+        "order_delivered": "Orden entregada",
+    }
+    notify_client(
+        store,
+        order.get("customerId", ""),
+        title_by_type.get(notification_type, "Orden actualizada"),
+        f"Tu orden {order_id} ahora esta en estado {status_label}. Total {total}.",
+        notification_type=notification_type,
+        priority="high" if notification_type == "order_rejected" else "normal",
+        module="orders",
+        entity_type="order",
+        entity_id=order_id,
+        deep_link=f"wulkan://orders/{order_id}",
+        metadata={"orderId": order_id, "beforeStatus": before_status, "status": after_status},
+        dedupe_key=f"client-order-status-{order_id}-{after_status}",
+    )
+    notify_seller(
+        store,
+        order.get("sellerId", ""),
+        title_by_type.get(notification_type, "Orden actualizada"),
+        f"Orden {order_id} actualizada a {status_label}.",
+        notification_type=notification_type,
+        priority="high" if notification_type == "order_rejected" else "normal",
+        module="orders",
+        entity_type="order",
+        entity_id=order_id,
+        deep_link=f"wulkan://seller/orders/{order_id}",
+        metadata={"orderId": order_id, "beforeStatus": before_status, "status": after_status},
+        dedupe_key=f"seller-order-status-{order_id}-{after_status}",
+    )
+
+
+def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
+    client_id = client.get("id", "")
+    approved = decision in {"approved", "reactivate", "adjust"} and safe_float(client.get("creditLimitUsd"), 0) > 0
+    rejected = decision in {"rejected", "suspended", "blocked_debt", "blocked_limit"}
+    if not approved and not rejected:
+        return
+    notification_type = "credit_approved" if approved else "credit_rejected"
+    title = "Credito aprobado" if approved else "Credito no aprobado"
+    body = (
+        f"Linea disponible por {money_usd(client.get('creditLimitUsd', 0))} a {client.get('paymentTermsDays', 0)} dias."
+        if approved
+        else "La solicitud de credito requiere revision o fue rechazada por gerencia."
+    )
+    notify_client(
+        store,
+        client_id,
+        title,
+        body,
+        notification_type=notification_type,
+        priority="high",
+        module="credit",
+        entity_type="client",
+        entity_id=client_id,
+        deep_link="wulkan://credit",
+        metadata={"clientId": client_id, "decision": decision},
+        dedupe_key=f"client-credit-{client_id}-{client.get('creditReviewedAt', '')}",
+    )
+    notify_seller(
+        store,
+        client.get("assignedSellerId", ""),
+        title,
+        f"{client.get('businessName') or client.get('commercialName') or 'Cliente'}: {body}",
+        notification_type=notification_type,
+        priority="high",
+        module="credit",
+        entity_type="client",
+        entity_id=client_id,
+        deep_link=f"wulkan://seller/clients/{client_id}",
+        metadata={"clientId": client_id, "decision": decision},
+        dedupe_key=f"seller-credit-{client_id}-{client.get('creditReviewedAt', '')}",
+    )
+    if decision in {"suspended", "blocked_debt", "blocked_limit"}:
+        notify_admin(
+            store,
+            "Cliente bloqueado",
+            f"{client.get('businessName') or client.get('commercialName') or client_id} quedo con credito {credit_status_label(client.get('creditRequestStatus', ''))}.",
+            notification_type="client_blocked",
+            priority="critical",
+            module="clients",
+            entity_type="client",
+            entity_id=client_id,
+            href=notification_url("clients", q=client.get("businessName", "")),
+            metadata={"clientId": client_id, "decision": decision},
+            dedupe_key=f"admin-client-blocked-{client_id}-{client.get('creditReviewedAt', '')}",
+        )
+
+
+def notify_credit_requested(store: dict, client: dict) -> None:
+    client_id = client.get("id", "")
+    amount = safe_float(client.get("creditRequestedUsd"), 0)
+    if amount <= 0:
+        return
+    title = "Credito solicitado"
+    body = f"{client.get('businessName') or client.get('commercialName') or 'Cliente'} solicito {money_usd(amount)}."
+    notify_admin(
+        store,
+        title,
+        body,
+        notification_type="credit_requested",
+        priority="high",
+        module="credit",
+        entity_type="client",
+        entity_id=client_id,
+        href=notification_url("credit", q=client.get("businessName", "")),
+        metadata={"clientId": client_id, "requestedUsd": amount},
+        dedupe_key=f"admin-credit-requested-{client_id}-{client.get('updatedAt', client.get('createdAt', ''))}",
+    )
+
+
+def notify_payment_registered(store: dict, order: dict, movement: dict) -> None:
+    order_id = order.get("orderId") or order.get("id", "")
+    amount = money_usd(movement.get("amountUsd") or 0)
+    notify_admin(
+        store,
+        "Abono registrado",
+        f"Se registro {amount} para la orden {order_id}.",
+        notification_type="payment_registered",
+        priority="normal",
+        module="collections",
+        entity_type="order",
+        entity_id=order_id,
+        href=notification_url("collections", q=order_id),
+        metadata={"orderId": order_id, "movementId": movement.get("id", "")},
+        dedupe_key=f"admin-payment-{movement.get('id', '')}",
+    )
+    notify_client(
+        store,
+        order.get("customerId", ""),
+        "Abono recibido",
+        f"Wulkan registro {amount} en tu orden {order_id}.",
+        notification_type="payment_registered",
+        priority="normal",
+        module="orders",
+        entity_type="order",
+        entity_id=order_id,
+        deep_link=f"wulkan://orders/{order_id}",
+        metadata={"orderId": order_id, "movementId": movement.get("id", "")},
+        dedupe_key=f"client-payment-{movement.get('id', '')}",
+    )
+
+
+def notify_commission_status(store: dict, order: dict, status: str) -> None:
+    if status not in {"commission_approved", "commission_paid"}:
+        return
+    order_id = order.get("orderId") or order.get("id", "")
+    notification_type = "commission_paid" if status == "commission_paid" else "commission_approved"
+    title = "Comision pagada" if status == "commission_paid" else "Comision aprobada"
+    notify_seller(
+        store,
+        order.get("sellerId", ""),
+        title,
+        f"{commission_status_label(status)} por {money_usd(order.get('commissionUsd', 0))} en orden {order_id}.",
+        notification_type=notification_type,
+        priority="normal",
+        module="commissions",
+        entity_type="order",
+        entity_id=order_id,
+        deep_link=f"wulkan://seller/commissions/{order_id}",
+        metadata={"orderId": order_id, "commissionStatus": status},
+        dedupe_key=f"seller-commission-{order_id}-{status}",
+    )
+
+
+def notify_stock_state(store: dict, product: dict) -> None:
+    enriched = enrich_inventory_product(product, store.get("orders", []), store.get("stock_movements", []))
+    status = enriched.get("stockStatus")
+    if status not in {"low", "out"}:
+        return
+    notification_type = "product_out" if status == "out" else "stock_low"
+    priority = "critical" if status == "out" else "high"
+    available = safe_int(enriched.get("availableStock"), 0)
+    notify_role(
+        store,
+        "inventory",
+        "Producto agotado" if status == "out" else "Stock critico",
+        f"{enriched.get('sku', '')} - {enriched.get('title', '')}: {available} unidades disponibles.",
+        notification_type=notification_type,
+        priority=priority,
+        module="stock",
+        entity_type="product",
+        entity_id=enriched.get("id", ""),
+        href=notification_url("stock", q=enriched.get("sku", "")),
+        metadata={"productId": enriched.get("id", ""), "sku": enriched.get("sku", ""), "stockStatus": status},
+        dedupe_key=f"stock-{enriched.get('id', '')}-{status}",
+    )
+
+
+def notify_quote_accepted(store: dict, quote: dict, order: dict | None = None) -> None:
+    quote_id = quote.get("id", "")
+    order_id = (order or {}).get("orderId", "")
+    notify_admin(
+        store,
+        "Cotizacion aceptada",
+        f"{quote.get('quoteNumber', quote_id)} fue aceptada y puede continuar como orden.",
+        notification_type="quote_accepted",
+        priority="normal",
+        module="quotes",
+        entity_type="quote",
+        entity_id=quote_id,
+        href=notification_url("quotes", q=quote.get("quoteNumber", "")),
+        metadata={"quoteId": quote_id, "orderId": order_id},
+        dedupe_key=f"quote-accepted-{quote_id}-{order_id}",
+    )
+
+
 def order_payments(movements: list[dict] | None, order_id: str) -> list[dict]:
     return [
         movement
@@ -8682,6 +9347,21 @@ def clients():
         client = client_payload()
         store["clients"].append(client)
         record_audit_event(store, "create", "client", client["id"], f"Cliente creado: {client['businessName']}.")
+        notify_credit_requested(store, client)
+        notify_seller(
+            store,
+            client.get("assignedSellerId", ""),
+            "Cliente asignado",
+            f"{client['businessName']} quedo asignado a tu cartera.",
+            notification_type="client_assigned",
+            priority="normal",
+            module="clients",
+            entity_type="client",
+            entity_id=client["id"],
+            deep_link=f"wulkan://seller/clients/{client['id']}",
+            metadata={"clientId": client["id"]},
+            dedupe_key=f"seller-client-assigned-{client['id']}",
+        )
         save_store(store)
         return redirect(url_for("clients"))
 
@@ -8717,6 +9397,29 @@ def client_edit(client_id: str):
             before,
             updated,
         )
+        if (
+            updated.get("creditRequestStatus") == "pending"
+            and (
+                before.get("creditRequestStatus") != updated.get("creditRequestStatus")
+                or safe_float(before.get("creditRequestedUsd"), 0) != safe_float(updated.get("creditRequestedUsd"), 0)
+            )
+        ):
+            notify_credit_requested(store, updated)
+        if updated.get("assignedSellerId") and before.get("assignedSellerId") != updated.get("assignedSellerId"):
+            notify_seller(
+                store,
+                updated.get("assignedSellerId", ""),
+                "Cliente asignado",
+                f"{updated['businessName']} quedo asignado a tu cartera.",
+                notification_type="client_assigned",
+                priority="normal",
+                module="clients",
+                entity_type="client",
+                entity_id=updated["id"],
+                deep_link=f"wulkan://seller/clients/{updated['id']}",
+                metadata={"clientId": updated["id"]},
+                dedupe_key=f"seller-client-assigned-{updated['id']}-{updated.get('updatedAt', '')}",
+            )
         save_store(store)
     return redirect(url_for("clients"))
 
@@ -8748,6 +9451,20 @@ def client_status_update(client_id: str):
         before,
         client,
     )
+    if target_status in {"blocked_debt", "blocked_credit", "suspended"}:
+        notify_admin(
+            store,
+            "Cliente bloqueado",
+            f"{client.get('businessName', client_id)} fue marcado como {client_status_label(target_status)}.",
+            notification_type="client_blocked",
+            priority="critical",
+            module="clients",
+            entity_type="client",
+            entity_id=client_id,
+            href=notification_url("clients", q=client.get("businessName", "")),
+            metadata={"clientId": client_id, "status": target_status},
+            dedupe_key=f"admin-client-status-{client_id}-{client.get('updatedAt', '')}",
+        )
     save_store(store)
     return redirect(url_for("clients"))
 
@@ -9155,6 +9872,10 @@ def stock():
             stock_before,
             stock_after,
         )
+        for product in store.get("products", []):
+            product_id = product.get("id", "")
+            if product_id and stock_before.get(product_id) != stock_after.get(product_id):
+                notify_stock_state(store, product)
         save_store(store)
         return redirect(url_for("stock"))
 
@@ -10180,8 +10901,122 @@ def credit_decision(client_id: str):
         before,
         client,
     )
+    notify_credit_decision(store, client, decision)
     save_store(store)
     return redirect(url_for("credit"))
+
+
+def notifications_page_context(store: dict) -> dict:
+    filters = {
+        "q": request.args.get("q", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "type": request.args.get("type", "").strip(),
+        "priority": request.args.get("priority", "").strip(),
+        "module": request.args.get("module", "").strip(),
+    }
+    notifications = visible_admin_notifications(store)
+
+    def matches(notification: dict) -> bool:
+        haystack = " ".join(
+            [
+                notification.get("title", ""),
+                notification.get("body", ""),
+                notification.get("entityId", ""),
+                notification.get("module", ""),
+                notification.get("typeLabel", ""),
+            ]
+        ).lower()
+        if filters["q"] and filters["q"].lower() not in haystack:
+            return False
+        if filters["status"] and notification.get("status") != filters["status"]:
+            return False
+        if filters["type"] and notification.get("notificationType") != filters["type"]:
+            return False
+        if filters["priority"] and notification.get("priority") != filters["priority"]:
+            return False
+        if filters["module"] and notification.get("module") != filters["module"]:
+            return False
+        return True
+
+    filtered = [notification for notification in notifications if matches(notification)]
+    metrics = {
+        "total": len(notifications),
+        "unread": sum(1 for item in notifications if item.get("status") == "unread"),
+        "critical": sum(1 for item in notifications if item.get("priority") == "critical"),
+        "mobile": sum(1 for item in notifications if item.get("channel") == "mobile"),
+    }
+    module_options = [
+        {
+            "key": key,
+            "label": MODULE_NAV_INDEX.get(key, {}).get("label") or label,
+        }
+        for key, label, _icon, _description in PERMISSION_MODULES
+        if can_access_module(key)
+    ]
+    return {
+        "notifications": filtered,
+        "filters": filters,
+        "metrics": metrics,
+        "status_options": NOTIFICATION_STATUS_LABELS.items(),
+        "type_options": sorted(NOTIFICATION_TYPE_LABELS.items(), key=lambda item: item[1]),
+        "priority_options": NOTIFICATION_PRIORITY_LABELS.items(),
+        "module_options": module_options,
+    }
+
+
+@app.get("/notifications")
+@require_roles(*roles_for_action("notifications", "view"))
+def notifications():
+    store = load_store()
+    return render_template("notifications.html", **notifications_page_context(store))
+
+
+@app.post("/notifications/<notification_id>/read")
+@require_roles(*roles_for_action("notifications", "edit"))
+def notification_read(notification_id: str):
+    store = load_store()
+    notification = find_by_id(store.get("notifications", []), notification_id)
+    if not notification or not notification_visible_to_current_admin(notification):
+        return redirect(url_for("notifications"))
+    before = copy.deepcopy(notification)
+    notification["status"] = "read"
+    notification["readAt"] = utc_now()
+    notification["updatedAt"] = notification["readAt"]
+    record_change_event(
+        store,
+        "notification_read",
+        "notification",
+        notification_id,
+        f"Notificacion marcada como leida: {notification.get('title', notification_id)}.",
+        before,
+        notification,
+    )
+    save_store(store)
+    return redirect(request.form.get("next") or url_for("notifications"))
+
+
+@app.post("/notifications/read-all")
+@require_roles(*roles_for_action("notifications", "edit"))
+def notifications_read_all():
+    store = load_store()
+    now = utc_now()
+    updated = 0
+    for notification in store.get("notifications", []):
+        if notification.get("status") == "unread" and notification_visible_to_current_admin(notification):
+            notification["status"] = "read"
+            notification["readAt"] = now
+            notification["updatedAt"] = now
+            updated += 1
+    if updated:
+        record_audit_event(
+            store,
+            "notification_read_all",
+            "notification",
+            "",
+            f"{updated} notificaciones marcadas como leidas.",
+        )
+        save_store(store)
+    return redirect(request.form.get("next") or url_for("notifications"))
 
 
 def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:
@@ -10763,6 +11598,8 @@ def quote_status_update(quote_id: str):
         before,
         quote,
     )
+    if status == "accepted":
+        notify_quote_accepted(store, quote)
     save_store(store)
     return redirect(url_for("quotes"))
 
@@ -10845,6 +11682,8 @@ def quote_convert(quote_id: str):
         order["orderId"],
         f"Orden creada desde cotizacion {quote.get('quoteNumber', '')}.",
     )
+    notify_quote_accepted(store, quote, order)
+    notify_order_created(store, order)
     save_store(store)
     return redirect(url_for("orders"))
 
@@ -10963,6 +11802,7 @@ def order_new():
             order["orderId"],
             f"Pedido asistido creado para {order['customer'].get('name', 'Cliente Wulkan')}.",
         )
+        notify_order_created(store, order)
         save_store(store)
         return redirect(url_for("orders"))
 
@@ -11052,6 +11892,7 @@ def order_status_update(order_id: str):
         before,
         order,
     )
+    notify_order_status_change(store, order, before.get("status", ""))
     save_store(store)
     return redirect(url_for("orders"))
 
@@ -11123,6 +11964,8 @@ def order_payment_create(order_id: str):
         before,
         order,
     )
+    notify_payment_registered(store, order, movement)
+    notify_order_status_change(store, order, before.get("status", ""))
     save_store(store)
     return redirect(next_url)
 
@@ -11698,6 +12541,7 @@ def commission_status_update(order_id: str):
         before,
         order,
     )
+    notify_commission_status(store, order, status)
     save_store(store)
     return redirect(url_for("commissions"))
 
@@ -11877,6 +12721,7 @@ def api_create_order():
         f"Orden movil creada por {order['customer'].get('name', 'Cliente Wulkan')}.",
         actor={"id": customer_id, "name": order["customer"].get("name", ""), "role": "client"},
     )
+    notify_order_created(store, order)
     save_store(store)
     return jsonify(
         {
@@ -11911,6 +12756,44 @@ def api_orders():
     items, filters = filter_mobile_orders(items)
     items, sort = sort_mobile_orders(items)
     return mobile_paginated_response(items, filters, sort)
+
+
+@app.get("/api/v1/mobile/notifications")
+@app.get("/api/mobile/notifications")
+def api_mobile_notifications():
+    store = load_store()
+    subject_type, subject_id, role, auth_error = mobile_notification_subject(store)
+    if auth_error:
+        return auth_error, 401
+    if generate_mobile_subject_notifications(store, subject_type, subject_id, role):
+        save_store(store)
+    status = request.args.get("status", "").strip()
+    notifications = mobile_notifications_for_subject(store, subject_type, subject_id, role)
+    if status:
+        notifications = [item for item in notifications if item.get("status", "unread") == status]
+    items = [mobile_notification_payload(item) for item in notifications]
+    return mobile_paginated_response(items, {"status": status, "subject": subject_type}, "created_desc")
+
+
+@app.post("/api/v1/mobile/notifications/<notification_id>/read")
+@app.post("/api/mobile/notifications/<notification_id>/read")
+def api_mobile_notification_read(notification_id: str):
+    store = load_store()
+    subject_type, subject_id, role, auth_error = mobile_notification_subject(store)
+    if auth_error:
+        return auth_error, 401
+    visible_ids = {
+        notification.get("id")
+        for notification in mobile_notifications_for_subject(store, subject_type, subject_id, role)
+    }
+    notification = find_by_id(store.get("notifications", []), notification_id)
+    if not notification or notification_id not in visible_ids:
+        return jsonify({"error": "Notificacion no encontrada."}), 404
+    notification["status"] = "read"
+    notification["readAt"] = utc_now()
+    notification["updatedAt"] = notification["readAt"]
+    save_store(store)
+    return jsonify({"notification": mobile_notification_payload(notification)})
 
 
 @app.get("/api/v1/mobile/seller/summary")
@@ -12058,6 +12941,36 @@ def api_mobile_seller_clients():
             f"Cliente creado desde app movil vendedor: {client['businessName']}.",
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
+        create_notification(
+            store,
+            title="Cliente nuevo por vendedor",
+            body=f"{user.get('name', 'Vendedor Wulkan')} creo {client['businessName']}.",
+            notification_type="client_created_by_seller",
+            priority="normal",
+            recipient_type="admin",
+            channel="web",
+            module="clients",
+            entity_type="client",
+            entity_id=client["id"],
+            href=notification_url("clients", q=client["businessName"]),
+            metadata={"clientId": client["id"], "sellerId": user["id"]},
+            dedupe_key=f"admin-client-created-{client['id']}",
+        )
+        notify_seller(
+            store,
+            user["id"],
+            "Cliente asignado",
+            f"{client['businessName']} quedo asignado a tu cartera.",
+            notification_type="client_assigned",
+            priority="normal",
+            module="clients",
+            entity_type="client",
+            entity_id=client["id"],
+            deep_link=f"wulkan://seller/clients/{client['id']}",
+            metadata={"clientId": client["id"]},
+            dedupe_key=f"seller-client-assigned-{client['id']}",
+        )
+        notify_credit_requested(store, client)
         save_store(store)
         response = mobile_seller_client_payload(client, store)
         response["temporaryPassword"] = temporary_password
@@ -12100,6 +13013,7 @@ def api_mobile_seller_orders():
             f"Pedido asistido movil creado por {user.get('name', 'Vendedor Wulkan')}.",
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
+        notify_order_created(store, order)
         save_store(store)
         return jsonify({"order": mobile_seller_order_payload(order, store), "orderId": order["orderId"]}), 201
 

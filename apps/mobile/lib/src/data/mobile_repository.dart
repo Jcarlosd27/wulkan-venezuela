@@ -14,6 +14,7 @@ abstract class MobileRepository {
   Future<List<MobileAnnouncement>> listAnnouncements(String placement);
   Future<MobileCreditSnapshot> getCredit(String customerId);
   Future<List<MobileOrderSummary>> listOrders(String customerId);
+  Future<List<MobileNotification>> listNotifications();
   Future<MobileSellerSummary> getSellerSummary();
   Future<List<MobileSellerClient>> listSellerClients();
   Future<MobileSellerClientCreated> createSellerClient(
@@ -216,6 +217,9 @@ class MockMobileRepository implements MobileRepository {
   Future<List<MobileOrderSummary>> listOrders(String customerId) async {
     return const [];
   }
+
+  @override
+  Future<List<MobileNotification>> listNotifications() async => const [];
 
   @override
   Future<MobileSellerSummary> getSellerSummary() async {
@@ -426,6 +430,12 @@ class ApiMobileRepository implements MobileRepository {
       queryParameters: {"customerId": customerId},
     );
     return items.map(mapApiOrder).toList();
+  }
+
+  @override
+  Future<List<MobileNotification>> listNotifications() async {
+    final items = await _getItems("/notifications");
+    return items.map(mapApiNotification).toList();
   }
 
   @override
@@ -671,6 +681,23 @@ MobileAnnouncement mapApiAnnouncement(String id, Map<String, dynamic> data) {
     startsAt: _asDateTime(data["startsAt"]),
     endsAt: _asNullableDateTime(data["endsAt"]),
     status: _asString(data["status"], fallback: "pending"),
+  );
+}
+
+MobileNotification mapApiNotification(Map<String, dynamic> data) {
+  return MobileNotification(
+    id: _asString(data["id"], fallback: "notification"),
+    title: _asString(data["title"], fallback: "Notificacion Wulkan"),
+    body: _asString(data["body"]),
+    type: _asString(data["type"], fallback: "info"),
+    typeLabel: _asString(data["typeLabel"], fallback: "Informacion"),
+    priority: _asString(data["priority"], fallback: "normal"),
+    status: _asString(data["status"], fallback: "unread"),
+    createdAt: _asDateTime(data["createdAt"]),
+    module: _asString(data["module"]),
+    entityType: _asString(data["entityType"]),
+    entityId: _asString(data["entityId"]),
+    deepLink: _asString(data["deepLink"]),
   );
 }
 

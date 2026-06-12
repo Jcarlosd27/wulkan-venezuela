@@ -120,6 +120,7 @@ def base_store() -> dict:
         ],
         "clients": [],
         "credit_movements": [],
+        "notifications": [],
         "service_technicians": [
             {
                 "id": "svc-flow-valencia",
@@ -271,6 +272,17 @@ def main() -> int:
     )
     assert seller_clients_paged["meta"]["pagination"]["limit"] == 1
     assert seller_clients_paged["items"][0]["id"] == client_id
+    seller_notifications = assert_status(
+        client.get(
+            "/api/v1/mobile/notifications",
+            headers={"Authorization": f"Bearer {seller_token}"},
+        ),
+        200,
+        "notificaciones vendedor v1",
+    )
+    assert any(item["type"] == "client_assigned" for item in seller_notifications["items"])
+    assert any(item["type"] == "client_created_by_seller" for item in state["notifications"])
+    assert any(item["type"] == "credit_requested" for item in state["notifications"])
     mobile_quote = assert_status(
         client.post(
             "/api/v1/mobile/seller/quotes",
@@ -417,6 +429,15 @@ def main() -> int:
         "perfil ferretero v1",
     )
     assert customer_profile_v1["profile"]["accountRole"] == "client"
+    customer_notifications_credit = assert_status(
+        client.get(
+            "/api/v1/mobile/notifications",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "notificaciones ferretero credito v1",
+    )
+    assert any(item["type"] == "credit_approved" for item in customer_notifications_credit["items"])
     customer_home_v1 = assert_status(
         client.get(
             "/api/v1/mobile/home",
@@ -486,6 +507,15 @@ def main() -> int:
     assert created_order["creditAfterUsd"] == 176
     assert created_order["commissionUsd"] == 16.2
     assert created_order["inventoryStatus"] == "reserved"
+    customer_notifications_order = assert_status(
+        client.get(
+            "/api/v1/mobile/notifications",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        ),
+        200,
+        "notificaciones ferretero orden v1",
+    )
+    assert any(item["type"] == "order_received" for item in customer_notifications_order["items"])
     orders_v1 = assert_status(
         client.get(
             "/api/v1/mobile/orders",

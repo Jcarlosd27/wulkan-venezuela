@@ -677,6 +677,23 @@ body.is-loading .content {
   place-items: center;
 }
 
+.notification-dot {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--wulkan-orange);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 13px;
+  text-align: center;
+}
+
 .user-pill {
   gap: 6px;
   padding: 0 9px;

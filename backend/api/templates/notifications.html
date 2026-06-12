@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Wulkan Admin | Notificaciones{% endblock %}
+
+{% block heading %}
+<div>
+  <h1>Notificaciones</h1>
+  <p>Alertas internas y moviles generadas por eventos reales del negocio.</p>
+</div>
+{% if can_module_action('notifications', 'edit') and metrics.unread %}
+<form method="post" action="{{ url_for('notifications_read_all') }}">
+  {{ csrf_field() }}
+  <input type="hidden" name="next" value="{{ request.full_path }}">
+  <button class="btn btn-primary" type="submit"><i class="bi bi-check2-all"></i> Marcar todo leido</button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="metric-grid mb-3">
+  {{ metric_card("bi-bell", "Total", metrics.total, "Sistema", "metric-active") }}
+  {{ metric_card("bi-envelope-exclamation", "Pendientes", metrics.unread, "Accion", "metric-warning") }}
+  {{ metric_card("bi-exclamation-octagon", "Criticas", metrics.critical, "Riesgo", "metric-danger") }}
+  {{ metric_card("bi-phone", "Moviles", metrics.mobile, "App", "metric-info") }}
+</section>
+
+<form class="seller-filter-panel mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-lg-4">
+      <label class="form-label" for="notificationQ">Buscar</label>
+      <input class="form-control" id="notificationQ" name="q" value="{{ filters.q }}" placeholder="Titulo, orden, cliente o modulo">
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label" for="notificationStatus">Estado</label>
+      <select class="form-select" id="notificationStatus" name="status">
+        <option value="">Todos</option>
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label" for="notificationPriority">Prioridad</label>
+      <select class="form-select" id="notificationPriority" name="priority">
+        <option value="">Todas</option>
+        {% for value, label in priority_options %}
+        <option value="{{ value }}" {% if filters.priority == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2">
+      <label class="form-label" for="notificationModule">Modulo</label>
+      <select class="form-select" id="notificationModule" name="module">
+        <option value="">Todos</option>
+        {% for module in module_options %}
+        <option value="{{ module.key }}" {% if filters.module == module.key %}selected{% endif %}>{{ module.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-2 d-grid">
+      <button class="btn btn-dark" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    </div>
+  </div>
+</form>
+
+<section class="panel">
+  <div class="panel-title">
+    <div>
+      <h2>Centro de alertas</h2>
+      <p>Ordenado por fecha, con trazabilidad al modulo y entidad origen.</p>
+    </div>
+    <span>{{ notifications|length }} registros</span>
+  </div>
+
+  {% if notifications %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Alerta</th>
+          <th>Modulo</th>
+          <th>Prioridad</th>
+          <th>Estado</th>
+          <th>Fecha</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for notification in notifications %}
+        <tr>
+          <td>
+            <div class="d-flex gap-3 align-items-start">
+              <span class="metric-icon">
+                <i class="bi bi-bell"></i>
+              </span>
+              <div>
+                <strong class="d-block">{{ notification.title }}</strong>
+                <small class="text-secondary d-block">{{ notification.body or notification.typeLabel }}</small>
+                {% if notification.entityId %}
+                <small class="text-secondary">{{ notification.entityType }}: {{ notification.entityId }}</small>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+          <td>{{ notification.module or 'Sistema' }}</td>
+          <td><span class="badge {{ notification.priorityClass }}">{{ notification.priorityLabel }}</span></td>
+          <td><span class="badge {{ notification.status | badge_class }}">{{ notification.statusLabel }}</span></td>
+          <td><small class="text-secondary">{{ notification.createdAt }}</small></td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-2">
+              {% if notification.href %}
+              <a class="btn btn-sm btn-outline-dark" href="{{ notification.href }}"><i class="bi bi-box-arrow-up-right"></i> Abrir</a>
+              {% endif %}
+              {% if notification.status == 'unread' and can_module_action('notifications', 'edit') %}
+              <form method="post" action="{{ url_for('notification_read', notification_id=notification.id) }}">
+                {{ csrf_field() }}
+                <input type="hidden" name="next" value="{{ request.full_path }}">
+                <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-check2"></i> Leida</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-secondary mb-0">No hay notificaciones para los filtros seleccionados.</p>
+  {% endif %}
+</section>
+{% endblock %}
