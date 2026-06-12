@@ -1,12 +1,17 @@
 {% extends "base.html" %}
+{% set heading = "Notificaciones" %}
+{% set description = "Alertas internas y moviles generadas por eventos reales del negocio." %}
 
-{% block title %}Wulkan Admin | Notificaciones{% endblock %}
+{% macro metric_card(icon, label, value, tag, tone="") -%}
+<article class="metric-card {{ tone }}">
+  <div class="metric-icon"><i class="bi {{ icon }}"></i></div>
+  <span>{{ label }}</span>
+  <strong>{{ value }}</strong>
+  <em>{{ tag }}</em>
+</article>
+{%- endmacro %}
 
-{% block heading %}
-<div>
-  <h1>Notificaciones</h1>
-  <p>Alertas internas y moviles generadas por eventos reales del negocio.</p>
-</div>
+{% block top_action %}
 {% if can_module_action('notifications', 'edit') and metrics.unread %}
 <form method="post" action="{{ url_for('notifications_read_all') }}">
   {{ csrf_field() }}
