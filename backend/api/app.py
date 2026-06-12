@@ -10344,8 +10344,12 @@ def category_delete(category_id: str):
         return redirect(url_for("categories"))
     audit_events_start = len(store.get("audit_events", []))
     before = copy.deepcopy(category)
-    affected_ids = {category_id, *category_descendant_ids(store, category_id)}
-    product_references = product_count_for_categories(store, affected_ids)
+    direct_children = [
+        item
+        for item in store.get("categories", [])
+        if item.get("parentId") == category_id and item.get("status") != "deleted"
+    ]
+    product_references = product_count_for_categories(store, {category_id})
     if product_references:
         record_change_event(
             store,
@@ -10370,25 +10374,50 @@ def category_delete(category_id: str):
         return redirect(url_for("categories"))
     else:
         deleted_at = utc_now()
+        replacement_parent_id = category.get("parentId", "")
         changed_categories = []
         for item in store.get("categories", []):
-            if item.get("id") in affected_ids:
+            if item.get("id") == category_id:
                 item["status"] = "deleted"
                 item["visibleInApp"] = False
                 item["deletedAt"] = deleted_at
                 item["updatedAt"] = deleted_at
                 changed_categories.append(item)
-        store["categories"] = [item for item in store["categories"] if item.get("id") not in affected_ids]
+            elif item.get("parentId") == category_id:
+                child_before = copy.deepcopy(item)
+                item["parentId"] = replacement_parent_id if replacement_parent_id != item.get("id") else ""
+                item["updatedAt"] = deleted_at
+                changed_categories.append(item)
+                record_change_event(
+                    store,
+                    "update",
+                    "category",
+                    item.get("id", ""),
+                    f"Subcategoria conservada tras eliminar categoria padre: {item.get('name', item.get('id', ''))}.",
+                    child_before,
+                    item,
+                )
+        store["categories"] = [item for item in store["categories"] if item.get("id") != category_id]
         record_change_event(
             store,
             "delete",
             "category",
             category_id,
-            f"Categoria eliminada: {category.get('name', category_id)}.",
+            (
+                f"Categoria eliminada: {category.get('name', category_id)}. "
+                f"Subcategorias conservadas: {len(direct_children)}."
+            ),
             before,
             None,
         )
-        push_admin_toast("Categoria eliminada correctamente.", "warning", "Categoria eliminada")
+        if direct_children:
+            push_admin_toast(
+                f"Categoria eliminada. {len(direct_children)} subcategoria(s) se conservaron sin borrarse.",
+                "warning",
+                "Categoria eliminada",
+            )
+        else:
+            push_admin_toast("Categoria eliminada correctamente.", "warning", "Categoria eliminada")
     persist_category_action(
         store,
         changed_categories,

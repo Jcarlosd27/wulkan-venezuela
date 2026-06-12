@@ -65,6 +65,26 @@ def base_store() -> dict:
                 "createdAt": now,
                 "updatedAt": now,
             },
+            {
+                "id": "cat-sql-parent-delete",
+                "name": "Categoria padre eliminable",
+                "slug": "categoria-padre-eliminable",
+                "status": "active",
+                "visibleInApp": True,
+                "parentId": "",
+                "createdAt": now,
+                "updatedAt": now,
+            },
+            {
+                "id": "cat-sql-child-preserved",
+                "name": "Subcategoria conservada",
+                "slug": "subcategoria-conservada",
+                "status": "active",
+                "visibleInApp": True,
+                "parentId": "cat-sql-parent-delete",
+                "createdAt": now,
+                "updatedAt": now,
+            },
         ],
         "products": [
             {
@@ -261,6 +281,7 @@ def main() -> int:
             ("/categories/cat-sql-root/status", {"status": "inactive"}),
             ("/categories/cat-sql-root/delete", None),
             ("/categories/cat-sql-empty/delete", None),
+            ("/categories/cat-sql-parent-delete/delete", None),
             ("/media-library/media-sql/delete", None),
             ("/documents/media-sql/delete", None),
             ("/announcements/ann-sql/delete", None),
@@ -273,9 +294,11 @@ def main() -> int:
     client_record = next(item for item in store["clients"] if item["id"] == "client-sql")
     product_record = next(item for item in store["products"] if item["id"] == "prod-sql")
     category_record = next(item for item in store["categories"] if item["id"] == "cat-sql-root")
+    child_category = next(item for item in store["categories"] if item["id"] == "cat-sql-child-preserved")
     assert client_record["status"] == "inactive", "cliente con orden debe quedar inactivo, no borrado fisico"
     assert product_record["status"] == "inactive", "producto con orden debe quedar inactivo, no borrado fisico"
     assert category_record["status"] == "inactive", "categoria con producto debe quedar inactiva"
+    assert child_category.get("parentId") == "", "eliminar categoria padre debe conservar y promover la subcategoria"
     print("Graphify SQL integrity smoke")
     print("----------------------------")
     print("OK: acciones destructivas no rompen integridad SQL ni generan 500.")

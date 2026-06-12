@@ -567,6 +567,30 @@ def safe_status_code(response) -> bool:
     return response.status_code < 500
 
 
+def assert_category_delete_preserves_children(app, state_holder: dict, failures: list[str]) -> None:
+    state_holder["state"] = base_store()
+    with app.test_client() as client:
+        authenticate(client)
+        response = client.post(
+            "/categories/cat-actions-root/delete",
+            data={"_csrf_token": CSRF},
+            follow_redirects=False,
+        )
+        if not safe_status_code(response):
+            failures.append(f"POST /categories/cat-actions-root/delete: HTTP {response.status_code}")
+            return
+
+    categories = state_holder["state"].get("categories", [])
+    root = next((item for item in categories if item.get("id") == "cat-actions-root"), None)
+    child = next((item for item in categories if item.get("id") == "cat-actions-child"), None)
+    if root is not None:
+        failures.append("La categoria padre eliminada sigue visible en el store.")
+    if child is None:
+        failures.append("Eliminar una categoria padre borro indebidamente su subcategoria.")
+    elif child.get("parentId"):
+        failures.append("La subcategoria conservada no fue promovida a categoria raiz.")
+
+
 def main() -> int:
     failures: list[str] = []
     collected_forms: list[tuple[str, dict]] = []
@@ -620,6 +644,8 @@ def main() -> int:
                 failures.append(
                     f"POST {describe_form(page, form)}: HTTP {response.status_code} {body}"
                 )
+
+    assert_category_delete_preserves_children(app, state_holder, failures)
 
     seen_links: set[str] = set()
     for page, href in collected_links:
