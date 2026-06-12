@@ -22,6 +22,11 @@ local.properties
 !infra/docker/.env.production.example
 !infra/digitalocean/.env.digitalocean.example
 
+# Android signing secrets
+apps/mobile/android/key.properties
+apps/mobile/android/*.jks
+apps/mobile/android/*.keystore
+
 # Local database files
 backend/api/data/*.db
 backups/

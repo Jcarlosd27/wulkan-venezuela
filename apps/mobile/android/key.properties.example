@@ -1,0 +1,4 @@
+storePassword=change-me
+keyPassword=change-me
+keyAlias=wulkan-release
+storeFile=wulkan-release-key.jks

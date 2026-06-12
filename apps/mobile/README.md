@@ -45,6 +45,25 @@ Compilar APK de produccion:
 flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json
 ```
 
+## Firma Android
+
+La firma release usa `android/key.properties` y `android/wulkan-release-key.jks`. Esos archivos son secretos locales y no se suben al repositorio.
+
+Formato esperado:
+
+```text
+storePassword=<password>
+keyPassword=<password>
+keyAlias=wulkan-release
+storeFile=wulkan-release-key.jks
+```
+
+Verificar firma:
+
+```powershell
+%LOCALAPPDATA%\Android\Sdk\build-tools\36.0.0\apksigner.bat verify --verbose --print-certs build\app\outputs\flutter-apk\app-release.apk
+```
+
 Instalar en telefono conectado:
 
 ```powershell
