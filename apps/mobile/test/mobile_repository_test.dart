@@ -128,5 +128,33 @@ void main() {
       expect(product.badge, 'Validar');
       expect(product.requiresTechnicalValidation, isTrue);
     });
+
+    test('maps order commission fields for seller mobile view', () {
+      final order = mapApiOrder({
+        'orderId': 'ord-mobile-100',
+        'customerName': 'Ferreteria Central',
+        'saleType': 'credit_line',
+        'saleTypeLabel': 'Linea de credito',
+        'status': 'approved',
+        'paymentStatus': 'partial_paid',
+        'stockStatus': 'reserved',
+        'totalUsd': 250,
+        'paidUsd': 100,
+        'balanceUsd': 150,
+        'itemsCount': 3,
+        'commissionUsd': 12.5,
+        'commissionStatus': 'commission_pending',
+        'commissionStatusLabel': 'Pendiente',
+      });
+
+      expect(order.id, 'ord-mobile-100');
+      expect(order.customerName, 'Ferreteria Central');
+      expect(order.saleType, 'credit_line');
+      expect(order.saleTypeLabel, 'Linea de credito');
+      expect(order.balanceUsd, 150);
+      expect(order.commissionUsd, 12.5);
+      expect(order.commissionStatus, 'commission_pending');
+      expect(order.commissionStatusLabel, 'Pendiente');
+    });
   });
 }

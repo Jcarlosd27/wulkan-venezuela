@@ -2165,33 +2165,642 @@ class _SellerClientCard extends StatelessWidget {
   return (label: 'Credito', color: const Color(0xFF198754));
 }
 
-class SellerCommissionsScreen extends StatelessWidget {
+class SellerCommissionsScreen extends StatefulWidget {
   const SellerCommissionsScreen({super.key});
 
   @override
+  State<SellerCommissionsScreen> createState() =>
+      _SellerCommissionsScreenState();
+}
+
+class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
+  late Future<({
+    MobileSellerSummary summary,
+    List<MobileOrderSummary> orders,
+  })> _future;
+  _CommissionFilter _filter = _CommissionFilter.all;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadSellerCommissionBoard();
+  }
+
+  Future<({
+    MobileSellerSummary summary,
+    List<MobileOrderSummary> orders,
+  })> _loadSellerCommissionBoard() async {
+    final results = await Future.wait([
+      mobileRepository.getSellerSummary(),
+      mobileRepository.listSellerCommissions(),
+    ]);
+
+    return (
+      summary: results[0] as MobileSellerSummary,
+      orders: results[1] as List<MobileOrderSummary>,
+    );
+  }
+
+  Future<void> _refresh() async {
+    final future = _loadSellerCommissionBoard();
+    setState(() {
+      _future = future;
+    });
+    await future;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<MobileOrderSummary>>(
-      future: mobileRepository.listSellerCommissions(),
+    return FutureBuilder<({
+      MobileSellerSummary summary,
+      List<MobileOrderSummary> orders,
+    })>(
+      future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const _LoadingState();
         }
 
-        final orders = snapshot.data ?? [];
-        if (orders.isEmpty) {
-          return const _EmptyState(message: 'Sin comisiones registradas');
+        if (snapshot.hasError) {
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _SectionTitle(title: 'Comisiones'),
+              _InlineNotice(
+                icon: Icons.cloud_off_outlined,
+                title: 'No pudimos sincronizar comisiones',
+                message: snapshot.error.toString(),
+                color: const Color(0xFFDC3545),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _refresh,
+                icon: const Icon(Icons.sync),
+                label: const Text('Reintentar'),
+              ),
+            ],
+          );
         }
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const _SectionTitle(title: 'Comisiones'),
-            for (final order in orders)
-              _SellerOrderCard(order: order, showCommission: true),
-          ],
+        final data = snapshot.data;
+        final summary = data?.summary;
+        final orders = data?.orders ?? const <MobileOrderSummary>[];
+        final filteredOrders = orders
+            .where((order) => _commissionMatches(order, _filter))
+            .toList(growable: false);
+
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _SectionTitle(title: 'Comisiones'),
+              if (summary != null) ...[
+                _SellerCommissionHero(summary: summary, orders: orders),
+                const SizedBox(height: 12),
+              ],
+              _CommissionFilterBar(
+                selected: _filter,
+                orders: orders,
+                onChanged: (value) => setState(() => _filter = value),
+              ),
+              const SizedBox(height: 12),
+              const _CommissionPolicyNotice(),
+              const SizedBox(height: 12),
+              if (orders.isEmpty)
+                const _EmptyState(
+                  title: 'Sin comisiones',
+                  message:
+                      'Cuando tus pedidos sean registrados y evaluados por Wulkan, veras aqui el estado de liquidacion.',
+                  icon: Icons.payments_outlined,
+                )
+              else if (filteredOrders.isEmpty)
+                _EmptyState(
+                  title: 'Sin resultados',
+                  message:
+                      'No hay comisiones en el estado ${_commissionFilterLabel(_filter).toLowerCase()}.',
+                  icon: Icons.filter_alt_off_outlined,
+                )
+              else
+                for (final order in filteredOrders)
+                  _SellerCommissionCard(order: order),
+            ],
+          ),
         );
       },
     );
+  }
+}
+
+enum _CommissionFilter {
+  all,
+  pending,
+  approved,
+  paid,
+  blocked,
+}
+
+class _SellerCommissionHero extends StatelessWidget {
+  const _SellerCommissionHero({
+    required this.summary,
+    required this.orders,
+  });
+
+  final MobileSellerSummary summary;
+  final List<MobileOrderSummary> orders;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalCommission = summary.pendingCommissionUsd +
+        summary.approvedCommissionUsd +
+        summary.paidCommissionUsd;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          colors: [_wulkanBlack, Color(0xFF2C1A12)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _wulkanBlack.withValues(alpha: 0.18),
+            blurRadius: 24,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: _wulkanOrange.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.payments_outlined,
+                    color: _wulkanOrange),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      summary.sellerName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    Text(
+                      '${summary.sellerCode.isEmpty ? summary.roleLabel : summary.sellerCode} - ${orders.length} ordenes',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFD4D4D4),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _StatusPill(
+                label:
+                    '${summary.commissionRatePercent.toStringAsFixed(1)}%',
+                color: _wulkanOrange,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'USD ${totalCommission.toStringAsFixed(2)}',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+          const Text(
+            'Comision total registrada en cartera',
+            style: TextStyle(
+              color: Color(0xFFD4D4D4),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _DarkMetric(
+                  label: 'Pendiente',
+                  value:
+                      'USD ${summary.pendingCommissionUsd.toStringAsFixed(2)}',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _DarkMetric(
+                  label: 'Aprobada',
+                  value:
+                      'USD ${summary.approvedCommissionUsd.toStringAsFixed(2)}',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _DarkMetric(
+                  label: 'Pagada',
+                  value: 'USD ${summary.paidCommissionUsd.toStringAsFixed(2)}',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommissionFilterBar extends StatelessWidget {
+  const _CommissionFilterBar({
+    required this.selected,
+    required this.orders,
+    required this.onChanged,
+  });
+
+  final _CommissionFilter selected;
+  final List<MobileOrderSummary> orders;
+  final ValueChanged<_CommissionFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final filter in _CommissionFilter.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                selected: selected == filter,
+                selectedColor: _wulkanBlack,
+                backgroundColor: Colors.white,
+                side: BorderSide(
+                  color: selected == filter ? _wulkanBlack : _wulkanLine,
+                ),
+                labelStyle: TextStyle(
+                  color: selected == filter ? Colors.white : _wulkanInk,
+                  fontWeight: FontWeight.w900,
+                ),
+                avatar: Icon(
+                  _commissionFilterIcon(filter),
+                  size: 16,
+                  color: selected == filter ? Colors.white : _wulkanMuted,
+                ),
+                label: Text(
+                  '${_commissionFilterLabel(filter)} ${_commissionFilterCount(orders, filter)}',
+                ),
+                onSelected: (_) => onChanged(filter),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommissionPolicyNotice extends StatelessWidget {
+  const _CommissionPolicyNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3CD),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFFFE69C)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.verified_user_outlined, color: Color(0xFF996404)),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'La comision queda trazada por orden y se libera segun validacion comercial, entrega o cobro definido por Wulkan.',
+              style: TextStyle(
+                color: Color(0xFF664D03),
+                fontWeight: FontWeight.w800,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerCommissionCard extends StatelessWidget {
+  const _SellerCommissionCard({required this.order});
+
+  final MobileOrderSummary order;
+
+  @override
+  Widget build(BuildContext context) {
+    final commission = _sellerCommissionStatus(order);
+    final orderStatus = _customerOrderStatus(order.status, order.paymentStatus);
+    final rate = order.totalUsd <= 0 ? 0 : order.commissionUsd / order.totalUsd;
+    final releaseReason = _commissionReleaseReason(order, commission.filter);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SoftIcon(icon: commission.icon, color: commission.color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        order.customerName.isEmpty
+                            ? 'Cliente por confirmar'
+                            : order.customerName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        order.id,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _wulkanMuted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _StatusPill(label: commission.label, color: commission.color),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _CommissionAmountTile(
+                    label: 'Comision',
+                    value: 'USD ${order.commissionUsd.toStringAsFixed(2)}',
+                    color: commission.color,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _CommissionAmountTile(
+                    label: 'Venta',
+                    value: 'USD ${order.totalUsd.toStringAsFixed(2)}',
+                    color: _wulkanInk,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MiniChip(label: order.saleTypeLabel, color: _wulkanOrange),
+                _MiniChip(label: orderStatus.label, color: orderStatus.color),
+                _MiniChip(
+                  label: '${order.itemsCount} items',
+                  color: _wulkanMuted,
+                ),
+                if (rate > 0)
+                  _MiniChip(
+                    label: '${(rate * 100).toStringAsFixed(1)}%',
+                    color: commission.color,
+                  ),
+                if (order.dueDate != null)
+                  _MiniChip(
+                    label: 'Vence ${_formatCustomerDate(order.dueDate!)}',
+                    color: _wulkanMuted,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: commission.color.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                releaseReason,
+                style: TextStyle(
+                  color: commission.color,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommissionAmountTile extends StatelessWidget {
+  const _CommissionAmountTile({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFD),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _wulkanLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: _wulkanMuted,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+bool _commissionMatches(MobileOrderSummary order, _CommissionFilter filter) {
+  if (filter == _CommissionFilter.all) {
+    return true;
+  }
+  return _sellerCommissionStatus(order).filter == filter;
+}
+
+int _commissionFilterCount(
+  List<MobileOrderSummary> orders,
+  _CommissionFilter filter,
+) {
+  if (filter == _CommissionFilter.all) {
+    return orders.length;
+  }
+  return orders
+      .where((order) => _sellerCommissionStatus(order).filter == filter)
+      .length;
+}
+
+String _commissionFilterLabel(_CommissionFilter filter) {
+  switch (filter) {
+    case _CommissionFilter.all:
+      return 'Todas';
+    case _CommissionFilter.pending:
+      return 'Pendientes';
+    case _CommissionFilter.approved:
+      return 'Aprobadas';
+    case _CommissionFilter.paid:
+      return 'Pagadas';
+    case _CommissionFilter.blocked:
+      return 'Retenidas';
+  }
+}
+
+IconData _commissionFilterIcon(_CommissionFilter filter) {
+  switch (filter) {
+    case _CommissionFilter.all:
+      return Icons.list_alt_outlined;
+    case _CommissionFilter.pending:
+      return Icons.schedule_outlined;
+    case _CommissionFilter.approved:
+      return Icons.verified_outlined;
+    case _CommissionFilter.paid:
+      return Icons.paid_outlined;
+    case _CommissionFilter.blocked:
+      return Icons.block_outlined;
+  }
+}
+
+({String label, IconData icon, Color color, _CommissionFilter filter})
+    _sellerCommissionStatus(MobileOrderSummary order) {
+  final raw =
+      '${order.commissionStatus} ${order.commissionStatusLabel}'.toLowerCase();
+  final orderRaw = '${order.status} ${order.paymentStatus}'.toLowerCase();
+
+  if (raw.contains('paid') ||
+      raw.contains('pagada') ||
+      raw.contains('liquid')) {
+    return (
+      label: 'Pagada',
+      icon: Icons.paid_outlined,
+      color: const Color(0xFF198754),
+      filter: _CommissionFilter.paid,
+    );
+  }
+  if (raw.contains('approved') ||
+      raw.contains('aprob') ||
+      raw.contains('released')) {
+    return (
+      label: 'Aprobada',
+      icon: Icons.verified_outlined,
+      color: const Color(0xFF0D6EFD),
+      filter: _CommissionFilter.approved,
+    );
+  }
+  if (raw.contains('cancel') ||
+      raw.contains('reject') ||
+      raw.contains('anulad') ||
+      raw.contains('hold') ||
+      raw.contains('reten')) {
+    return (
+      label: 'Retenida',
+      icon: Icons.block_outlined,
+      color: const Color(0xFFDC3545),
+      filter: _CommissionFilter.blocked,
+    );
+  }
+  if (orderRaw.contains('cancel')) {
+    return (
+      label: 'Anulada',
+      icon: Icons.cancel_outlined,
+      color: const Color(0xFFDC3545),
+      filter: _CommissionFilter.blocked,
+    );
+  }
+  return (
+    label: 'Pendiente',
+    icon: Icons.schedule_outlined,
+    color: const Color(0xFFFFB020),
+    filter: _CommissionFilter.pending,
+  );
+}
+
+String _commissionReleaseReason(
+  MobileOrderSummary order,
+  _CommissionFilter filter,
+) {
+  switch (filter) {
+    case _CommissionFilter.paid:
+      return 'Liquidada por Wulkan. Esta comision ya forma parte del historial pagado.';
+    case _CommissionFilter.approved:
+      return 'Aprobada comercialmente. Queda lista para liquidacion segun el cierre interno.';
+    case _CommissionFilter.blocked:
+      return 'Retenida o anulada. Revisa con gerencia comercial antes de considerarla cobrable.';
+    case _CommissionFilter.pending:
+    case _CommissionFilter.all:
+      if (order.balanceUsd > 0) {
+        return 'Pendiente por saldo de cliente: USD ${order.balanceUsd.toStringAsFixed(2)}.';
+      }
+      if (order.stockStatus.toLowerCase().contains('reserved')) {
+        return 'Pedido con stock reservado. Falta validacion de entrega o cierre comercial.';
+      }
+      return 'Pendiente de validacion Wulkan para liberar la comision.';
   }
 }
 
