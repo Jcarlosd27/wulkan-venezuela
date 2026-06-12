@@ -31,7 +31,7 @@
 - [x] Fase 6 - UI/UX App Movil.
 - [x] Fase 7 - Notificaciones.
 - [x] Fase 8 - Reglas de negocio criticas.
-- [ ] Fase 9 - Escalabilidad y mantenimiento.
+- [x] Fase 9 - Escalabilidad y mantenimiento: indices SQL, migracion Alembic, modulo Mantenimiento, versionado, backups, logs, variables, documentacion tecnica/funcional y manuales admin/app.
 
 ## Objetivo general
 

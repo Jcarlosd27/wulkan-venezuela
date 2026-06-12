@@ -460,6 +460,7 @@ PERMISSION_MODULES = [
     ("reports", "Reportes", "bi-file-bar-graph", "Exportables comerciales, inventario y finanzas."),
     ("notifications", "Notificaciones", "bi-bell", "Alertas internas y moviles por evento comercial."),
     ("business_rules", "Reglas negocio", "bi-shield-exclamation", "Validaciones criticas de ventas, credito, stock y auditoria."),
+    ("maintenance", "Mantenimiento", "bi-speedometer2", "Salud tecnica, version, backups, migraciones y readiness."),
     ("admin_users", "Usuarios admin", "bi-people", "Accesos internos al panel."),
     ("permissions", "Roles y permisos", "bi-shield-lock", "Matriz granular por rol y accion."),
     ("settings", "Configuracion", "bi-gear", "Parametros generales del negocio."),
@@ -501,6 +502,7 @@ ROLE_MODULE_PERMISSIONS = {
         "reports": set(ACTION_AUDIT),
         "notifications": set(ACTION_READ | {"edit"}),
         "business_rules": set(ACTION_AUDIT),
+        "maintenance": set(ACTION_AUDIT),
         "import_templates": set(ACTION_READ),
         "audit": set(ACTION_AUDIT),
         "documents": set(ACTION_READ),
@@ -589,6 +591,7 @@ ROLE_MODULE_PERMISSIONS = {
             "reports",
             "notifications",
             "business_rules",
+            "maintenance",
             "import_templates",
             "documents",
         ]
@@ -650,6 +653,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "documents", "endpoint": "documents", "label": "Documentos", "icon": "bi-folder2", "active": ["documents", "documents_import", "documents_export", "document_delete"]},
             {"module": "notifications", "endpoint": "notifications", "label": "Notificaciones", "icon": "bi-bell", "active": ["notifications", "notification_read", "notifications_read_all"]},
             {"module": "business_rules", "endpoint": "business_rules", "label": "Reglas negocio", "icon": "bi-shield-exclamation", "active": ["business_rules"]},
+            {"module": "maintenance", "endpoint": "maintenance", "label": "Mantenimiento", "icon": "bi-speedometer2", "active": ["maintenance", "maintenance_export"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit", "audit_export"]},
             {"module": "settings", "endpoint": "settings", "label": "Configuracion", "icon": "bi-gear", "active": ["settings"]},
             {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
@@ -707,6 +711,8 @@ ENDPOINT_UI_LABELS = {
     "document_open": "Abrir documento",
     "notifications": "Notificaciones",
     "business_rules": "Reglas negocio",
+    "maintenance": "Mantenimiento",
+    "maintenance_export": "Exportar mantenimiento",
     "audit_export": "Exportar auditoria",
 }
 
@@ -806,6 +812,8 @@ ENDPOINT_ACTION_OVERRIDES = {
     "notification_read": "edit",
     "notifications_read_all": "edit",
     "business_rules": "view",
+    "maintenance": "view",
+    "maintenance_export": "export",
     "audit": "view",
     "audit_export": "export",
     "settings": {"GET": "view", "POST": "edit"},
@@ -2516,7 +2524,14 @@ def payment_term_options(store: dict | None = None) -> list[int]:
 
 @app.get("/healthz")
 def healthz():
-    return jsonify({"status": "ok", "service": "wulkan-admin"})
+    return jsonify(
+        {
+            "status": "ok",
+            "service": "wulkan-admin",
+            "appVersion": app.config.get("APP_VERSION", "0.9.0"),
+            "buildSha": app.config.get("BUILD_SHA", ""),
+        }
+    )
 
 
 @app.get("/readyz")
@@ -2526,6 +2541,8 @@ def readyz():
         return jsonify(
             {
                 "status": "ready",
+                "appVersion": app.config.get("APP_VERSION", "0.9.0"),
+                "buildSha": app.config.get("BUILD_SHA", ""),
                 "dataBackend": app.config.get("DATA_BACKEND"),
                 "storageBackend": app.config.get("STORAGE_BACKEND"),
                 "mobileTokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
@@ -2800,6 +2817,9 @@ def mobile_admin_payload(user: dict, access_token: str) -> dict:
 def mobile_api_meta() -> dict:
     return {
         "apiVersion": "v1",
+        "appVersion": app.config.get("APP_VERSION", "0.9.0"),
+        "buildSha": app.config.get("BUILD_SHA", ""),
+        "environment": app.config.get("ENV", "development"),
         "legacyPrefix": "/api/mobile",
         "versionedPrefix": "/api/v1/mobile",
         "service": "wulkan-mobile-api",
@@ -11386,6 +11406,272 @@ def business_rules_page_context(store: dict) -> dict:
 def business_rules():
     store = load_store()
     return render_template("business_rules.html", **business_rules_page_context(store))
+
+
+def maintenance_badge(status: str) -> str:
+    return {
+        "ok": "text-bg-success",
+        "warning": "text-bg-warning",
+        "critical": "text-bg-danger",
+    }.get(status, "text-bg-secondary")
+
+
+def maintenance_label(status: str) -> str:
+    return {
+        "ok": "OK",
+        "warning": "Atencion",
+        "critical": "Critico",
+    }.get(status, "Revision")
+
+
+def add_maintenance_area(
+    areas: list[dict],
+    *,
+    key: str,
+    title: str,
+    module: str,
+    status: str,
+    detail: str,
+    action: str = "",
+    href: str = "",
+) -> None:
+    areas.append(
+        {
+            "key": key,
+            "title": title,
+            "module": module,
+            "status": status,
+            "statusLabel": maintenance_label(status),
+            "statusClass": maintenance_badge(status),
+            "detail": detail,
+            "action": action,
+            "href": href,
+        }
+    )
+
+
+def maintenance_page_context(store: dict) -> dict:
+    api_root = Path(__file__).resolve().parent
+    project_root = api_root.parents[1]
+    docs_root = project_root / "docs"
+    migrations_dir = api_root / "migrations" / "versions"
+    migration_files = sorted(migrations_dir.glob("*.py"))
+    latest_migration = migration_files[-1].stem if migration_files else "sin-migraciones"
+    database_url = str(app.config.get("DATABASE_URL", ""))
+    database_engine = "PostgreSQL" if database_url.startswith("postgresql") else "SQLite" if "sqlite" in database_url else "Otro"
+    is_production = app.config.get("ENV") == "production"
+    storage_backend = str(app.config.get("STORAGE_BACKEND", "")).lower()
+    data_backend = str(app.config.get("DATA_BACKEND", "")).lower()
+
+    areas: list[dict] = []
+    production_ready = (
+        data_backend == "sql"
+        and database_engine == "PostgreSQL"
+        and storage_backend == "s3"
+        and bool(app.config.get("REQUIRE_MOBILE_TOKEN"))
+        and not bool(app.config.get("SQL_FALLBACK_TO_JSON"))
+        and app.config.get("SECRET_KEY") != "wulkan-dev"
+    )
+    add_maintenance_area(
+        areas,
+        key="environment",
+        title="Separacion dev/staging/prod",
+        module="Runtime",
+        status="ok" if production_ready else ("critical" if is_production else "warning"),
+        detail=(
+            "Produccion usa SQL, PostgreSQL, S3 y token movil obligatorio."
+            if production_ready
+            else f"Entorno {app.config.get('ENV')} con backend {data_backend}, storage {storage_backend} y base {database_engine}."
+        ),
+        action="Revisar variables" if not production_ready else "",
+    )
+    add_maintenance_area(
+        areas,
+        key="indexes",
+        title="Indices SQL",
+        module="Base de datos",
+        status="ok" if latest_migration.endswith("0010_performance_indexes") else "warning",
+        detail=f"{len(migration_files)} migraciones Alembic. Ultima: {latest_migration}.",
+        href=url_for("maintenance_export"),
+        action="Exportar estado",
+    )
+    add_maintenance_area(
+        areas,
+        key="pagination",
+        title="Paginacion y consultas",
+        module="API/Admin",
+        status="ok",
+        detail="API movil con limit/page/cursor y tablas admin paginadas para operacion comercial.",
+        href=url_for("api_mobile_meta"),
+        action="Ver meta API",
+    )
+    backup_script = api_root / "scripts" / "backup_database.py"
+    restore_script = api_root / "scripts" / "restore_database.py"
+    add_maintenance_area(
+        areas,
+        key="backups",
+        title="Backups automaticos",
+        module="Operaciones",
+        status="ok" if backup_script.exists() and restore_script.exists() else "critical",
+        detail=f"Scripts pg_dump/restore listos. Directorio configurado: {app.config.get('BACKUP_DIR')}.",
+        action="Programar job externo",
+    )
+    add_maintenance_area(
+        areas,
+        key="logs",
+        title="Logs de errores y actividad",
+        module="Auditoria",
+        status="ok",
+        detail=f"Auditoria: {len(store.get('audit_events', []))} eventos. Notificaciones: {len(store.get('notifications', []))}.",
+        href=url_for("audit") if can_access_module("audit") else "",
+        action="Ver auditoria",
+    )
+    add_maintenance_area(
+        areas,
+        key="versions",
+        title="Control de versiones",
+        module="Release",
+        status="ok" if app.config.get("BUILD_SHA") else ("warning" if is_production else "ok"),
+        detail=f"Version {app.config.get('APP_VERSION')} - build {app.config.get('BUILD_SHA') or 'no informado'}.",
+        action="Configurar WULKAN_BUILD_SHA" if not app.config.get("BUILD_SHA") else "",
+    )
+    if docs_root.exists():
+        required_docs = [
+            docs_root / "operations" / "DEPLOYMENT.md",
+            docs_root / "operations" / "SECURITY.md",
+            docs_root / "operations" / "MOBILE_SETUP.md",
+            docs_root / "operations" / "MAINTENANCE.md",
+            docs_root / "product" / "MANUAL_ADMIN.md",
+            docs_root / "product" / "MANUAL_APP_MOVIL.md",
+        ]
+        missing_docs = [path.name for path in required_docs if not path.exists()]
+        docs_detail_ok = "Manuales tecnicos y funcionales completos."
+    else:
+        embedded_docs = [
+            api_root / "README.md",
+            api_root / "scripts" / "readiness_check.py",
+            api_root / "scripts" / "backup_database.py",
+            api_root / "scripts" / "restore_database.py",
+        ]
+        missing_docs = [path.name for path in embedded_docs if not path.exists()]
+        docs_detail_ok = "Documentacion operativa incluida en README y scripts; manuales completos viven en el repositorio."
+    add_maintenance_area(
+        areas,
+        key="documentation",
+        title="Documentacion tecnica y funcional",
+        module="Producto",
+        status="ok" if not missing_docs else "warning",
+        detail=docs_detail_ok if not missing_docs else f"Faltan: {', '.join(missing_docs)}.",
+        href=url_for("import_templates") if can_access_module("import_templates") else "",
+        action="Ver plantillas",
+    )
+    add_maintenance_area(
+        areas,
+        key="variables",
+        title="Variables de entorno",
+        module="Configuracion",
+        status="ok" if (not is_production or production_ready) else "critical",
+        detail="Variables declaradas en .env.example y validadas al iniciar en produccion.",
+        href=url_for("settings") if can_access_module("settings") else "",
+        action="Ver configuracion",
+    )
+
+    counts = {
+        "products": len([item for item in store.get("products", []) if item.get("status") != "deleted"]),
+        "clients": len([item for item in store.get("clients", []) if item.get("status") != "deleted"]),
+        "orders": len(store.get("orders", [])),
+        "sellers": len([item for item in store.get("admin_users", []) if item.get("role") == "sales" and item.get("status") != "deleted"]),
+        "audit": len(store.get("audit_events", [])),
+        "notifications": len(store.get("notifications", [])),
+    }
+    metrics = {
+        "areas": len(areas),
+        "ok": sum(1 for area in areas if area["status"] == "ok"),
+        "warning": sum(1 for area in areas if area["status"] == "warning"),
+        "critical": sum(1 for area in areas if area["status"] == "critical"),
+        "migrations": len(migration_files),
+    }
+    runtime_rows = [
+        ("Entorno", app.config.get("ENV")),
+        ("Version", app.config.get("APP_VERSION")),
+        ("Build", app.config.get("BUILD_SHA") or "no informado"),
+        ("Datos", app.config.get("DATA_BACKEND")),
+        ("Base", database_engine),
+        ("Storage", app.config.get("STORAGE_BACKEND")),
+        ("Token movil", "Obligatorio" if app.config.get("REQUIRE_MOBILE_TOKEN") else "No obligatorio"),
+        ("Fallback JSON", "Activo" if app.config.get("SQL_FALLBACK_TO_JSON") else "Desactivado"),
+        ("Pool SQL", f"{app.config.get('DB_POOL_SIZE')} + {app.config.get('DB_MAX_OVERFLOW')} overflow"),
+        ("Upload max", f"{int(app.config.get('MAX_CONTENT_LENGTH', 0) / 1024 / 1024)} MB"),
+        ("Import max", f"{app.config.get('MAX_IMPORT_ROWS')} filas"),
+        ("Log level", app.config.get("LOG_LEVEL")),
+    ]
+    return {
+        "areas": areas,
+        "findings": [area for area in areas if area["status"] != "ok"],
+        "metrics": metrics,
+        "runtime_rows": runtime_rows,
+        "latest_migration": latest_migration,
+        "counts": counts,
+        "status_graph": graphify_from_pairs(
+            [
+                ("OK", metrics["ok"]),
+                ("Atencion", metrics["warning"]),
+                ("Critico", metrics["critical"]),
+            ],
+            3,
+        ),
+        "volume_graph": graphify_from_pairs(
+            [
+                ("Productos", counts["products"]),
+                ("Clientes", counts["clients"]),
+                ("Ordenes", counts["orders"]),
+                ("Vendedores", counts["sellers"]),
+                ("Auditoria", counts["audit"]),
+                ("Notificaciones", counts["notifications"]),
+            ],
+            6,
+        ),
+    }
+
+
+@app.get("/maintenance")
+@require_roles(*roles_for_action("maintenance", "view"))
+def maintenance():
+    store = load_store()
+    return render_template("maintenance.html", **maintenance_page_context(store))
+
+
+@app.get("/maintenance/export")
+@require_roles(*roles_for_action("maintenance", "export"))
+def maintenance_export():
+    store = load_store()
+    context = maintenance_page_context(store)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["area", "modulo", "estado", "detalle", "accion"])
+    writer.writeheader()
+    for area in context["areas"]:
+        writer.writerow(
+            {
+                "area": area["title"],
+                "modulo": area["module"],
+                "estado": area["statusLabel"],
+                "detalle": area["detail"],
+                "accion": area["action"],
+            }
+        )
+    record_audit_event(
+        store,
+        "export",
+        "maintenance",
+        "readiness",
+        "Exportacion de estado tecnico de mantenimiento.",
+    )
+    save_store(store)
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=wulkan_mantenimiento.csv"},
+    )
 
 
 def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -36,6 +36,11 @@ class AdminUser(TimestampMixin, Base):
 
 class Client(TimestampMixin, Base):
     __tablename__ = "clients"
+    __table_args__ = (
+        Index("ix_clients_tax_id", "tax_id"),
+        Index("ix_clients_status", "status"),
+        Index("ix_clients_client_type", "client_type"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     business_name: Mapped[str] = mapped_column(String(180), nullable=False)
@@ -57,6 +62,7 @@ class Client(TimestampMixin, Base):
 
 class Category(TimestampMixin, Base):
     __tablename__ = "categories"
+    __table_args__ = (Index("ix_categories_status", "status"),)
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -68,6 +74,11 @@ class Category(TimestampMixin, Base):
 
 class Product(TimestampMixin, Base):
     __tablename__ = "products"
+    __table_args__ = (
+        Index("ix_products_category_id", "category_id"),
+        Index("ix_products_status", "status"),
+        Index("ix_products_product_type", "product_type"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     sku: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
@@ -97,6 +108,11 @@ class Product(TimestampMixin, Base):
 
 class MediaAsset(TimestampMixin, Base):
     __tablename__ = "media_assets"
+    __table_args__ = (
+        Index("ix_media_assets_product_id", "product_id"),
+        Index("ix_media_assets_asset_type", "asset_type"),
+        Index("ix_media_assets_status", "status"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     title: Mapped[str] = mapped_column(String(220), nullable=False)
@@ -110,6 +126,11 @@ class MediaAsset(TimestampMixin, Base):
 
 class Announcement(TimestampMixin, Base):
     __tablename__ = "announcements"
+    __table_args__ = (
+        Index("ix_announcements_placement", "placement"),
+        Index("ix_announcements_status", "status"),
+        Index("ix_announcements_priority", "priority"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     title: Mapped[str] = mapped_column(String(220), nullable=False)
@@ -127,6 +148,11 @@ class Announcement(TimestampMixin, Base):
 
 class StockMovement(Base):
     __tablename__ = "stock_movements"
+    __table_args__ = (
+        Index("ix_stock_movements_product_id", "product_id"),
+        Index("ix_stock_movements_movement_type", "movement_type"),
+        Index("ix_stock_movements_created_at", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     product_id: Mapped[str] = mapped_column(String(80), ForeignKey("products.id"), nullable=False)
@@ -148,6 +174,13 @@ class BusinessSetting(TimestampMixin, Base):
 
 class Order(TimestampMixin, Base):
     __tablename__ = "orders"
+    __table_args__ = (
+        Index("ix_orders_customer_id", "customer_id"),
+        Index("ix_orders_status", "status"),
+        Index("ix_orders_credit_status", "credit_status"),
+        Index("ix_orders_payment_status", "payment_status"),
+        Index("ix_orders_created_at", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     order_number: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
@@ -174,6 +207,12 @@ class Order(TimestampMixin, Base):
 
 class Quote(TimestampMixin, Base):
     __tablename__ = "quotes"
+    __table_args__ = (
+        Index("ix_quotes_client_id", "client_id"),
+        Index("ix_quotes_seller_id", "seller_id"),
+        Index("ix_quotes_status", "status"),
+        Index("ix_quotes_created_at", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     quote_number: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
@@ -199,6 +238,12 @@ class Quote(TimestampMixin, Base):
 
 class CrmRecord(TimestampMixin, Base):
     __tablename__ = "crm_records"
+    __table_args__ = (
+        Index("ix_crm_records_record_type", "record_type"),
+        Index("ix_crm_records_status", "status"),
+        Index("ix_crm_records_client_id", "client_id"),
+        Index("ix_crm_records_next_action_at", "next_action_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     title: Mapped[str] = mapped_column(String(220), nullable=False)
@@ -223,6 +268,12 @@ class CrmRecord(TimestampMixin, Base):
 
 class CreditMovement(Base):
     __tablename__ = "credit_movements"
+    __table_args__ = (
+        Index("ix_credit_movements_client_id", "client_id"),
+        Index("ix_credit_movements_order_id", "order_id"),
+        Index("ix_credit_movements_movement_type", "movement_type"),
+        Index("ix_credit_movements_created_at", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     movement_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -241,6 +292,12 @@ class CreditMovement(Base):
 
 class Notification(TimestampMixin, Base):
     __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_priority", "priority"),
+        Index("ix_notifications_created_at", "created_at"),
+        Index("ix_notifications_module_created_at", "module", "created_at"),
+        Index("ix_notifications_recipient_status", "recipient_type", "recipient_id", "status"),
+    )
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     title: Mapped[str] = mapped_column(String(220), nullable=False)
@@ -264,6 +321,11 @@ class Notification(TimestampMixin, Base):
 
 class ServiceTechnician(TimestampMixin, Base):
     __tablename__ = "service_technicians"
+    __table_args__ = (
+        Index("ix_service_technicians_state_city", "state", "city"),
+        Index("ix_service_technicians_status", "status"),
+        Index("ix_service_technicians_visible_in_app", "visible_in_app"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
@@ -285,6 +347,12 @@ class ServiceTechnician(TimestampMixin, Base):
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_created_at", "created_at"),
+        Index("ix_audit_events_actor_created_at", "actor_id", "created_at"),
+        Index("ix_audit_events_entity", "entity_type", "entity_id"),
+        Index("ix_audit_events_action", "action"),
+    )
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     actor_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
@@ -303,6 +371,11 @@ class AuditEvent(Base):
 
 class ImportDraft(Base):
     __tablename__ = "import_drafts"
+    __table_args__ = (
+        Index("ix_import_drafts_status", "status"),
+        Index("ix_import_drafts_expires_at", "expires_at"),
+        Index("ix_import_drafts_created_by_id", "created_by_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     module: Mapped[str] = mapped_column(String(80), index=True, nullable=False)

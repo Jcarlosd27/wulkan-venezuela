@@ -47,6 +47,12 @@ http://localhost:5000/healthz
 http://localhost:5000/readyz
 ```
 
+Mantenimiento operativo:
+
+```text
+http://localhost:5000/maintenance
+```
+
 ## Base de datos
 
 Archivo de variables sugerido:
@@ -96,6 +102,8 @@ Variables recomendadas para produccion:
 
 ```bash
 WULKAN_ENV=production
+WULKAN_APP_VERSION=1.0.0
+WULKAN_BUILD_SHA=<commit-git>
 WULKAN_SECRET_KEY=<secreto-real-largo>
 WULKAN_DATA_BACKEND=sql
 WULKAN_SQL_FALLBACK_TO_JSON=0
@@ -104,6 +112,8 @@ WULKAN_DATABASE_URL=postgresql+psycopg://user:password@host:5432/wulkan
 WULKAN_LOGIN_MAX_ATTEMPTS=5
 WULKAN_LOGIN_WINDOW_SECONDS=300
 WULKAN_MAX_UPLOAD_MB=16
+WULKAN_BACKUP_DIR=backups
+WULKAN_LOG_LEVEL=INFO
 WULKAN_RUN_MIGRATIONS=1
 WULKAN_HARDEN_DEFAULT_ACCOUNTS=1
 WULKAN_STORAGE_BACKEND=s3

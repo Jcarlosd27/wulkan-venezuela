@@ -18,6 +18,12 @@ services:
       - key: WULKAN_ENV
         scope: RUN_TIME
         value: production
+      - key: WULKAN_APP_VERSION
+        scope: RUN_TIME
+        value: "1.0.0"
+      - key: WULKAN_BUILD_SHA
+        scope: RUN_TIME
+        value: digitalocean-main
       - key: WULKAN_SECRET_KEY
         scope: RUN_TIME
         type: SECRET
@@ -72,6 +78,12 @@ services:
       - key: WULKAN_MAX_UPLOAD_MB
         scope: RUN_TIME
         value: "16"
+      - key: WULKAN_BACKUP_DIR
+        scope: RUN_TIME
+        value: backups
+      - key: WULKAN_LOG_LEVEL
+        scope: RUN_TIME
+        value: INFO
       - key: WULKAN_WEB_WORKERS
         scope: RUN_TIME
         value: "1"

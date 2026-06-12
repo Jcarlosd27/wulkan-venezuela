@@ -38,6 +38,8 @@ def database_url() -> str:
 
 class Config:
     ENV = os.environ.get("WULKAN_ENV", "development")
+    APP_VERSION = os.environ.get("WULKAN_APP_VERSION", "0.9.0")
+    BUILD_SHA = os.environ.get("WULKAN_BUILD_SHA", "")
     SECRET_KEY = os.environ.get("WULKAN_SECRET_KEY", "wulkan-dev")
     DATA_BACKEND = os.environ.get("WULKAN_DATA_BACKEND", "json")
     DATABASE_URL = database_url()
@@ -61,6 +63,8 @@ class Config:
     DB_POOL_SIZE = int(os.environ.get("WULKAN_DB_POOL_SIZE", "2"))
     DB_MAX_OVERFLOW = int(os.environ.get("WULKAN_DB_MAX_OVERFLOW", "2"))
     DB_POOL_RECYCLE_SECONDS = int(os.environ.get("WULKAN_DB_POOL_RECYCLE_SECONDS", "1800"))
+    BACKUP_DIR = os.environ.get("WULKAN_BACKUP_DIR", "backups")
+    LOG_LEVEL = os.environ.get("WULKAN_LOG_LEVEL", "INFO")
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = False

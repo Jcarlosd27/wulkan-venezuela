@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% set heading = "Mantenimiento" %}
+{% set description = "Salud tecnica, version, migraciones, backups y preparacion operativa." %}
+
+{% block top_action %}
+<a class="btn btn-light" href="{{ url_for('maintenance_export') }}">
+  <i class="bi bi-download"></i> Exportar estado
+</a>
+{% endblock %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
+      <span>Controles OK</span>
+      <strong>{{ metrics.ok }}</strong>
+      <em>{{ metrics.areas }} areas revisadas</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <span>Atencion</span>
+      <strong>{{ metrics.warning }}</strong>
+      <em>Revisar antes de escalar</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card metric-danger">
+      <div class="metric-icon"><i class="bi bi-x-octagon"></i></div>
+      <span>Criticos</span>
+      <strong>{{ metrics.critical }}</strong>
+      <em>Bloquean produccion</em>
+    </article>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-diagram-3"></i></div>
+      <span>Migraciones</span>
+      <strong>{{ metrics.migrations }}</strong>
+      <em>{{ latest_migration }}</em>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-5">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Readiness tecnico</h2>
+          <span>Graphify</span>
+        </div>
+      </div>
+      <div
+        class="graphify-bars"
+        data-labels='{{ status_graph["labels"] | tojson }}'
+        data-values='{{ status_graph["values"] | tojson }}'
+      ></div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-7">
+    <article class="panel h-100">
+      <div class="panel-header">
+        <div>
+          <h2>Volumen operativo</h2>
+          <span>Graphify</span>
+        </div>
+      </div>
+      <div
+        class="graphify-bars"
+        data-labels='{{ volume_graph["labels"] | tojson }}'
+        data-values='{{ volume_graph["values"] | tojson }}'
+      ></div>
+    </article>
+  </div>
+</section>
+
+<section class="row g-3 mb-3">
+  <div class="col-12 col-xl-8">
+    <article class="panel h-100">
+      <div class="panel-title">
+        <div>
+          <h2>Checklist de produccion</h2>
+          <p>Controles necesarios para operar con datos reales y trazabilidad.</p>
+        </div>
+        <span>{{ areas|length }} controles</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle" data-no-pagination="1">
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Modulo</th>
+              <th>Estado</th>
+              <th>Detalle</th>
+              <th class="text-end">Accion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for area in areas %}
+            <tr>
+              <td>
+                <strong class="d-block">{{ area.title }}</strong>
+                <small class="text-secondary">{{ area.key }}</small>
+              </td>
+              <td>{{ area.module }}</td>
+              <td><span class="badge {{ area.statusClass }}">{{ area.statusLabel }}</span></td>
+              <td><small class="text-secondary">{{ area.detail }}</small></td>
+              <td class="text-end">
+                {% if area.href %}
+                <a class="btn btn-sm btn-outline-dark" href="{{ area.href }}">
+                  <i class="bi bi-box-arrow-up-right"></i> {{ area.action or "Abrir" }}
+                </a>
+                {% elif area.action %}
+                <span class="text-secondary small">{{ area.action }}</span>
+                {% else %}
+                <span class="text-secondary small">Sin accion</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </div>
+  <div class="col-12 col-xl-4">
+    <article class="panel h-100">
+      <div class="panel-title">
+        <div>
+          <h2>Runtime</h2>
+          <p>Configuracion efectiva del contenedor actual.</p>
+        </div>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for label, value in runtime_rows %}
+        <div class="list-group-item px-0 d-flex justify-content-between gap-3 align-items-start">
+          <span class="text-secondary">{{ label }}</span>
+          <strong class="text-end">{{ value }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+</section>
+
+{% if findings %}
+<section class="panel">
+  <div class="panel-title">
+    <div>
+      <h2>Acciones pendientes</h2>
+      <p>Elementos que conviene resolver antes de aumentar volumen o usuarios.</p>
+    </div>
+    <span>{{ findings|length }} hallazgos</span>
+  </div>
+  <div class="row g-3">
+    {% for item in findings %}
+    <div class="col-12 col-lg-6">
+      <article class="border rounded-3 p-3 h-100 bg-white">
+        <span class="badge {{ item.statusClass }}">{{ item.statusLabel }}</span>
+        <h3 class="h6 mt-2 mb-1">{{ item.title }}</h3>
+        <p class="text-secondary small mb-0">{{ item.detail }}</p>
+      </article>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}
