@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from alembic import op
+import sqlalchemy as sa
 
 
 revision = "20260611_0010"
@@ -62,9 +63,14 @@ INDEXES = [
 
 def upgrade() -> None:
     for name, table, columns in INDEXES:
-        op.create_index(name, table, columns)
+        column_sql = ", ".join(columns)
+        op.execute(
+            sa.text(
+                f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column_sql})"
+            )
+        )
 
 
 def downgrade() -> None:
     for name, table, _columns in reversed(INDEXES):
-        op.drop_index(name, table_name=table)
+        op.execute(sa.text(f"DROP INDEX IF EXISTS {name}"))
