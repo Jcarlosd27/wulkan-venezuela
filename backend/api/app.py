@@ -116,6 +116,9 @@ ORDER_STATUS_OPTIONS = [
 ]
 ORDER_CREDIT_RESERVING_STATUSES = {"approved_with_credit", "preparing", "delivered", "partial_paid"}
 ORDER_STOCK_RESERVING_STATUSES = {"approved_with_credit", "preparing", "partial_paid", "paid"}
+CLIENT_SALE_BLOCKING_STATUSES = {"inactive", "blocked_debt", "blocked_credit", "blocked_manual", "suspended"}
+CLIENT_CREDIT_BLOCKING_STATUSES = {"suspended", "blocked_debt", "blocked_limit"}
+CLIENT_COLLECTION_BLOCKING_STATUSES = {"blocked", "critical", "uncollectible"}
 PAYMENT_METHOD_OPTIONS = [
     ("cash", "Efectivo"),
     ("transfer", "Transferencia"),
@@ -456,6 +459,7 @@ PERMISSION_MODULES = [
     ("dispatch", "Despacho", "bi-truck", "Preparacion, ruta y evidencia de entrega."),
     ("reports", "Reportes", "bi-file-bar-graph", "Exportables comerciales, inventario y finanzas."),
     ("notifications", "Notificaciones", "bi-bell", "Alertas internas y moviles por evento comercial."),
+    ("business_rules", "Reglas negocio", "bi-shield-exclamation", "Validaciones criticas de ventas, credito, stock y auditoria."),
     ("admin_users", "Usuarios admin", "bi-people", "Accesos internos al panel."),
     ("permissions", "Roles y permisos", "bi-shield-lock", "Matriz granular por rol y accion."),
     ("settings", "Configuracion", "bi-gear", "Parametros generales del negocio."),
@@ -496,6 +500,7 @@ ROLE_MODULE_PERMISSIONS = {
         "dispatch": set(ACTION_READ),
         "reports": set(ACTION_AUDIT),
         "notifications": set(ACTION_READ | {"edit"}),
+        "business_rules": set(ACTION_AUDIT),
         "import_templates": set(ACTION_READ),
         "audit": set(ACTION_AUDIT),
         "documents": set(ACTION_READ),
@@ -519,6 +524,7 @@ ROLE_MODULE_PERMISSIONS = {
         "dispatch": set(ACTION_READ | {"edit"}),
         "reports": set(ACTION_READ),
         "notifications": set(ACTION_READ | {"edit"}),
+        "business_rules": set(ACTION_READ),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_WORK),
     },
@@ -531,6 +537,7 @@ ROLE_MODULE_PERMISSIONS = {
         "orders": set(ACTION_READ),
         "dispatch": set(ACTION_READ),
         "notifications": set(ACTION_READ | {"edit"}),
+        "business_rules": set(ACTION_READ),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_WORK),
     },
@@ -543,6 +550,7 @@ ROLE_MODULE_PERMISSIONS = {
         "collections": {"view", "create", "edit", "export", "audit"},
         "reports": set(ACTION_READ),
         "notifications": set(ACTION_READ | {"edit"}),
+        "business_rules": set(ACTION_READ),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_READ),
     },
@@ -554,6 +562,7 @@ ROLE_MODULE_PERMISSIONS = {
         "service_technicians": set(ACTION_READ),
         "reports": set(ACTION_READ),
         "notifications": set(ACTION_READ | {"edit"}),
+        "business_rules": set(ACTION_READ),
         "documents": set(ACTION_READ),
     },
     "auditor": {
@@ -579,6 +588,7 @@ ROLE_MODULE_PERMISSIONS = {
             "dispatch",
             "reports",
             "notifications",
+            "business_rules",
             "import_templates",
             "documents",
         ]
@@ -639,6 +649,7 @@ ADMIN_MENU_GROUPS = [
             {"module": "import_templates", "endpoint": "import_templates", "label": "Plantillas", "icon": "bi-file-earmark-spreadsheet", "active": ["import_templates", "download_import_template"]},
             {"module": "documents", "endpoint": "documents", "label": "Documentos", "icon": "bi-folder2", "active": ["documents", "documents_import", "documents_export", "document_delete"]},
             {"module": "notifications", "endpoint": "notifications", "label": "Notificaciones", "icon": "bi-bell", "active": ["notifications", "notification_read", "notifications_read_all"]},
+            {"module": "business_rules", "endpoint": "business_rules", "label": "Reglas negocio", "icon": "bi-shield-exclamation", "active": ["business_rules"]},
             {"module": "audit", "endpoint": "audit", "label": "Auditoria", "icon": "bi-shield-check", "active": ["audit", "audit_export"]},
             {"module": "settings", "endpoint": "settings", "label": "Configuracion", "icon": "bi-gear", "active": ["settings"]},
             {"module": "permissions", "endpoint": "permissions", "label": "Roles y permisos", "icon": "bi-shield-lock", "active": ["permissions"]},
@@ -695,6 +706,7 @@ ENDPOINT_UI_LABELS = {
     "documents_import": "Importar documentos",
     "document_open": "Abrir documento",
     "notifications": "Notificaciones",
+    "business_rules": "Reglas negocio",
     "audit_export": "Exportar auditoria",
 }
 
@@ -793,6 +805,7 @@ ENDPOINT_ACTION_OVERRIDES = {
     "notifications": "view",
     "notification_read": "edit",
     "notifications_read_all": "edit",
+    "business_rules": "view",
     "audit": "view",
     "audit_export": "export",
     "settings": {"GET": "view", "POST": "edit"},
@@ -5265,6 +5278,9 @@ def build_commercial_order(
         or "cash"
     )
     sale_type = requested_sale_type if requested_sale_type in dict(SALE_TYPE_OPTIONS) else "cash"
+    blocker = client_sales_blocker(client, sale_type)
+    if blocker:
+        return None, blocker
     allowed_terms = [
         int(term)
         for term in client.get("allowedPaymentTermsDays", [0])
@@ -6177,6 +6193,18 @@ def credit_available(
     if orders is not None:
         used += client_order_credit_used(orders, client.get("id", ""), movements, exclude_order_id)
     return max(0.0, round(limit - used, 2))
+
+
+def client_sales_blocker(client: dict | None, sale_type: str = "") -> str:
+    if not client:
+        return "Cliente no encontrado."
+    if client.get("status") in CLIENT_SALE_BLOCKING_STATUSES:
+        return f"Cliente no habilitado para comprar: {client_status_label(client.get('status', ''))}."
+    if client.get("collectionStatus") in CLIENT_COLLECTION_BLOCKING_STATUSES:
+        return f"Cliente no habilitado para comprar por cobranza: {collection_status_label(client.get('collectionStatus', ''))}."
+    if sale_type in {"credit_line", "term_credit"} and client.get("creditRequestStatus") in CLIENT_CREDIT_BLOCKING_STATUSES:
+        return f"Cliente no habilitado para comprar por credito: {credit_status_label(client.get('creditRequestStatus', ''))}."
+    return ""
 
 
 def enrich_client(
@@ -11019,6 +11047,347 @@ def notifications_read_all():
     return redirect(request.form.get("next") or url_for("notifications"))
 
 
+def business_rule_badge(status: str) -> str:
+    return {
+        "ok": "text-bg-success",
+        "warning": "text-bg-warning",
+        "critical": "text-bg-danger",
+    }.get(status, "text-bg-secondary")
+
+
+def business_rule_label(status: str) -> str:
+    return {
+        "ok": "OK",
+        "warning": "Atencion",
+        "critical": "Critico",
+    }.get(status, "Revision")
+
+
+def business_rule_href(module: str, endpoint: str, **kwargs) -> str:
+    if not can_access_module(module):
+        return ""
+    return url_for(endpoint, **kwargs)
+
+
+def duplicate_record_groups(records: list[dict], field: str, label_field: str) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for record in records:
+        value = str(record.get(field, "")).strip().lower()
+        if not value:
+            continue
+        groups.setdefault(value, []).append(str(record.get(label_field) or record.get("id") or value))
+    return {key: values for key, values in groups.items() if len(values) > 1}
+
+
+def add_business_rule(
+    rules: list[dict],
+    *,
+    code: str,
+    title: str,
+    module: str,
+    description: str,
+    count: int = 0,
+    examples: list[str] | None = None,
+    href: str = "",
+    warning: bool = False,
+) -> None:
+    status = "ok"
+    if count > 0:
+        status = "warning" if warning else "critical"
+    rules.append(
+        {
+            "code": code,
+            "title": title,
+            "module": module,
+            "description": description,
+            "count": count,
+            "examples": (examples or [])[:4],
+            "href": href,
+            "status": status,
+            "statusLabel": business_rule_label(status),
+            "statusClass": business_rule_badge(status),
+        }
+    )
+
+
+def business_rules_page_context(store: dict) -> dict:
+    products = [product for product in store.get("products", []) if product.get("status") != "deleted"]
+    clients = [client for client in store.get("clients", []) if client.get("status") != "deleted"]
+    orders = store.get("orders", [])
+    movements = store.get("credit_movements", [])
+    audit_events = store.get("audit_events", [])
+    products_by_id = {product.get("id", ""): product for product in products}
+    clients_by_id = {client.get("id", ""): client for client in clients}
+    rules: list[dict] = []
+
+    orders_without_client = [
+        order for order in orders
+        if not order.get("customerId") or order.get("customerId") not in clients_by_id
+    ]
+    add_business_rule(
+        rules,
+        code="orders.customer.required",
+        title="Orden siempre con cliente",
+        module="Ordenes",
+        description="No se permite crear ni mantener ordenes sin cliente ferretero asociado.",
+        count=len(orders_without_client),
+        examples=[order.get("orderId", order.get("id", "")) for order in orders_without_client],
+        href=business_rule_href("orders", "orders"),
+    )
+
+    orders_without_items = [
+        order for order in orders
+        if not [item for item in order.get("items") or [] if safe_int(item.get("quantity"), 0) > 0]
+    ]
+    invalid_item_orders = [
+        order for order in orders
+        if any(item.get("productId") and item.get("productId") not in products_by_id for item in order.get("items") or [])
+    ]
+    add_business_rule(
+        rules,
+        code="orders.items.required",
+        title="Orden siempre con productos",
+        module="Ordenes",
+        description="Toda orden debe contener items validos del catalogo publicado por Wulkan.",
+        count=len(orders_without_items) + len(invalid_item_orders),
+        examples=[order.get("orderId", order.get("id", "")) for order in orders_without_items + invalid_item_orders],
+        href=business_rule_href("orders", "orders"),
+    )
+
+    reserved_by_product = stock_reserved_quantities(orders)
+    over_reserved_products = [
+        f"{product.get('sku', product.get('id', ''))}: reservado {reserved_by_product.get(product.get('id', ''), 0)} / stock {safe_int(product.get('stock'), 0)}"
+        for product in products
+        if reserved_by_product.get(product.get("id", ""), 0) > safe_int(product.get("stock"), 0)
+    ]
+    stock_review_orders = [
+        order for order in orders
+        if order.get("status") in ORDER_STOCK_RESERVING_STATUSES
+        and order.get("inventoryStatus") in {"", None, "review", "insufficient_stock"}
+    ]
+    add_business_rule(
+        rules,
+        code="orders.stock.required",
+        title="Aprobacion solo con stock",
+        module="Stock",
+        description="Una orden aprobada, preparada o pagada debe tener reserva o entrega de inventario consistente.",
+        count=len(over_reserved_products) + len(stock_review_orders),
+        examples=over_reserved_products + [order.get("orderId", order.get("id", "")) for order in stock_review_orders],
+        href=business_rule_href("stock", "stock"),
+    )
+
+    unauthorized_credit = [
+        event for event in audit_events
+        if event.get("action") == "credit_decision"
+        and event.get("actorRole") not in CREDIT_APPROVAL_ROLES
+    ]
+    add_business_rule(
+        rules,
+        code="credit.approval.role",
+        title="Credito aprobado por rol autorizado",
+        module="Credito B2B",
+        description="Las decisiones de credito solo pueden ser ejecutadas por super admin, gerente general o gerente comercial.",
+        count=len(unauthorized_credit),
+        examples=[f"{event.get('actorName', 'Actor')} -> {event.get('entityId', '')}" for event in unauthorized_credit],
+        href=business_rule_href("audit", "audit", action="credit_decision"),
+    )
+
+    over_limit_clients = []
+    for client in clients:
+        limit = safe_float(client.get("creditLimitUsd"), 0)
+        exposure = safe_float(client.get("creditUsedUsd"), 0) + client_order_credit_used(orders, client.get("id", ""), movements)
+        if client.get("creditEnabled") and limit >= 0 and exposure > limit + 0.01:
+            over_limit_clients.append(f"{client.get('businessName', client.get('id', 'Cliente'))}: {money_usd(exposure)} / {money_usd(limit)}")
+    add_business_rule(
+        rules,
+        code="credit.limit.exceeded",
+        title="Cupo no superado sin autorizacion",
+        module="Credito B2B",
+        description="La exposicion de linea de credito no debe superar el cupo aprobado por gerencia.",
+        count=len(over_limit_clients),
+        examples=over_limit_clients,
+        href=business_rule_href("credit", "credit"),
+    )
+
+    blocked_client_orders = []
+    for order in orders:
+        if order.get("status") in {"cancelled", "rejected"}:
+            continue
+        client = clients_by_id.get(order.get("customerId", ""))
+        blocker = client_sales_blocker(client, order.get("saleType", ""))
+        if blocker:
+            blocked_client_orders.append(f"{order.get('orderId', order.get('id', 'Orden'))}: {blocker}")
+    add_business_rule(
+        rules,
+        code="clients.blocked.no_sale",
+        title="Cliente bloqueado no compra",
+        module="Clientes",
+        description="Clientes bloqueados, suspendidos o con cobranza critica no pueden generar ventas nuevas.",
+        count=len(blocked_client_orders),
+        examples=blocked_client_orders,
+        href=business_rule_href("clients", "clients"),
+    )
+
+    released_cancelled_commissions = [
+        order for order in orders
+        if order.get("status") in {"cancelled", "rejected"}
+        and order.get("commissionStatus") in {"commission_approved", "commission_paid"}
+    ]
+    add_business_rule(
+        rules,
+        code="commissions.cancelled.no_release",
+        title="Orden anulada no libera comision",
+        module="Comisiones",
+        description="Una comision no puede aprobarse ni pagarse cuando la orden esta anulada o rechazada.",
+        count=len(released_cancelled_commissions),
+        examples=[order.get("orderId", order.get("id", "")) for order in released_cancelled_commissions],
+        href=business_rule_href("commissions", "commissions"),
+    )
+
+    product_sku_duplicates = duplicate_record_groups(products, "sku", "title")
+    add_business_rule(
+        rules,
+        code="products.sku.unique",
+        title="SKU unico",
+        module="Productos",
+        description="El SKU es la llave operativa entre catalogo, stock, ordenes y app movil.",
+        count=len(product_sku_duplicates),
+        examples=[f"{sku.upper()}: {', '.join(names)}" for sku, names in product_sku_duplicates.items()],
+        href=business_rule_href("products", "products"),
+    )
+
+    client_rif_duplicates = duplicate_record_groups(clients, "taxId", "businessName")
+    add_business_rule(
+        rules,
+        code="clients.rif.unique",
+        title="RIF unico",
+        module="Clientes",
+        description="El RIF no debe repetirse para evitar credito duplicado, cartera mezclada o facturacion incorrecta.",
+        count=len(client_rif_duplicates),
+        examples=[f"{rif.upper()}: {', '.join(names)}" for rif, names in client_rif_duplicates.items()],
+        href=business_rule_href("clients", "clients"),
+    )
+
+    invalid_price_products = [
+        product for product in products
+        if safe_float(product.get("publicPriceUsd"), 0) <= 0
+        or safe_float(product.get("b2bPriceUsd"), 0) < 0
+        or safe_float(product.get("originalPriceUsd"), 0) < 0
+        or safe_float(product.get("costReferenceUsd"), 0) < 0
+    ]
+    add_business_rule(
+        rules,
+        code="products.price.non_negative",
+        title="Precios no negativos",
+        module="Productos",
+        description="Los precios publico, ferretero, anterior y costo referencial deben ser validos antes de publicar.",
+        count=len(invalid_price_products),
+        examples=[product.get("sku", product.get("id", "")) for product in invalid_price_products],
+        href=business_rule_href("products", "products"),
+    )
+
+    negative_stock_products = [
+        product for product in products
+        if safe_int(product.get("stock"), 0) < 0
+        or safe_int(product.get("minimumStock"), 0) < 0
+        or safe_int(product.get("maximumStock"), 0) < 0
+    ]
+    add_business_rule(
+        rules,
+        code="stock.non_negative",
+        title="Stock no negativo",
+        module="Stock",
+        description="El stock fisico, minimo y maximo no pueden quedar bajo cero sin una autorizacion especial.",
+        count=len(negative_stock_products),
+        examples=[product.get("sku", product.get("id", "")) for product in negative_stock_products],
+        href=business_rule_href("stock", "stock"),
+    )
+
+    protected_products = [
+        product for product in products
+        if product.get("status") == "inactive" and product_has_commercial_history(store, product)
+    ]
+    add_business_rule(
+        rules,
+        code="products.history.protected_delete",
+        title="Producto con historial protegido",
+        module="Productos",
+        description="Los productos con ventas o movimientos se desactivan; no se eliminan fisicamente.",
+        count=len(protected_products),
+        examples=[product.get("sku", product.get("id", "")) for product in protected_products],
+        href=business_rule_href("products", "products"),
+        warning=True,
+    )
+
+    protected_clients = [
+        client for client in clients
+        if client.get("status") == "inactive"
+        and any(order.get("customerId") == client.get("id") for order in orders)
+    ]
+    add_business_rule(
+        rules,
+        code="clients.orders.protected_delete",
+        title="Cliente con ordenes protegido",
+        module="Clientes",
+        description="Los clientes con ordenes se desactivan; no se eliminan fisicamente.",
+        count=len(protected_clients),
+        examples=[client.get("businessName", client.get("id", "")) for client in protected_clients],
+        href=business_rule_href("clients", "clients"),
+        warning=True,
+    )
+
+    data_exists = bool(products or clients or orders)
+    write_events = [
+        event for event in audit_events
+        if event.get("action") in AUDIT_WRITE_ACTIONS or (event.get("metadata") or {}).get("changedFields")
+    ]
+    add_business_rule(
+        rules,
+        code="audit.sensitive.changes",
+        title="Cambios sensibles auditados",
+        module="Auditoria",
+        description="Creacion, edicion, eliminacion, pagos, estados, credito y permisos deben dejar evento de auditoria.",
+        count=0 if not data_exists or write_events else 1,
+        examples=[] if write_events or not data_exists else ["Hay datos operativos sin eventos de auditoria visibles."],
+        href=business_rule_href("audit", "audit"),
+        warning=True,
+    )
+
+    metrics = {
+        "total": len(rules),
+        "ok": sum(1 for rule in rules if rule["status"] == "ok"),
+        "warning": sum(1 for rule in rules if rule["status"] == "warning"),
+        "critical": sum(1 for rule in rules if rule["status"] == "critical"),
+        "incidents": sum(rule["count"] for rule in rules if rule["status"] != "ok"),
+    }
+    module_counts: dict[str, float] = {}
+    for rule in rules:
+        if rule["status"] == "ok":
+            continue
+        module_counts[rule["module"]] = module_counts.get(rule["module"], 0) + rule["count"]
+    return {
+        "rules": rules,
+        "incidents": [rule for rule in rules if rule["status"] != "ok"],
+        "metrics": metrics,
+        "status_graph": graphify_from_pairs(
+            [
+                ("OK", metrics["ok"]),
+                ("Atencion", metrics["warning"]),
+                ("Critico", metrics["critical"]),
+            ],
+            3,
+        ),
+        "module_graph": graphify_from_pairs(list(module_counts.items()), 8),
+    }
+
+
+@app.get("/business-rules")
+@require_roles(*roles_for_action("business_rules", "view"))
+def business_rules():
+    store = load_store()
+    return render_template("business_rules.html", **business_rules_page_context(store))
+
+
 def audit_event_matches_filters(event: dict, filters: dict[str, str]) -> bool:
     created_at = parse_utc_datetime(event.get("createdAt", ""))
     date_from = parse_filter_date(filters.get("date_from"))
@@ -12501,6 +12870,11 @@ def commission_status_update(order_id: str):
         for client in store.get("clients", [])
     }
     enriched = enrich_commission_order(enrich_order(order, movements), client_lookup)
+    if status in {"commission_approved", "commission_paid"} and order.get("status") in {"cancelled", "rejected"}:
+        return render_template(
+            "commissions.html",
+            **commissions_page_context(store, "No se puede aprobar ni pagar comision de una orden anulada o rechazada."),
+        ), 400
     if status == "commission_paid" and enriched.get("commissionReleaseBlockers"):
         return render_template(
             "commissions.html",

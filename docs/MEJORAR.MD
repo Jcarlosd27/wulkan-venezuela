@@ -30,7 +30,7 @@
 - [x] Fase 5 - UI/UX Admin Panel.
 - [x] Fase 6 - UI/UX App Movil.
 - [x] Fase 7 - Notificaciones.
-- [ ] Fase 8 - Reglas de negocio criticas.
+- [x] Fase 8 - Reglas de negocio criticas.
 - [ ] Fase 9 - Escalabilidad y mantenimiento.
 
 ## Objetivo general
@@ -1667,6 +1667,16 @@ Implementar reglas para evitar errores.
 * No permitir precios negativos.
 * No permitir stock negativo sin permiso.
 * Todo cambio sensible debe auditarse.
+
+## Avance Fase 8
+
+* [x] Modulo Sistema > Reglas negocio con KPIs, incidencias y graficos Graphify por estado y modulo.
+* [x] Regla central para bloquear ventas a clientes inactivos, suspendidos, bloqueados o con cobranza critica.
+* [x] Regla de credito aplicada segun tipo de venta: el rechazo de credito no bloquea contado, pero bloqueos/suspensiones impiden ventas a credito.
+* [x] Comisiones anuladas protegidas: no se puede aprobar ni pagar comision de orden cancelada o rechazada.
+* [x] Diagnostico de ordenes sin cliente, ordenes sin productos, stock inconsistente, cupo superado, duplicidad de SKU/RIF, precios invalidos y stock negativo.
+* [x] Confirmado que productos/clientes con historial se desactivan y mantienen trazabilidad en vez de eliminarse fisicamente.
+* [x] Smoke test `python backend/api/scripts/smoke_business_rules.py` para validar reglas criticas desde web y app movil.
 
 ---
 
