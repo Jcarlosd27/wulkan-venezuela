@@ -15,6 +15,7 @@ abstract class MobileRepository {
   Future<MobileCreditSnapshot> getCredit(String customerId);
   Future<List<MobileOrderSummary>> listOrders(String customerId);
   Future<List<MobileNotification>> listNotifications();
+  Future<void> markNotificationRead(String notificationId);
   Future<MobileSellerSummary> getSellerSummary();
   Future<List<MobileSellerClient>> listSellerClients();
   Future<MobileSellerClientCreated> createSellerClient(
@@ -220,6 +221,9 @@ class MockMobileRepository implements MobileRepository {
 
   @override
   Future<List<MobileNotification>> listNotifications() async => const [];
+
+  @override
+  Future<void> markNotificationRead(String notificationId) async {}
 
   @override
   Future<MobileSellerSummary> getSellerSummary() async {
@@ -436,6 +440,11 @@ class ApiMobileRepository implements MobileRepository {
   Future<List<MobileNotification>> listNotifications() async {
     final items = await _getItems("/notifications");
     return items.map(mapApiNotification).toList();
+  }
+
+  @override
+  Future<void> markNotificationRead(String notificationId) async {
+    await _postPayload("/notifications/$notificationId/read", const {});
   }
 
   @override

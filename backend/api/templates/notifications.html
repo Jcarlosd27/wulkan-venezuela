@@ -3,7 +3,7 @@
 {% set description = "Alertas internas y moviles generadas por eventos reales del negocio." %}
 
 {% macro metric_card(icon, label, value, tag, tone="") -%}
-<article class="metric-card {{ tone }}">
+<article class="metric-card notification-metric {{ tone }}">
   <div class="metric-icon"><i class="bi {{ icon }}"></i></div>
   <span>{{ label }}</span>
   <strong>{{ value }}</strong>
@@ -22,7 +22,7 @@
 {% endblock %}
 
 {% block content %}
-<section class="metric-grid mb-3">
+<section class="metric-grid notification-metrics mb-3">
   {{ metric_card("bi-bell", "Total", metrics.total, "Sistema", "metric-active") }}
   {{ metric_card("bi-envelope-exclamation", "Pendientes", metrics.unread, "Accion", "metric-warning") }}
   {{ metric_card("bi-exclamation-octagon", "Criticas", metrics.critical, "Riesgo", "metric-danger") }}
@@ -131,7 +131,16 @@
     </table>
   </div>
   {% else %}
-  <p class="text-secondary mb-0">No hay notificaciones para los filtros seleccionados.</p>
+  <div class="empty-state">
+    <span class="empty-icon"><i class="bi bi-bell-slash"></i></span>
+    <strong>Sin notificaciones pendientes</strong>
+    <span>Cuando existan ordenes, creditos, stock bajo o eventos de seguridad, apareceran aqui con trazabilidad al modulo y usuario responsable.</span>
+    {% if filters.q or filters.status or filters.priority or filters.module %}
+    <a class="btn btn-sm btn-outline-dark mt-2" href="{{ url_for('notifications') }}">
+      <i class="bi bi-x-lg"></i> Limpiar filtros
+    </a>
+    {% endif %}
+  </div>
   {% endif %}
 </section>
 {% endblock %}

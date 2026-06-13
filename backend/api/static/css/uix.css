@@ -832,6 +832,12 @@ body.is-loading .content {
   box-shadow: var(--shadow-soft);
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .metric-card {
   display: grid;
   min-height: 92px;
@@ -889,6 +895,12 @@ body.is-loading .content {
 
 .metric-card::after {
   display: none;
+}
+
+.notification-metrics .metric-card,
+.notification-metric {
+  min-height: 96px;
+  align-content: start;
 }
 
 .metric-icon {
@@ -951,6 +963,16 @@ body.is-loading .content {
 .metric-warning em {
   background: #fff3cd;
   color: #7a5b00;
+}
+
+.metric-info .metric-icon {
+  background: #cfe2ff;
+  color: #0d6efd;
+}
+
+.metric-info em {
+  background: #e7f1ff;
+  color: #0d6efd;
 }
 
 .metric-sales em,
@@ -2508,6 +2530,7 @@ body.is-loading .content {
   .template-help,
   .template-grid,
   .bulk-result-grid,
+  .metric-grid,
   .dashboard-filter-grid,
   .admin-user-notice,
   .client-detail-grid,
@@ -2525,6 +2548,10 @@ body.is-loading .content {
 @media (max-width: 700px) {
   .content {
     padding: 0 14px 22px;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
   }
 
   .hero-panel {

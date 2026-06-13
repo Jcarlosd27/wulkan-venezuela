@@ -903,40 +903,94 @@ class _NotificationsButton extends StatelessWidget {
   }
 }
 
-class NotificationsScreen extends StatelessWidget {
+class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
+
+  @override
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  late Future<List<MobileNotification>> _notificationsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _notificationsFuture = mobileRepository.listNotifications();
+  }
+
+  Future<void> _refreshNotifications() async {
+    final future = mobileRepository.listNotifications();
+    setState(() {
+      _notificationsFuture = future;
+    });
+    try {
+      await future;
+    } catch (_) {
+      // The FutureBuilder below renders the error state.
+    }
+  }
+
+  void _reloadNotifications() {
+    setState(() {
+      _notificationsFuture = mobileRepository.listNotifications();
+    });
+  }
+
+  Future<void> _markAsRead(MobileNotification notification) async {
+    if (!notification.isUnread) {
+      return;
+    }
+    await mobileRepository.markNotificationRead(notification.id);
+    await _refreshNotifications();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notificaciones'),
+        actions: [
+          IconButton(
+            tooltip: 'Actualizar',
+            onPressed: _reloadNotifications,
+            icon: const Icon(Icons.refresh_outlined),
+          ),
+        ],
       ),
       body: SafeArea(
         child: FutureBuilder<List<MobileNotification>>(
-          future: mobileRepository.listNotifications(),
+          future: _notificationsFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const _LoadingState();
+              return const _NotificationsLoadingState();
             }
             if (snapshot.hasError) {
-              return _ErrorState(
-                title: 'No pudimos cargar las notificaciones',
-                message: _friendlyMobileError(snapshot.error),
+              return Padding(
+                padding: const EdgeInsets.all(18),
+                child: _ErrorState(
+                  title: 'No pudimos cargar las notificaciones',
+                  message: _friendlyMobileError(snapshot.error),
+                  onRetry: _reloadNotifications,
+                ),
               );
             }
             final notifications = snapshot.data ?? const <MobileNotification>[];
             if (notifications.isEmpty) {
-              return const _EmptyState(
-                message: 'Sin notificaciones por ahora',
+              return _NotificationsEmptyState(
+                onRefresh: _refreshNotifications,
               );
             }
-            return ListView.separated(
-              padding: const EdgeInsets.all(18),
-              itemCount: notifications.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) => _NotificationCard(
-                notification: notifications[index],
+            return RefreshIndicator(
+              onRefresh: _refreshNotifications,
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+                itemCount: notifications.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) => _NotificationCard(
+                  notification: notifications[index],
+                  onRead: () => _markAsRead(notifications[index]),
+                ),
               ),
             );
           },
@@ -946,10 +1000,129 @@ class NotificationsScreen extends StatelessWidget {
   }
 }
 
+class _NotificationsLoadingState extends StatelessWidget {
+  const _NotificationsLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Container(
+          margin: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: _wulkanSurface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _wulkanLine),
+            boxShadow: const [
+              BoxShadow(
+                blurRadius: 24,
+                offset: Offset(0, 12),
+                color: Color(0x0F000000),
+              ),
+            ],
+          ),
+          child: const Row(
+            children: [
+              _SoftIcon(icon: Icons.sync_outlined),
+              SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  'Sincronizando alertas Wulkan',
+                  style: TextStyle(
+                    color: _wulkanBlack,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.4),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NotificationsEmptyState extends StatelessWidget {
+  const _NotificationsEmptyState({required this.onRefresh});
+
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(18, 34, 18, 24),
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
+            decoration: BoxDecoration(
+              color: _wulkanSurface,
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: _wulkanLine),
+              boxShadow: const [
+                BoxShadow(
+                  blurRadius: 24,
+                  offset: Offset(0, 12),
+                  color: Color(0x0D000000),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                const _SoftIcon(icon: Icons.notifications_none_outlined),
+                const SizedBox(height: 16),
+                Text(
+                  'Sin alertas por revisar',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: _wulkanBlack,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Las notificaciones de pedidos, credito, stock y comisiones apareceran aqui cuando exista una accion pendiente.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: _wulkanMuted,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                OutlinedButton.icon(
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh_outlined),
+                  label: const Text('Actualizar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _NotificationCard extends StatelessWidget {
-  const _NotificationCard({required this.notification});
+  const _NotificationCard({
+    required this.notification,
+    required this.onRead,
+  });
 
   final MobileNotification notification;
+  final Future<void> Function() onRead;
 
   @override
   Widget build(BuildContext context) {
@@ -1043,6 +1216,22 @@ class _NotificationCard extends StatelessWidget {
                       ),
                   ],
                 ),
+                if (notification.isUnread) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onRead,
+                      icon: const Icon(Icons.done_all_outlined, size: 18),
+                      label: const Text('Marcar como leida'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: color,
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2334,10 +2523,11 @@ class SellerCommissionsScreen extends StatefulWidget {
 }
 
 class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
-  late Future<({
-    MobileSellerSummary summary,
-    List<MobileOrderSummary> orders,
-  })> _future;
+  late Future<
+      ({
+        MobileSellerSummary summary,
+        List<MobileOrderSummary> orders,
+      })> _future;
   _CommissionFilter _filter = _CommissionFilter.all;
 
   @override
@@ -2346,10 +2536,11 @@ class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
     _future = _loadSellerCommissionBoard();
   }
 
-  Future<({
-    MobileSellerSummary summary,
-    List<MobileOrderSummary> orders,
-  })> _loadSellerCommissionBoard() async {
+  Future<
+      ({
+        MobileSellerSummary summary,
+        List<MobileOrderSummary> orders,
+      })> _loadSellerCommissionBoard() async {
     final results = await Future.wait([
       mobileRepository.getSellerSummary(),
       mobileRepository.listSellerCommissions(),
@@ -2371,10 +2562,11 @@ class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<({
-      MobileSellerSummary summary,
-      List<MobileOrderSummary> orders,
-    })>(
+    return FutureBuilder<
+        ({
+          MobileSellerSummary summary,
+          List<MobileOrderSummary> orders,
+        })>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -2734,8 +2926,8 @@ class _SellerCommissionHero extends StatelessWidget {
                   color: _wulkanOrange.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.payments_outlined,
-                    color: _wulkanOrange),
+                child:
+                    const Icon(Icons.payments_outlined, color: _wulkanOrange),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -2764,8 +2956,7 @@ class _SellerCommissionHero extends StatelessWidget {
                 ),
               ),
               _StatusPill(
-                label:
-                    '${summary.commissionRatePercent.toStringAsFixed(1)}%',
+                label: '${summary.commissionRatePercent.toStringAsFixed(1)}%',
                 color: _wulkanOrange,
               ),
             ],
