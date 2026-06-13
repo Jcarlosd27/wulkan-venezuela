@@ -195,9 +195,10 @@
             <small class="d-block text-secondary">Vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
           </td>
           <td>
-            <strong class="d-block">{{ client.ordersCount }} ordenes</strong>
-            <small class="d-block text-secondary">{{ client.lastPurchaseAt or 'Sin compra' }}</small>
-            <small class="d-block text-secondary">{{ client.lastOrderId or 'Sin orden' }}</small>
+            <span class="badge text-bg-light">{{ client.createdViaLabel or client_origin_label(client.createdVia) }}</span>
+            <strong class="d-block mt-1">{{ client.createdByName or 'Sistema Wulkan' }}</strong>
+            <small class="d-block text-secondary">Creado {{ client.createdAt or 'Sin fecha' }}</small>
+            <small class="d-block text-secondary">{{ client.ordersCount }} ordenes - {{ client.lastOrderId or 'Sin orden' }}</small>
           </td>
           <td class="text-end">
             <div class="d-flex justify-content-end gap-2">
@@ -304,8 +305,11 @@
           </div>
           <div class="col-12 col-lg-4">
             <h3 class="client-detail-title">Trazabilidad</h3>
-            <p class="mb-1"><strong>Creado:</strong> {{ client.createdAt }}</p>
-            <p class="mb-1"><strong>Actualizado:</strong> {{ client.updatedAt }}</p>
+            <p class="mb-1"><strong>Origen:</strong> {{ client.createdViaLabel or client_origin_label(client.createdVia) }}</p>
+            <p class="mb-1"><strong>Creado por:</strong> {{ client.createdByName or 'Sistema Wulkan' }}</p>
+            <p class="mb-1"><strong>Creado:</strong> {{ client.createdAt or 'Sin fecha' }}</p>
+            <p class="mb-1"><strong>Ultima actualizacion:</strong> {{ client.updatedViaLabel or client_origin_label(client.updatedVia) }} - {{ client.updatedByName or 'Sistema Wulkan' }}</p>
+            <p class="mb-1"><strong>Actualizado:</strong> {{ client.updatedAt or 'Sin fecha' }}</p>
             <p class="mb-0"><strong>Ultima compra:</strong> {{ client.lastPurchaseAt or 'Sin compra' }}</p>
           </div>
         </div>

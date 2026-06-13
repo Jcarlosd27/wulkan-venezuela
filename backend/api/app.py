@@ -145,6 +145,15 @@ SALES_CHANNEL_LABELS = {
     "admin": "Admin",
     "phone": "Telefono",
 }
+CLIENT_ORIGIN_LABELS = {
+    "admin": "Panel admin",
+    "import": "Carga masiva",
+    "mobile": "App ferretero",
+    "client_mobile": "App ferretero",
+    "seller_mobile": "App vendedor",
+    "seller_assisted": "Pedido asistido",
+    "api": "API externa",
+}
 DISPATCH_STATUS_LABELS = {
     "pending": "Pendiente",
     "preparing": "Preparando",
@@ -1788,6 +1797,10 @@ def sales_channel_label(value: str) -> str:
     return SALES_CHANNEL_LABELS.get(value, value or "Sin canal")
 
 
+def client_origin_label(value: str) -> str:
+    return CLIENT_ORIGIN_LABELS.get(value, value or "Sin origen")
+
+
 def dispatch_status_label(value: str) -> str:
     return DISPATCH_STATUS_LABELS.get(value, value or "Sin despacho")
 
@@ -2728,6 +2741,7 @@ def security_context():
         "crm_activity_type_label": crm_activity_type_label,
         "crm_status_label": crm_status_label,
         "sales_channel_label": sales_channel_label,
+        "client_origin_label": client_origin_label,
         "dispatch_status_label": dispatch_status_label,
         "due_status_label": due_status_label,
         "notification_type_label": notification_type_label,
@@ -3957,6 +3971,12 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
             "id": enriched.get("assignedSellerId", ""),
             "name": enriched.get("assignedSellerName", ""),
         },
+        "createdVia": enriched.get("createdVia", ""),
+        "createdViaLabel": enriched.get("createdViaLabel", ""),
+        "createdByName": enriched.get("createdByName", ""),
+        "updatedVia": enriched.get("updatedVia", ""),
+        "updatedViaLabel": enriched.get("updatedViaLabel", ""),
+        "updatedByName": enriched.get("updatedByName", ""),
     }
 
 
@@ -5081,6 +5101,10 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "creditUsedUsd": parse_import_float(row_value(row, "creditUsedUsd", "credito_usado_usd", "deuda_manual_usd"), float((client or {}).get("creditUsedUsd") or 0)),
             "paymentTermsDays": payment_term if credit_status == "approved" else int((client or {}).get("paymentTermsDays") or 0),
             "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
+            "updatedVia": "import",
+            "updatedById": session.get("admin_user_id", ""),
+            "updatedByName": session.get("admin_name", "Admin Wulkan"),
+            "updatedByRole": current_admin_role(),
             "updatedAt": utc_now(),
         }
         payload["whatsapp"] = payload["whatsapp"] or payload["phone"]
@@ -5101,6 +5125,10 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             payload["creditReviewedAt"] = client.get("creditReviewedAt", "")
         if client:
             payload["id"] = client["id"]
+            payload["createdVia"] = client.get("createdVia", "import")
+            payload["createdById"] = client.get("createdById", "")
+            payload["createdByName"] = client.get("createdByName") or client.get("assignedSellerName") or "Carga masiva"
+            payload["createdByRole"] = client.get("createdByRole") or ("sales" if payload["createdVia"] == "seller_mobile" else "admin")
             payload["createdAt"] = client.get("createdAt", utc_now())
             payload["passwordHash"] = generate_password_hash(password) if password else client.get("passwordHash", "")
             payload["mustChangePassword"] = True if password else bool(client.get("mustChangePassword"))
@@ -5109,6 +5137,10 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             bulk_row(result, "updated", row_number, f"{business_name} - {email}")
         else:
             payload["id"] = next_id("client", email)
+            payload["createdVia"] = "import"
+            payload["createdById"] = session.get("admin_user_id", "")
+            payload["createdByName"] = session.get("admin_name", "Carga masiva")
+            payload["createdByRole"] = current_admin_role()
             payload["createdAt"] = utc_now()
             payload["passwordHash"] = generate_password_hash(password)
             payload["mustChangePassword"] = True
@@ -6780,6 +6812,25 @@ def enrich_client(
     movements: list[dict] | None = None,
 ) -> dict:
     enriched = dict(client)
+    origin = (
+        enriched.get("createdVia")
+        or enriched.get("source")
+        or ("seller_mobile" if enriched.get("onboardingStatus") == "pending_review" and enriched.get("assignedSellerId") else "")
+        or "admin"
+    )
+    updated_origin = enriched.get("updatedVia") or origin
+    enriched["createdVia"] = origin
+    enriched["createdViaLabel"] = client_origin_label(origin)
+    enriched["updatedVia"] = updated_origin
+    enriched["updatedViaLabel"] = client_origin_label(updated_origin)
+    enriched["createdById"] = enriched.get("createdById", "")
+    enriched["createdByName"] = enriched.get("createdByName") or (
+        enriched.get("assignedSellerName") if origin == "seller_mobile" else "Admin Wulkan"
+    )
+    enriched["createdByRole"] = enriched.get("createdByRole") or ("sales" if origin == "seller_mobile" else "admin")
+    enriched["updatedById"] = enriched.get("updatedById") or enriched["createdById"]
+    enriched["updatedByName"] = enriched.get("updatedByName") or enriched["createdByName"]
+    enriched["updatedByRole"] = enriched.get("updatedByRole") or enriched["createdByRole"]
     enriched["legalName"] = enriched.get("legalName") or enriched.get("businessName", "")
     enriched["commercialName"] = enriched.get("commercialName") or enriched.get("businessName", "")
     enriched["whatsapp"] = enriched.get("whatsapp") or enriched.get("phone", "")
@@ -8040,6 +8091,9 @@ def client_payload(existing: dict | None = None) -> dict:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     now = utc_now()
+    actor_id = session.get("admin_user_id", "")
+    actor_name = session.get("admin_name", "Admin Wulkan")
+    actor_role = current_admin_role()
     active_store = load_store()
     seller_id = request.form.get("assignedSellerId", "").strip()
     current_seller_id, current_seller_name = current_seller_assignment(active_store)
@@ -8119,6 +8173,10 @@ def client_payload(existing: dict | None = None) -> dict:
         "creditUsedUsd": float(request.form.get("creditUsedUsd") or (existing or {}).get("creditUsedUsd") or 0),
         "paymentTermsDays": payment_terms_days,
         "notes": sanitize_text(request.form.get("notes", ""), max_length=1500),
+        "updatedVia": "admin",
+        "updatedById": actor_id,
+        "updatedByName": actor_name,
+        "updatedByRole": actor_role,
         "updatedAt": now,
     }
     payload["businessName"] = payload["businessName"] or payload["commercialName"] or payload["legalName"]
@@ -8136,11 +8194,19 @@ def client_payload(existing: dict | None = None) -> dict:
         payload["creditApprovedAt"] = existing.get("creditApprovedAt", "")
     if existing is None:
         payload["id"] = next_id("client", email or payload["businessName"])
+        payload["createdVia"] = "admin"
+        payload["createdById"] = actor_id
+        payload["createdByName"] = actor_name
+        payload["createdByRole"] = actor_role
         payload["createdAt"] = now
         payload["passwordHash"] = generate_password_hash(password)
         payload["mustChangePassword"] = True
     else:
         payload["id"] = existing["id"]
+        payload["createdVia"] = existing.get("createdVia", "admin")
+        payload["createdById"] = existing.get("createdById", "")
+        payload["createdByName"] = existing.get("createdByName") or existing.get("assignedSellerName") or "Admin Wulkan"
+        payload["createdByRole"] = existing.get("createdByRole") or ("sales" if payload["createdVia"] == "seller_mobile" else "admin")
         payload["createdAt"] = existing.get("createdAt", now)
         payload["passwordHash"] = (
             generate_password_hash(password) if password else existing.get("passwordHash", "")
@@ -10228,6 +10294,10 @@ def client_status_update(client_id: str):
     before = copy.deepcopy(client)
     client["status"] = target_status
     client["updatedAt"] = utc_now()
+    client["updatedVia"] = "admin"
+    client["updatedById"] = session.get("admin_user_id", "")
+    client["updatedByName"] = session.get("admin_name", "Admin Wulkan")
+    client["updatedByRole"] = current_admin_role()
     if target_status == "blocked_debt":
         client["collectionStatus"] = "blocked"
     elif target_status == "active" and client.get("collectionStatus") == "blocked":
@@ -10271,6 +10341,10 @@ def client_delete(client_id: str):
     if has_orders:
         client["status"] = "inactive"
         client["updatedAt"] = utc_now()
+        client["updatedVia"] = "admin"
+        client["updatedById"] = session.get("admin_user_id", "")
+        client["updatedByName"] = session.get("admin_name", "Admin Wulkan")
+        client["updatedByRole"] = current_admin_role()
         after = client
     else:
         store["clients"] = [item for item in store.get("clients", []) if item.get("id") != client_id]
@@ -14478,6 +14552,7 @@ def api_mobile_seller_clients():
         terms = terms or [0]
         temporary_password = str(payload.get("password") or secrets.token_urlsafe(10))
         authorized_discount = max(0.0, min(safe_float(payload.get("authorizedDiscountPercent"), 0), 100.0))
+        now = utc_now()
         client = {
             "id": next_id("client", email or business_name),
             "legalName": str(payload.get("legalName") or business_name).strip(),
@@ -14518,8 +14593,17 @@ def api_mobile_seller_clients():
             "notes": str(payload.get("notes") or "").strip(),
             "passwordHash": generate_password_hash(temporary_password),
             "mustChangePassword": True,
-            "createdAt": utc_now(),
-            "updatedAt": utc_now(),
+            "source": "seller_mobile",
+            "createdVia": "seller_mobile",
+            "createdById": user["id"],
+            "createdByName": user.get("name", "Vendedor Wulkan"),
+            "createdByRole": user.get("role", "sales"),
+            "updatedVia": "seller_mobile",
+            "updatedById": user["id"],
+            "updatedByName": user.get("name", "Vendedor Wulkan"),
+            "updatedByRole": user.get("role", "sales"),
+            "createdAt": now,
+            "updatedAt": now,
         }
         store["clients"].append(client)
         record_create_event(
