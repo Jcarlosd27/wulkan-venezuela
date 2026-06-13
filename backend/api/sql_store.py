@@ -68,6 +68,54 @@ def client_email_exists(email: str, *, exclude_id: str = "") -> bool:
         return query.first() is not None
 
 
+def client_identity_exists(
+    *,
+    email: str = "",
+    tax_id: str = "",
+    exclude_id: str = "",
+) -> dict[str, str] | None:
+    normalized_email = str(email or "").strip().lower()
+    normalized_tax_id = str(tax_id or "").strip()
+    if not normalized_email and not normalized_tax_id:
+        return None
+
+    init_database()
+    with SessionLocal() as session:
+        if normalized_email:
+            query = session.query(Client.id, Client.email, Client.tax_id, Client.status).filter(
+                Client.email == normalized_email
+            )
+            if exclude_id:
+                query = query.filter(Client.id != exclude_id)
+            row = query.first()
+            if row is not None:
+                return {
+                    "id": row.id,
+                    "field": "email",
+                    "email": row.email,
+                    "taxId": row.tax_id,
+                    "status": row.status,
+                }
+
+        if normalized_tax_id:
+            query = session.query(Client.id, Client.email, Client.tax_id, Client.status).filter(
+                Client.tax_id == normalized_tax_id
+            )
+            if exclude_id:
+                query = query.filter(Client.id != exclude_id)
+            row = query.first()
+            if row is not None:
+                return {
+                    "id": row.id,
+                    "field": "taxId",
+                    "email": row.email,
+                    "taxId": row.tax_id,
+                    "status": row.status,
+                }
+
+    return None
+
+
 def upsert(session, model, object_id: str, values: dict[str, Any]) -> None:
     dialect_name = session.get_bind().dialect.name
     table = model.__table__

@@ -14635,14 +14635,19 @@ def api_mobile_seller_clients():
 
         if use_sql_backend():
             try:
-                from sql_store import client_email_exists
+                from sql_store import client_identity_exists
 
-                if client_email_exists(email):
+                duplicate_client = client_identity_exists(
+                    email=email,
+                    tax_id=normalized_tax_id,
+                )
+                if duplicate_client:
+                    duplicate_field = "correo" if duplicate_client.get("field") == "email" else "RIF"
                     return jsonify(
                         {
                             "error": (
-                                f"Ya existe un cliente con el email {email}. "
-                                "Revisalo en Clientes o usa otro correo real."
+                                f"Ya existe un cliente con ese {duplicate_field}. "
+                                "Revisalo en Clientes o usa datos distintos antes de reintentar."
                             )
                         }
                     ), 409

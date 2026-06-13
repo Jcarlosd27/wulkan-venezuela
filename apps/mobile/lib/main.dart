@@ -2032,12 +2032,16 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
       useSafeArea: true,
       builder: (sheetContext) {
         var isSaving = false;
+        String? formError;
 
         Future<void> submit(StateSetter setSheetState) async {
           if (isSaving || formKey.currentState?.validate() != true) {
             return;
           }
-          setSheetState(() => isSaving = true);
+          setSheetState(() {
+            isSaving = true;
+            formError = null;
+          });
           try {
             final requestedCredit = double.tryParse(
                   creditController.text.trim().replaceAll(',', '.'),
@@ -2079,13 +2083,13 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
             if (!sheetContext.mounted) {
               return;
             }
-            setSheetState(() => isSaving = false);
+            final readableError = _friendlyMobileError(error);
+            setSheetState(() {
+              isSaving = false;
+              formError = readableError;
+            });
             ScaffoldMessenger.of(sheetContext).showSnackBar(
-              SnackBar(
-                content: Text(
-                  error.toString().replaceFirst('Bad state: ', ''),
-                ),
-              ),
+              SnackBar(content: Text(readableError)),
             );
           }
         }
@@ -2180,8 +2184,9 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: phoneController,
                               keyboardType: TextInputType.phone,
                               textInputAction: TextInputAction.next,
-                              inputFormatters: const [
-                                _VenezuelanPhoneInputFormatter(),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                const _VenezuelanPhoneInputFormatter(),
                               ],
                               decoration: const InputDecoration(
                                 labelText: 'Telefono',
@@ -2352,6 +2357,15 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                           border: OutlineInputBorder(),
                         ),
                       ),
+                      if (formError != null) ...[
+                        const SizedBox(height: 12),
+                        _InlineNotice(
+                          icon: Icons.error_outline,
+                          title: 'No se pudo crear el cliente',
+                          message: formError!,
+                          color: Colors.red,
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
