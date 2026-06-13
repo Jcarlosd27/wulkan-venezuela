@@ -56,6 +56,18 @@ def copy_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     return dict(payload or {})
 
 
+def client_email_exists(email: str, *, exclude_id: str = "") -> bool:
+    normalized = str(email or "").strip().lower()
+    if not normalized:
+        return False
+    init_database()
+    with SessionLocal() as session:
+        query = session.query(Client.id).filter(Client.email == normalized)
+        if exclude_id:
+            query = query.filter(Client.id != exclude_id)
+        return query.first() is not None
+
+
 def upsert(session, model, object_id: str, values: dict[str, Any]) -> None:
     dialect_name = session.get_bind().dialect.name
     table = model.__table__

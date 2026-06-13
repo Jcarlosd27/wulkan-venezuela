@@ -14372,20 +14372,34 @@ def api_mobile_seller_clients():
         business_name = str(payload.get("businessName") or payload.get("name") or "").strip()
         if not email or not business_name:
             return jsonify({"error": "Nombre comercial y email son obligatorios."}), 400
-        duplicated = any(client.get("email", "").lower() == email for client in store.get("clients", []))
+        duplicated = any(str(client.get("email", "")).strip().lower() == email for client in store.get("clients", []))
+        if not duplicated and use_sql_backend():
+            try:
+                from sql_store import client_email_exists
+
+                duplicated = client_email_exists(email)
+            except Exception:
+                app.logger.exception("No se pudo validar duplicidad SQL para cliente movil.")
         if duplicated:
             return jsonify({"error": f"Ya existe un cliente con el email {email}."}), 409
 
         seller_id = user["id"]
         seller_name = user.get("name", "") or seller_name_for(store, seller_id)
-        requested_credit = float(payload.get("creditRequestedUsd") or 0)
+        requested_credit = max(0.0, safe_float(payload.get("creditRequestedUsd"), 0))
         raw_terms = payload.get("allowedPaymentTermsDays") or [0]
-        terms = [
-            int(term)
-            for term in raw_terms
-            if str(term).strip().isdigit() and int(term) in payment_term_options(store)
-        ] or [0]
+        if isinstance(raw_terms, str):
+            raw_terms = re.split(r"[\s,;|/]+", raw_terms)
+        elif not isinstance(raw_terms, list):
+            raw_terms = [raw_terms]
+        available_terms = set(payment_term_options(store))
+        terms = []
+        for term in raw_terms:
+            value = safe_int(term, -1)
+            if value in available_terms and value not in terms:
+                terms.append(value)
+        terms = terms or [0]
         temporary_password = str(payload.get("password") or secrets.token_urlsafe(10))
+        authorized_discount = max(0.0, min(safe_float(payload.get("authorizedDiscountPercent"), 0), 100.0))
         client = {
             "id": next_id("client", email or business_name),
             "legalName": str(payload.get("legalName") or business_name).strip(),
@@ -14401,7 +14415,7 @@ def api_mobile_seller_clients():
             "clientType": "ferretero",
             "clientCategory": str(payload.get("clientCategory") or "standard"),
             "priceList": str(payload.get("priceList") or "b2b"),
-            "authorizedDiscountPercent": float(payload.get("authorizedDiscountPercent") or 0),
+            "authorizedDiscountPercent": authorized_discount,
             "status": "active",
             "onboardingStatus": "pending_review",
             "address": str(payload.get("address") or "").strip(),
@@ -14468,7 +14482,13 @@ def api_mobile_seller_clients():
             dedupe_key=f"seller-client-assigned-{client['id']}",
         )
         notify_credit_requested(store, client)
-        save_store(store)
+        try:
+            save_store(store)
+        except Exception as exc:
+            app.logger.exception("No se pudo crear cliente desde app movil.")
+            message = "No se pudo guardar el cliente. Verifica que el correo no exista y vuelve a intentar."
+            status_code = 409 if "unique" in str(exc).lower() or "duplicate" in str(exc).lower() else 500
+            return jsonify({"error": message}), status_code
         response = mobile_seller_client_payload(client, store)
         response["temporaryPassword"] = temporary_password
         return jsonify({"client": response}), 201

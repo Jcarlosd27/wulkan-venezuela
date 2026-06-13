@@ -153,6 +153,29 @@ def base_store() -> dict:
                 "defaultSaleType": "credit_line",
                 "createdAt": now,
                 "updatedAt": now,
+            },
+            {
+                "id": "client-sql-deleted",
+                "businessName": "Ferreteria SQL Eliminada",
+                "contactName": "Comprador Eliminado",
+                "email": "deleted.sql@wulkan.test",
+                "passwordHash": generate_password_hash("DeletedSql2026"),
+                "status": "deleted",
+                "clientType": "ferretero",
+                "taxId": "J-44444444-4",
+                "phone": "+580000000005",
+                "address": "Av SQL Eliminada",
+                "city": "Valencia",
+                "state": "Carabobo",
+                "creditEnabled": False,
+                "creditLimitUsd": 0,
+                "creditUsedUsd": 0,
+                "creditRequestStatus": "none",
+                "paymentTermsDays": 0,
+                "allowedPaymentTermsDays": [0],
+                "defaultSaleType": "cash",
+                "createdAt": now,
+                "updatedAt": now,
             }
         ],
         "orders": [
@@ -270,9 +293,26 @@ def main() -> int:
     init_database()
     sync_store_to_sql(base_store())
     app = wulkan_app.app
-    app.config.update(TESTING=True, SECRET_KEY="sql-integrity-smoke-secret")
+    app.config.update(TESTING=True, SECRET_KEY="sql-integrity-smoke-secret", REQUIRE_MOBILE_TOKEN=True)
 
     with app.test_client() as client:
+        mobile_login = client.post(
+            "/api/mobile/auth/login",
+            json={"email": "admin.sql@wulkan.test", "password": "AdminSql2026"},
+        )
+        assert mobile_login.status_code == 200, mobile_login.get_data(as_text=True)
+        duplicate_mobile_client = client.post(
+            "/api/mobile/seller/clients",
+            headers={"Authorization": f"Bearer {mobile_login.get_json()['accessToken']}"},
+            json={
+                "businessName": "Ferreteria Reutilizada SQL",
+                "email": "deleted.sql@wulkan.test",
+                "creditRequestedUsd": "no-es-numero",
+                "allowedPaymentTermsDays": "0,15,30",
+            },
+        )
+        assert duplicate_mobile_client.status_code == 409, duplicate_mobile_client.get_data(as_text=True)
+        assert duplicate_mobile_client.is_json
         authenticate(client)
         checks = [
             ("/clients/client-sql/delete", None),

@@ -510,7 +510,7 @@ class ApiMobileRepository implements MobileRepository {
       final body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError("Flask API ${response.statusCode}: $body");
+        throw StateError(_apiErrorMessage(response.statusCode, body));
       }
 
       final payload = jsonDecode(body);
@@ -539,7 +539,7 @@ class ApiMobileRepository implements MobileRepository {
       final responseBody = await response.transform(utf8.decoder).join();
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError("Flask API ${response.statusCode}: $responseBody");
+        throw StateError(_apiErrorMessage(response.statusCode, responseBody));
       }
 
       final payload = jsonDecode(responseBody);
@@ -568,6 +568,27 @@ class ApiMobileRepository implements MobileRepository {
       for (final item in items)
         if (item is Map<String, dynamic>) item,
     ];
+  }
+
+  String _apiErrorMessage(int statusCode, String responseBody) {
+    var message = responseBody.trim();
+    try {
+      final decoded = jsonDecode(responseBody);
+      if (decoded is Map<String, dynamic>) {
+        final error = decoded["error"] ?? decoded["message"];
+        if (error != null && error.toString().trim().isNotEmpty) {
+          message = error.toString().trim();
+        }
+      }
+    } on FormatException {
+      // The backend can return HTML for unexpected failures; keep a readable fallback.
+    }
+
+    if (message.isEmpty || message.startsWith("<!doctype") || message.startsWith("<html")) {
+      return "No se pudo completar la solicitud. Intenta nuevamente.";
+    }
+
+    return message;
   }
 
   Map<String, dynamic>? _paginationFromPayload(Map<String, dynamic> payload) {
