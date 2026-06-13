@@ -5816,6 +5816,13 @@ def build_commercial_order(
 
     seller_id = client.get("assignedSellerId", "")
     seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
+    if (
+        default_channel == "seller_mobile"
+        and not seller_id
+        and actor.get("role") in MOBILE_SALES_ROLES
+    ):
+        seller_id = actor.get("id", "")
+        seller_name = actor.get("name", "Vendedor Wulkan")
     commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
     commission_usd = round(total_usd * commission_rate / 100, 2)
     commission_rule = business_settings(store).get("defaultCommissionRule") or "sale_generated"

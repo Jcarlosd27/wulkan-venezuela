@@ -343,6 +343,56 @@ def main() -> int:
     )
     assert super_order["order"]["sellerId"] == SUPER_ADMIN_ID
 
+    state["clients"].append(
+        {
+            "id": "client-unassigned-super-flow",
+            "legalName": "Ferreteria Sin Vendedor Flow",
+            "commercialName": "Ferreteria Sin Vendedor Flow",
+            "businessName": "Ferreteria Sin Vendedor Flow",
+            "email": "sin.vendedor.flow@wulkan.test",
+            "clientType": "ferretero",
+            "clientCategory": "standard",
+            "priceList": "b2b",
+            "status": "active",
+            "address": "Av. Libre",
+            "country": "VE",
+            "state": "Carabobo",
+            "city": "Valencia",
+            "assignedSellerId": "",
+            "assignedSellerName": "",
+            "defaultSaleType": "cash",
+            "allowedPaymentTermsDays": [0],
+            "creditEnabled": False,
+            "creditLimitUsd": 0,
+            "creditUsedUsd": 0,
+            "paymentTermsDays": 0,
+            "mustChangePassword": False,
+            "createdAt": utc_now(),
+            "updatedAt": utc_now(),
+        }
+    )
+    super_unassigned_order = assert_status(
+        client.post(
+            "/api/v1/mobile/seller/orders",
+            headers={"Authorization": f"Bearer {super_token}"},
+            json={
+                "customerId": "client-unassigned-super-flow",
+                "saleType": "cash",
+                "paymentTermDays": 0,
+                "items": [
+                    {
+                        "productId": "prod-flow-motosierra",
+                        "quantity": 1,
+                    }
+                ],
+                "preview": {"totalUsd": 162, "subtotalUsd": 162},
+            },
+        ),
+        201,
+        "crear pedido super admin para cliente sin vendedor",
+    )
+    assert super_unassigned_order["order"]["sellerId"] == SUPER_ADMIN_ID
+
     mobile_quote = assert_status(
         client.post(
             "/api/v1/mobile/seller/quotes",
