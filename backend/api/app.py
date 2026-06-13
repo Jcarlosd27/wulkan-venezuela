@@ -14573,7 +14573,7 @@ def api_mobile_seller_clients():
             field_errors["businessName"] = "Ingresa la razon social o nombre comercial del cliente."
         if not email:
             field_errors["email"] = "Ingresa el correo de acceso del cliente."
-        elif not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+        elif not re.match(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", email):
             field_errors["email"] = "Ingresa un correo valido, por ejemplo cliente@empresa.com."
         if app.config.get("ENV") == "production":
             unsafe_text = f"{business_name} {email}".lower()

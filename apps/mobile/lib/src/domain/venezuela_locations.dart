@@ -196,13 +196,10 @@ String normalizeVenezuelanRif(String value) {
   }
   final prefix = compact.substring(0, 1);
   final digits = compact.substring(1).replaceAll(RegExp(r'\D+'), '');
-  if (!_rifPrefixes.contains(prefix) || !{8, 9, 10}.contains(digits.length)) {
+  if (!_rifPrefixes.contains(prefix) || digits.length != 9) {
     return '';
   }
-  if (digits.length == 8) {
-    return '$prefix-$digits';
-  }
-  return '$prefix-${digits.substring(0, digits.length - 1)}-${digits.substring(digits.length - 1)}';
+  return '$prefix-${digits.substring(0, 8)}-${digits.substring(8)}';
 }
 
 bool isValidVenezuelanRif(String value) =>

@@ -98,8 +98,6 @@ def normalize_venezuelan_rif(value: str | None) -> str:
         return ""
     prefix = compact[0]
     digits = re.sub(r"\D+", "", compact[1:])
-    if prefix not in VENEZUELA_RIF_PREFIXES or len(digits) not in {8, 9, 10}:
+    if prefix not in VENEZUELA_RIF_PREFIXES or len(digits) != 9:
         return ""
-    if len(digits) == 8:
-        return f"{prefix}-{digits}"
-    return f"{prefix}-{digits[:-1]}-{digits[-1]}"
+    return f"{prefix}-{digits[:8]}-{digits[8]}"

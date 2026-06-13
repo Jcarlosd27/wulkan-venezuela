@@ -25,6 +25,77 @@ const _wulkanLine = Color(0xFFEDE8E4);
 String _newOperationId(String prefix) =>
     '$prefix-${DateTime.now().microsecondsSinceEpoch}';
 
+class _VenezuelanPhoneInputFormatter extends TextInputFormatter {
+  const _VenezuelanPhoneInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'\D+'), '');
+    if (digits.startsWith('0058')) {
+      digits = digits.substring(4);
+    } else if (digits.startsWith('58') && digits.length > 10) {
+      digits = digits.substring(2);
+    }
+    if (digits.startsWith('0')) {
+      digits = digits.substring(1);
+    }
+    if (digits.length > 10) {
+      digits = digits.substring(0, 10);
+    }
+
+    final formatted = switch (digits.length) {
+      0 => '',
+      <= 3 => '+58 $digits',
+      _ => '+58 ${digits.substring(0, 3)}-${digits.substring(3)}',
+    };
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
+
+class _VenezuelanRifInputFormatter extends TextInputFormatter {
+  const _VenezuelanRifInputFormatter();
+
+  static const _validPrefixes = {'V', 'E', 'J', 'G', 'P'};
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final compact =
+        newValue.text.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '');
+    if (compact.isEmpty) {
+      return const TextEditingValue();
+    }
+
+    final prefix = compact.substring(0, 1);
+    if (!_validPrefixes.contains(prefix)) {
+      return oldValue;
+    }
+
+    var digits = compact.substring(1).replaceAll(RegExp(r'\D+'), '');
+    if (digits.length > 9) {
+      digits = digits.substring(0, 9);
+    }
+
+    final formatted = switch (digits.length) {
+      0 => '$prefix-',
+      <= 8 => '$prefix-$digits',
+      _ => '$prefix-${digits.substring(0, 8)}-${digits.substring(8)}',
+    };
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   mobileEnvironment.validateRuntime();
@@ -2090,8 +2161,9 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                           if (email.isEmpty) {
                             return 'Ingresa el correo';
                           }
-                          if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
-                              .hasMatch(email)) {
+                          if (!RegExp(
+                            r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$',
+                          ).hasMatch(email)) {
                             return 'Correo no valido';
                           }
                           if (email.endsWith('@wulkan.local')) {
@@ -2108,14 +2180,12 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: phoneController,
                               keyboardType: TextInputType.phone,
                               textInputAction: TextInputAction.next,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(
-                                  RegExp(r'[0-9+\-\s()]'),
-                                ),
+                              inputFormatters: const [
+                                _VenezuelanPhoneInputFormatter(),
                               ],
                               decoration: const InputDecoration(
                                 labelText: 'Telefono',
-                                hintText: '0412-1234567',
+                                hintText: '+58 412-1234567',
                                 border: OutlineInputBorder(),
                               ),
                               validator: (value) {
@@ -2136,10 +2206,8 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: taxIdController,
                               textInputAction: TextInputAction.next,
                               textCapitalization: TextCapitalization.characters,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(
-                                  RegExp(r'[A-Za-z0-9\-]'),
-                                ),
+                              inputFormatters: const [
+                                _VenezuelanRifInputFormatter(),
                               ],
                               decoration: const InputDecoration(
                                 labelText: 'RIF',
@@ -2261,6 +2329,11 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                           decimal: true,
                         ),
                         textInputAction: TextInputAction.next,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
                         decoration: const InputDecoration(
                           labelText: 'Cupo solicitado USD',
                           helperText:

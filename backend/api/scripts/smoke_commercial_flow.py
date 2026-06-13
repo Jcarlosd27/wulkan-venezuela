@@ -248,6 +248,34 @@ def main() -> int:
     assert super_mobile_login["customer"]["accountRole"] == "super_admin"
     assert super_mobile_login["customer"]["assignedSeller"]["id"] == SUPER_ADMIN_ID
 
+    invalid_client = assert_status(
+        client.post(
+            "/api/mobile/seller/clients",
+            headers={
+                "Authorization": f"Bearer {seller_token}",
+                "Idempotency-Key": "invalid-rif-flow",
+            },
+            json={
+                "businessName": "Ferreteria Rif Incompleto Flow",
+                "taxId": "J-12345678",
+                "contactName": "Comprador Rif",
+                "phone": "+58 412-1111112",
+                "email": "ferreteria.rif.incompleto@wulkan.test",
+                "address": "Av. Validacion",
+                "state": "Carabobo",
+                "city": "Valencia",
+                "deliveryZone": "Centro",
+                "creditRequestedUsd": 0,
+                "allowedPaymentTermsDays": [0],
+                "defaultSaleType": "cash",
+                "password": CLIENT_PASSWORD,
+            },
+        ),
+        400,
+        "rechazar cliente movil con RIF incompleto",
+    )
+    assert "taxId" in invalid_client.get("errors", {})
+
     new_client = assert_status(
         client.post(
             "/api/mobile/seller/clients",
