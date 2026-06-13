@@ -252,6 +252,7 @@ class MockMobileRepository implements MobileRepository {
     final requestedCredit = draft.creditRequestedUsd;
     return MobileSellerClientCreated(
       temporaryPassword: "Temporal2026",
+      message: "Cliente creado localmente.",
       client: MobileSellerClient(
         id: "client-${draft.email.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '-')}",
         businessName: draft.businessName,
@@ -466,7 +467,11 @@ class ApiMobileRepository implements MobileRepository {
   Future<MobileSellerClientCreated> createSellerClient(
     MobileSellerClientDraft draft,
   ) async {
-    final payload = await _postPayload("/seller/clients", draft.toJson());
+    final payload = await _postPayload(
+      "/seller/clients",
+      draft.toJson(),
+      idempotencyKey: draft.idempotencyKey,
+    );
     final clientData = payload["client"];
     final data =
         clientData is Map<String, dynamic> ? clientData : <String, dynamic>{};
@@ -475,6 +480,8 @@ class ApiMobileRepository implements MobileRepository {
       client: mapApiSellerClient(data),
       temporaryPassword:
           _asString(data["temporaryPassword"] ?? payload["temporaryPassword"]),
+      alreadyExists: payload["alreadyExists"] == true,
+      message: _asString(payload["message"]),
     );
   }
 
@@ -522,8 +529,9 @@ class ApiMobileRepository implements MobileRepository {
 
   Future<Map<String, dynamic>> _postPayload(
     String path,
-    Map<String, dynamic> body,
-  ) async {
+    Map<String, dynamic> body, {
+    String idempotencyKey = "",
+  }) async {
     final uri = _baseUri.replace(path: "${_baseUri.path}$path");
     final client = HttpClient();
 
@@ -533,6 +541,9 @@ class ApiMobileRepository implements MobileRepository {
       final session = await mobileAuthRepository.getCurrentSession();
       if (session.accessToken.isNotEmpty) {
         request.headers.set("Authorization", "Bearer ${session.accessToken}");
+      }
+      if (idempotencyKey.trim().isNotEmpty) {
+        request.headers.set("Idempotency-Key", idempotencyKey.trim());
       }
       request.write(jsonEncode(body));
       final response = await request.close();

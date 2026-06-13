@@ -536,6 +536,7 @@ class MobileSellerClientDraft {
     this.defaultSaleType = "cash",
     this.creditRequestedUsd = 0,
     this.allowedPaymentTermsDays = const [0],
+    this.idempotencyKey = "",
   });
 
   final String businessName;
@@ -551,6 +552,7 @@ class MobileSellerClientDraft {
   final String defaultSaleType;
   final double creditRequestedUsd;
   final List<int> allowedPaymentTermsDays;
+  final String idempotencyKey;
 
   Map<String, dynamic> toJson() {
     return {
@@ -567,6 +569,7 @@ class MobileSellerClientDraft {
       "defaultSaleType": defaultSaleType,
       "creditRequestedUsd": creditRequestedUsd,
       "allowedPaymentTermsDays": allowedPaymentTermsDays,
+      if (idempotencyKey.isNotEmpty) "idempotencyKey": idempotencyKey,
     };
   }
 }
@@ -575,8 +578,12 @@ class MobileSellerClientCreated {
   const MobileSellerClientCreated({
     required this.client,
     required this.temporaryPassword,
+    this.alreadyExists = false,
+    this.message = "",
   });
 
   final MobileSellerClient client;
   final String temporaryPassword;
+  final bool alreadyExists;
+  final String message;
 }

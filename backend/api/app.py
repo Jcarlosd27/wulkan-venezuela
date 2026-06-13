@@ -14498,8 +14498,21 @@ def api_mobile_seller_clients():
         payload = request.get_json(silent=True) or {}
         email = str(payload.get("email") or "").strip().lower()
         business_name = str(payload.get("businessName") or payload.get("name") or "").strip()
-        if not email or not business_name:
-            return jsonify({"error": "Nombre comercial y email son obligatorios."}), 400
+        raw_idempotency_key = request.headers.get("Idempotency-Key") or payload.get("idempotencyKey") or ""
+        idempotency_key = re.sub(r"[^A-Za-z0-9._:-]", "-", str(raw_idempotency_key).strip())[:120]
+        field_errors = {}
+        if not business_name:
+            field_errors["businessName"] = "Ingresa la razon social o nombre comercial del cliente."
+        if not email:
+            field_errors["email"] = "Ingresa el correo de acceso del cliente."
+        elif not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+            field_errors["email"] = "Ingresa un correo valido, por ejemplo cliente@empresa.com."
+        if app.config.get("ENV") == "production":
+            unsafe_text = f"{business_name} {email}".lower()
+            if email.endswith("@wulkan.local"):
+                field_errors["email"] = "Usa un correo real del cliente. @wulkan.local solo sirve para desarrollo."
+            elif "demo" in unsafe_text:
+                field_errors["businessName"] = "No uses datos demo en produccion. Ingresa datos reales del cliente."
         normalized_tax_id = normalize_venezuelan_rif(payload.get("taxId"))
         normalized_phone = normalize_venezuelan_phone(payload.get("phone"))
         normalized_whatsapp = normalize_venezuelan_phone(payload.get("whatsapp")) if payload.get("whatsapp") else normalized_phone
@@ -14507,7 +14520,6 @@ def api_mobile_seller_clients():
             payload.get("state"),
             payload.get("city"),
         )
-        field_errors = {}
         if not normalized_tax_id:
             field_errors["taxId"] = "Ingresa un RIF venezolano valido, por ejemplo J-12345678-9."
         if not normalized_phone:
@@ -14518,22 +14530,56 @@ def api_mobile_seller_clients():
             field_errors["location"] = location_error
         if field_errors:
             return jsonify({"error": "Revisa los datos del cliente.", "errors": field_errors}), 400
-        duplicated = any(str(client.get("email", "")).strip().lower() == email for client in store.get("clients", []))
-        if not duplicated and use_sql_backend():
+
+        def find_existing_mobile_client(source_store: dict) -> dict | None:
+            for candidate in source_store.get("clients", []):
+                candidate_email = str(candidate.get("email", "")).strip().lower()
+                candidate_tax_id = normalize_venezuelan_rif(candidate.get("taxId", "")).lower()
+                candidate_key = str(candidate.get("idempotencyKey", "")).strip()
+                if idempotency_key and candidate_key == idempotency_key:
+                    return candidate
+                if candidate_email and candidate_email == email:
+                    return candidate
+                if candidate_tax_id and candidate_tax_id == normalized_tax_id.lower():
+                    return candidate
+            return None
+
+        def user_can_access_existing_client(candidate: dict) -> bool:
+            if user.get("role") in {"super_admin", "commercial_manager"}:
+                return True
+            return candidate.get("assignedSellerId") == user["id"] or candidate.get("createdById") == user["id"]
+
+        def existing_client_response(candidate: dict, source_store: dict | None = None):
+            if not user_can_access_existing_client(candidate):
+                return jsonify({"error": "Ese cliente ya existe y esta asignado a otra cartera comercial."}), 409
+            response = mobile_seller_client_payload(candidate, source_store or store)
+            return jsonify(
+                {
+                    "client": response,
+                    "alreadyExists": True,
+                    "message": "El cliente ya existia. Se sincronizo con tu cartera sin crear duplicados.",
+                }
+            ), 200
+
+        existing_client = find_existing_mobile_client(store)
+        if existing_client:
+            return existing_client_response(existing_client, store)
+
+        if use_sql_backend():
             try:
                 from sql_store import client_email_exists
 
-                duplicated = client_email_exists(email)
+                if client_email_exists(email):
+                    return jsonify(
+                        {
+                            "error": (
+                                f"Ya existe un cliente con el email {email}. "
+                                "Revisalo en Clientes o usa otro correo real."
+                            )
+                        }
+                    ), 409
             except Exception:
                 app.logger.exception("No se pudo validar duplicidad SQL para cliente movil.")
-        if duplicated:
-            return jsonify({"error": f"Ya existe un cliente con el email {email}."}), 409
-        duplicated_tax_id = any(
-            normalize_venezuelan_rif(client.get("taxId", "")).lower() == normalized_tax_id.lower()
-            for client in store.get("clients", [])
-        )
-        if duplicated_tax_id:
-            return jsonify({"error": f"Ya existe un cliente con el RIF {normalized_tax_id}."}), 409
 
         seller_id = user["id"]
         seller_name = user.get("name", "") or seller_name_for(store, seller_id)
@@ -14593,6 +14639,7 @@ def api_mobile_seller_clients():
             "notes": str(payload.get("notes") or "").strip(),
             "passwordHash": generate_password_hash(temporary_password),
             "mustChangePassword": True,
+            "idempotencyKey": idempotency_key,
             "source": "seller_mobile",
             "createdVia": "seller_mobile",
             "createdById": user["id"],
@@ -14648,12 +14695,20 @@ def api_mobile_seller_clients():
             save_store(store)
         except Exception as exc:
             app.logger.exception("No se pudo crear cliente desde app movil.")
-            message = "No se pudo guardar el cliente. Verifica que el correo no exista y vuelve a intentar."
-            status_code = 409 if "unique" in str(exc).lower() or "duplicate" in str(exc).lower() else 500
-            return jsonify({"error": message}), status_code
+            error_text = str(exc).lower()
+            if any(token in error_text for token in ("unique", "duplicate", "integrity")):
+                try:
+                    fresh_store = load_store()
+                    existing_client = find_existing_mobile_client(fresh_store)
+                    if existing_client:
+                        return existing_client_response(existing_client, fresh_store)
+                except Exception:
+                    app.logger.exception("No se pudo resolver duplicidad luego de fallo SQL.")
+                return jsonify({"error": "Ya existe un cliente con ese correo o RIF. Revisa Clientes antes de reintentar."}), 409
+            return jsonify({"error": "No se pudo guardar el cliente. Intenta nuevamente o revisa los datos ingresados."}), 500
         response = mobile_seller_client_payload(client, store)
         response["temporaryPassword"] = temporary_password
-        return jsonify({"client": response}), 201
+        return jsonify({"client": response, "alreadyExists": False, "message": "Cliente creado correctamente."}), 201
 
     clients = [mobile_seller_client_payload(client, store) for client in seller_scope_clients(store, user)]
     clients, filters = filter_mobile_clients(clients)

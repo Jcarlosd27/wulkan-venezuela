@@ -22,6 +22,9 @@ const _wulkanCanvas = Color(0xFFFAF8F6);
 const _wulkanSurface = Color(0xFFFFFFFF);
 const _wulkanLine = Color(0xFFEDE8E4);
 
+String _newOperationId(String prefix) =>
+    '$prefix-${DateTime.now().microsecondsSinceEpoch}';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   mobileEnvironment.validateRuntime();
@@ -1939,6 +1942,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
     final notesController = TextEditingController();
     String? selectedState;
     String? selectedCity;
+    final idempotencyKey = _newOperationId('seller-client');
 
     Future<void> disposeControllers() async {
       businessNameController.dispose();
@@ -1974,6 +1978,10 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
             final normalizedTaxId = normalizeVenezuelanRif(
               taxIdController.text.trim(),
             );
+            setSheetState(() {
+              phoneController.text = normalizedPhone;
+              taxIdController.text = normalizedTaxId;
+            });
             final result = await mobileRepository.createSellerClient(
               MobileSellerClientDraft(
                 businessName: businessNameController.text.trim(),
@@ -1990,6 +1998,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                 allowedPaymentTermsDays: requestedCredit > 0
                     ? const [0, 10, 15, 20, 30, 40]
                     : const [0],
+                idempotencyKey: idempotencyKey,
               ),
             );
             if (sheetContext.mounted) {
@@ -2077,12 +2086,16 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                           border: OutlineInputBorder(),
                         ),
                         validator: (value) {
-                          final email = value?.trim() ?? '';
+                          final email = (value?.trim() ?? '').toLowerCase();
                           if (email.isEmpty) {
                             return 'Ingresa el correo';
                           }
-                          if (!email.contains('@')) {
+                          if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+                              .hasMatch(email)) {
                             return 'Correo no valido';
+                          }
+                          if (email.endsWith('@wulkan.local')) {
+                            return 'Usa correo real del cliente';
                           }
                           return null;
                         },
@@ -2301,21 +2314,28 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
     }
 
     _reloadClients();
+    final showTemporaryPassword =
+        !created.alreadyExists && created.temporaryPassword.trim().isNotEmpty;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Cliente creado'),
+        title: Text(
+            created.alreadyExists ? 'Cliente sincronizado' : 'Cliente creado'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(created.client.businessName),
             const SizedBox(height: 10),
-            const Text(
-              'Clave temporal',
-              style: TextStyle(fontWeight: FontWeight.w900),
-            ),
-            SelectableText(created.temporaryPassword),
+            if (created.message.trim().isNotEmpty) Text(created.message),
+            if (showTemporaryPassword) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Clave temporal',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              SelectableText(created.temporaryPassword),
+            ],
           ],
         ),
         actions: [
