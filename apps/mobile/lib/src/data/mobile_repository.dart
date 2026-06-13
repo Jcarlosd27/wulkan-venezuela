@@ -579,12 +579,24 @@ class ApiMobileRepository implements MobileRepository {
         if (error != null && error.toString().trim().isNotEmpty) {
           message = error.toString().trim();
         }
+        final errors = decoded["errors"];
+        if (errors is Map) {
+          final details = errors.values
+              .map((value) => value.toString().trim())
+              .where((value) => value.isNotEmpty)
+              .join(" ");
+          if (details.isNotEmpty) {
+            message = "$message $details";
+          }
+        }
       }
     } on FormatException {
       // The backend can return HTML for unexpected failures; keep a readable fallback.
     }
 
-    if (message.isEmpty || message.startsWith("<!doctype") || message.startsWith("<html")) {
+    if (message.isEmpty ||
+        message.startsWith("<!doctype") ||
+        message.startsWith("<html")) {
       return "No se pudo completar la solicitud. Intenta nuevamente.";
     }
 

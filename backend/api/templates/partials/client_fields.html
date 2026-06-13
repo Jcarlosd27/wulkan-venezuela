@@ -6,6 +6,8 @@
 {% set selected_price_list = client.priceList if client is defined else 'b2b' %}
 {% set selected_collection = client.collectionStatus if client is defined else 'without_debt' %}
 {% set selected_risk = client.creditRiskLevel if client is defined else 'low' %}
+{% set selected_state = client.state if client is defined else '' %}
+{% set selected_city = client.city if client is defined else '' %}
 
 <div class="client-form-stack">
   <section class="form-section">
@@ -28,7 +30,7 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">RIF / documento fiscal</label>
-        <input class="form-control" name="taxId" value="{{ client.taxId if client is defined else '' }}" placeholder="J-00000000-0">
+        <input class="form-control" name="taxId" required value="{{ client.taxId if client is defined else '' }}" placeholder="J-00000000-0" autocomplete="off" maxlength="14" pattern="[VvEeJjGgPp][- ]?[0-9]{7,9}[- ]?[0-9]?">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Email / usuario movil</label>
@@ -66,11 +68,11 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Telefono</label>
-        <input class="form-control" name="phone" value="{{ client.phone if client is defined else '' }}">
+        <input class="form-control" name="phone" required value="{{ client.phone if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">WhatsApp</label>
-        <input class="form-control" name="whatsapp" value="{{ client.whatsapp if client is defined else '' }}">
+        <input class="form-control" name="whatsapp" value="{{ client.whatsapp if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Pais</label>
@@ -90,11 +92,18 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Estado / region</label>
-        <input class="form-control" name="state" value="{{ client.state if client is defined else '' }}" placeholder="Ej: Carabobo">
+        <select class="form-select" name="state" required data-venezuela-state>
+          <option value="">Selecciona estado</option>
+          {% for state in venezuela_locations.keys() %}
+          <option value="{{ state }}" {% if selected_state == state %}selected{% endif %}>{{ state }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Ciudad</label>
-        <input class="form-control" name="city" value="{{ client.city if client is defined else '' }}" placeholder="Ej: Valencia">
+        <select class="form-select" name="city" required data-venezuela-city data-selected-city="{{ selected_city }}">
+          <option value="">Selecciona ciudad</option>
+        </select>
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Zona comercial</label>

@@ -376,9 +376,50 @@
 {% set bulk_action = url_for("clients_import") %}
 {% set bulk_title = "Importar clientes ferreteros" %}
 {% set bulk_help = "Crea o actualiza clientes B2B, asignacion de vendedor, direcciones, contactos, condiciones comerciales y solicitudes de credito." %}
-{% set bulk_columns = ["cliente", "email", "rif", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "estado_credito", "credito_solicitado_usd", "cupo_usd", "dias_credito", "score_credito", "observacion_gerencia"] %}
+{% set bulk_columns = ["cliente", "email", "rif", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "estado_ubicacion", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "estado_credito", "credito_solicitado_usd", "cupo_usd", "dias_credito", "score_credito", "observacion_gerencia"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
+<script>
+  (() => {
+    const locations = {{ venezuela_locations|tojson }};
+    const stateSelects = document.querySelectorAll("[data-venezuela-state]");
+
+    const buildOption = (value, selectedValue) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      option.selected = value === selectedValue;
+      return option;
+    };
+
+    stateSelects.forEach((stateSelect) => {
+      const form = stateSelect.closest("form") || document;
+      const citySelect = form.querySelector("[data-venezuela-city]");
+      if (!citySelect) {
+        return;
+      }
+
+      const renderCities = () => {
+        const selectedCity = citySelect.dataset.selectedCity || citySelect.value;
+        const cities = locations[stateSelect.value] || [];
+        citySelect.innerHTML = "";
+        citySelect.appendChild(buildOption("Selecciona ciudad", ""));
+        citySelect.options[0].value = "";
+        cities.forEach((city) => citySelect.appendChild(buildOption(city, selectedCity)));
+        if (!cities.includes(selectedCity)) {
+          citySelect.value = "";
+        }
+        citySelect.disabled = !stateSelect.value;
+      };
+
+      stateSelect.addEventListener("change", () => {
+        citySelect.dataset.selectedCity = "";
+        renderCities();
+      });
+      renderCities();
+    });
+  })();
+</script>
 {% endblock %}

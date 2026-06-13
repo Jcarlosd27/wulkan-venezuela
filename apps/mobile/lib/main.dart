@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'src/auth/mobile_auth.dart';
@@ -10,6 +11,7 @@ import 'src/cart/mobile_cart_service.dart';
 import 'src/config/mobile_environment.dart';
 import 'src/data/mobile_repository.dart';
 import 'src/domain/mobile_models.dart';
+import 'src/domain/venezuela_locations.dart';
 import 'src/orders/mobile_order_service.dart';
 
 const _wulkanOrange = Color(0xFFFF4B00);
@@ -1932,11 +1934,11 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
     final phoneController = TextEditingController();
     final taxIdController = TextEditingController();
     final contactNameController = TextEditingController();
-    final stateController = TextEditingController();
-    final cityController = TextEditingController();
     final addressController = TextEditingController();
     final creditController = TextEditingController();
     final notesController = TextEditingController();
+    String? selectedState;
+    String? selectedCity;
 
     Future<void> disposeControllers() async {
       businessNameController.dispose();
@@ -1944,8 +1946,6 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
       phoneController.dispose();
       taxIdController.dispose();
       contactNameController.dispose();
-      stateController.dispose();
-      cityController.dispose();
       addressController.dispose();
       creditController.dispose();
       notesController.dispose();
@@ -1968,15 +1968,21 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                   creditController.text.trim().replaceAll(',', '.'),
                 ) ??
                 0;
+            final normalizedPhone = normalizeVenezuelanPhone(
+              phoneController.text.trim(),
+            );
+            final normalizedTaxId = normalizeVenezuelanRif(
+              taxIdController.text.trim(),
+            );
             final result = await mobileRepository.createSellerClient(
               MobileSellerClientDraft(
                 businessName: businessNameController.text.trim(),
                 email: emailController.text.trim().toLowerCase(),
-                phone: phoneController.text.trim(),
-                taxId: taxIdController.text.trim(),
+                phone: normalizedPhone,
+                taxId: normalizedTaxId,
                 contactName: contactNameController.text.trim(),
-                state: stateController.text.trim(),
-                city: cityController.text.trim(),
+                state: selectedState ?? '',
+                city: selectedCity ?? '',
                 address: addressController.text.trim(),
                 notes: notesController.text.trim(),
                 creditRequestedUsd: requestedCredit,
@@ -2006,6 +2012,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            final cityOptions = venezuelanCitiesFor(selectedState);
             return Padding(
               padding: EdgeInsets.only(
                 left: 18,
@@ -2088,10 +2095,26 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: phoneController,
                               keyboardType: TextInputType.phone,
                               textInputAction: TextInputAction.next,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'[0-9+\-\s()]'),
+                                ),
+                              ],
                               decoration: const InputDecoration(
                                 labelText: 'Telefono',
+                                hintText: '0412-1234567',
                                 border: OutlineInputBorder(),
                               ),
+                              validator: (value) {
+                                final phone = value?.trim() ?? '';
+                                if (phone.isEmpty) {
+                                  return 'Ingresa telefono';
+                                }
+                                if (!isValidVenezuelanPhone(phone)) {
+                                  return 'Formato VE invalido';
+                                }
+                                return null;
+                              },
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -2099,10 +2122,27 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                             child: TextFormField(
                               controller: taxIdController,
                               textInputAction: TextInputAction.next,
+                              textCapitalization: TextCapitalization.characters,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'[A-Za-z0-9\-]'),
+                                ),
+                              ],
                               decoration: const InputDecoration(
                                 labelText: 'RIF',
+                                hintText: 'J-12345678-9',
                                 border: OutlineInputBorder(),
                               ),
+                              validator: (value) {
+                                final rif = value?.trim() ?? '';
+                                if (rif.isEmpty) {
+                                  return 'Ingresa RIF';
+                                }
+                                if (!isValidVenezuelanRif(rif)) {
+                                  return 'RIF invalido';
+                                }
+                                return null;
+                              },
                             ),
                           ),
                         ],
@@ -2121,24 +2161,71 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: TextFormField(
-                              controller: stateController,
-                              textInputAction: TextInputAction.next,
+                            child: DropdownButtonFormField<String>(
+                              key: ValueKey(
+                                  'client-state-${selectedState ?? ''}'),
+                              initialValue: selectedState,
+                              isExpanded: true,
                               decoration: const InputDecoration(
                                 labelText: 'Estado',
                                 border: OutlineInputBorder(),
                               ),
+                              items: venezuelaStates
+                                  .map(
+                                    (state) => DropdownMenuItem<String>(
+                                      value: state,
+                                      child: Text(
+                                        state,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(growable: false),
+                              onChanged: (value) {
+                                setSheetState(() {
+                                  selectedState = value;
+                                  selectedCity = null;
+                                });
+                              },
+                              validator: (value) =>
+                                  value == null || value.trim().isEmpty
+                                      ? 'Selecciona estado'
+                                      : null,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: TextFormField(
-                              controller: cityController,
-                              textInputAction: TextInputAction.next,
+                            child: DropdownButtonFormField<String>(
+                              key: ValueKey(
+                                  'client-city-${selectedState ?? ''}'),
+                              initialValue: selectedCity,
+                              isExpanded: true,
                               decoration: const InputDecoration(
                                 labelText: 'Ciudad',
                                 border: OutlineInputBorder(),
                               ),
+                              items: cityOptions
+                                  .map(
+                                    (city) => DropdownMenuItem<String>(
+                                      value: city,
+                                      child: Text(
+                                        city,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(growable: false),
+                              onChanged: cityOptions.isEmpty
+                                  ? null
+                                  : (value) {
+                                      setSheetState(() {
+                                        selectedCity = value;
+                                      });
+                                    },
+                              validator: (value) =>
+                                  value == null || value.trim().isEmpty
+                                      ? 'Selecciona ciudad'
+                                      : null,
                             ),
                           ),
                         ],

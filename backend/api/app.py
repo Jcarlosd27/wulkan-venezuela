@@ -32,6 +32,12 @@ from store import (
     use_sql_backend,
 )
 from uix import badge_class, money_usd, usd_to_ves
+from venezuela_locations import (
+    VENEZUELA_STATE_CITIES,
+    normalize_venezuelan_location,
+    normalize_venezuelan_phone,
+    normalize_venezuelan_rif,
+)
 
 
 app = Flask(__name__)
@@ -1342,17 +1348,17 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "razon_social", "required": False, "example": "Ferreteria Principal C.A.", "help": "Nombre legal para documentos fiscales."},
                     {"name": "nombre_comercial", "required": False, "example": "Ferreteria Principal", "help": "Nombre visible en app y cartera."},
                     {"name": "email", "required": True, "example": "compras@ferreteriaprincipal.com", "help": "Correo unico para acceso movil."},
-                    {"name": "rif", "required": False, "example": "J-12345678-9", "help": "Identificacion fiscal."},
+                    {"name": "rif", "required": True, "example": "J-12345678-9", "help": "RIF venezolano normalizado para facturacion y credito."},
                     {"name": "contacto", "required": False, "example": "Maria Gonzalez", "help": "Responsable de compras."},
                     {"name": "contacto_administrativo", "required": False, "example": "Luis Perez", "help": "Responsable de pagos o administracion."},
                     {"name": "contacto_recepcion", "required": False, "example": "Ana Torres", "help": "Responsable de recibir mercancia."},
-                    {"name": "telefono", "required": False, "example": "+584140000000", "help": "Telefono o WhatsApp."},
+                    {"name": "telefono", "required": True, "example": "0414-0000000", "help": "Telefono venezolano. Se normaliza a +58."},
                     {"name": "whatsapp", "required": False, "example": "+584120000000", "help": "WhatsApp principal si es distinto al telefono."},
                     {"name": "direccion", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal o despacho."},
                     {"name": "direccion_fiscal", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal."},
                     {"name": "direccion_despacho", "required": False, "example": "Galpon 4, Zona Industrial", "help": "Direccion de entrega."},
-                    {"name": "ciudad", "required": False, "example": "Valencia", "help": "Ciudad del cliente."},
-                    {"name": "estado_ubicacion", "required": False, "example": "Carabobo", "help": "Estado o region."},
+                    {"name": "estado_ubicacion", "required": True, "example": "Carabobo", "help": "Estado venezolano. Debe coincidir con la ciudad."},
+                    {"name": "ciudad", "required": True, "example": "Valencia", "help": "Ciudad del cliente asociada al estado."},
                     {"name": "pais", "required": False, "example": "VE", "help": "Pais del cliente."},
                     {"name": "zona", "required": False, "example": "Centro", "help": "Zona de despacho o cartera."},
                     {"name": "vendedor_email", "required": False, "example": "carlos@wulkanvenezuela.com", "help": "Asigna cartera por email del vendedor."},
@@ -4975,22 +4981,41 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
         business_name = row_value(row, "businessName", "razon_social", "nombre_comercial", "cliente")
-        tax_id = row_value(row, "taxId", "rif", "rut")
+        raw_tax_id = row_value(row, "taxId", "rif", "rut")
+        tax_id = normalize_venezuelan_rif(raw_tax_id)
+        raw_phone = row_value(row, "phone", "telefono", "whatsapp")
+        raw_whatsapp = row_value(row, "whatsapp", "telefono_whatsapp")
+        phone = normalize_venezuelan_phone(raw_phone)
+        whatsapp = normalize_venezuelan_phone(raw_whatsapp) if raw_whatsapp else phone
+        raw_state = row_value(row, "state", "estado_ubicacion", "provincia")
+        raw_city = row_value(row, "city", "ciudad")
+        normalized_state, normalized_city, location_error = normalize_venezuelan_location(raw_state, raw_city)
         if not email or not business_name:
             bulk_error(result, row_number, "cliente requiere nombre comercial y email.")
+            continue
+        if not tax_id:
+            bulk_error(result, row_number, f"{business_name}: RIF venezolano obligatorio. Ejemplo J-12345678-9.")
+            continue
+        if not phone:
+            bulk_error(result, row_number, f"{business_name}: telefono venezolano obligatorio. Ejemplo 0412-1234567.")
+            continue
+        if raw_whatsapp and not whatsapp:
+            bulk_error(result, row_number, f"{business_name}: WhatsApp no tiene formato venezolano valido.")
+            continue
+        if location_error:
+            bulk_error(result, row_number, f"{business_name}: {location_error}")
             continue
         duplicate_message = duplicate_in_upload(seen_emails, email, row_number)
         if duplicate_message:
             bulk_error(result, row_number, f"{email}: {duplicate_message}")
             continue
-        if tax_id:
-            duplicate_tax = duplicate_in_upload(seen_tax_ids, tax_id.lower(), row_number)
-            if duplicate_tax:
-                bulk_error(result, row_number, f"{tax_id}: {duplicate_tax}")
-                continue
+        duplicate_tax = duplicate_in_upload(seen_tax_ids, tax_id.lower(), row_number)
+        if duplicate_tax:
+            bulk_error(result, row_number, f"{tax_id}: {duplicate_tax}")
+            continue
         client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == email), None)
-        if not client and tax_id:
-            client = next((item for item in store.get("clients", []) if item.get("taxId", "").lower() == tax_id.lower()), None)
+        if not client:
+            client = next((item for item in store.get("clients", []) if normalize_venezuelan_rif(item.get("taxId", "")).lower() == tax_id.lower()), None)
         password = row_value(row, "password", "contrasena", "clave")
         if password and password_errors(password):
             bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
@@ -5024,8 +5049,8 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "contactName": row_value(row, "contactName", "contacto", "responsable", default=(client or {}).get("contactName", "")),
             "administrativeContact": row_value(row, "administrativeContact", "contacto_administrativo", "admin_contacto", default=(client or {}).get("administrativeContact", "")),
             "receivingContact": row_value(row, "receivingContact", "contacto_recepcion", "recepcion_contacto", default=(client or {}).get("receivingContact", "")),
-            "phone": row_value(row, "phone", "telefono", "whatsapp", default=(client or {}).get("phone", "")),
-            "whatsapp": row_value(row, "whatsapp", "telefono_whatsapp", default=(client or {}).get("whatsapp", "")),
+            "phone": phone,
+            "whatsapp": whatsapp,
             "email": email,
             "clientType": row_value(row, "clientType", "tipo_cliente", default=(client or {}).get("clientType", "ferretero")) or "ferretero",
             "clientCategory": row_value(row, "clientCategory", "categoria_comercial", default=(client or {}).get("clientCategory", "standard")) or "standard",
@@ -5036,8 +5061,8 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "fiscalAddress": row_value(row, "fiscalAddress", "direccion_fiscal", default=(client or {}).get("fiscalAddress", "")),
             "shippingAddress": row_value(row, "shippingAddress", "direccion_despacho", "direccion_entrega", default=(client or {}).get("shippingAddress", "")),
             "country": row_value(row, "country", "pais", default=(client or {}).get("country", "VE")) or "VE",
-            "state": row_value(row, "state", "estado_ubicacion", "provincia", default=(client or {}).get("state", "")),
-            "city": row_value(row, "city", "ciudad", default=(client or {}).get("city", "")),
+            "state": normalized_state,
+            "city": normalized_city,
             "deliveryZone": row_value(row, "deliveryZone", "zona", default=(client or {}).get("deliveryZone", "")),
             "assignedSellerId": (seller or {}).get("id", (client or {}).get("assignedSellerId", "")),
             "assignedSellerName": (seller or {}).get("name", (client or {}).get("assignedSellerName", "")),
@@ -5062,12 +5087,8 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         payload["fiscalAddress"] = payload["fiscalAddress"] or payload["address"]
         payload["shippingAddress"] = payload["shippingAddress"] or payload["address"]
         payload["address"] = payload["address"] or payload["shippingAddress"] or payload["fiscalAddress"]
-        if not payload.get("taxId"):
-            bulk_warning(result, row_number, f"{business_name} no tiene RIF/taxId.")
         if not payload.get("contactName"):
             bulk_warning(result, row_number, f"{business_name} no tiene contacto principal.")
-        if not payload.get("phone"):
-            bulk_warning(result, row_number, f"{business_name} no tiene telefono/WhatsApp.")
         if credit_status == "approved" and can_approve:
             payload["creditApprovedBy"] = session.get("admin_name", "Admin")
             payload["creditApprovedAt"] = utc_now()
@@ -7878,11 +7899,24 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
         or request.form.get("commercialName", "").strip()
         or request.form.get("legalName", "").strip()
     )
-    tax_id = request.form.get("taxId", "").strip().lower()
+    raw_tax_id = request.form.get("taxId", "").strip()
+    raw_phone = request.form.get("phone", "").strip()
+    normalized_tax_id = normalize_venezuelan_rif(raw_tax_id)
+    normalized_phone = normalize_venezuelan_phone(raw_phone)
+    normalized_state, _normalized_city, location_error = normalize_venezuelan_location(
+        request.form.get("state", ""),
+        request.form.get("city", ""),
+    )
     if not business_name:
         return "La razon social o nombre comercial del cliente es obligatoria."
     if not email:
         return "El email del cliente ferretero es obligatorio."
+    if not normalized_tax_id:
+        return "El RIF debe tener formato venezolano, por ejemplo J-12345678-9."
+    if not normalized_phone:
+        return "El telefono debe ser venezolano y puede ingresarse como 0412-1234567 o +58 412-1234567."
+    if location_error:
+        return location_error
     duplicated = any(
         client.get("email", "").lower() == email
         and (existing is None or client.get("id") != existing.get("id"))
@@ -7890,13 +7924,13 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
     )
     if duplicated:
         return f"Ya existe un cliente con el email {email}."
-    duplicated_tax_id = bool(tax_id) and any(
-        client.get("taxId", "").strip().lower() == tax_id
+    duplicated_tax_id = any(
+        normalize_venezuelan_rif(client.get("taxId", "")).lower() == normalized_tax_id.lower()
         and (existing is None or client.get("id") != existing.get("id"))
         for client in store["clients"]
     )
     if duplicated_tax_id:
-        return f"Ya existe un cliente con el RIF {request.form.get('taxId', '').strip()}."
+        return f"Ya existe un cliente con el RIF {normalized_tax_id}."
     return credential_form_error(password, existing)
 
 
@@ -8012,6 +8046,13 @@ def client_payload(existing: dict | None = None) -> dict:
     if current_seller_id:
         seller_id = current_seller_id
     seller_name = seller_name_for(active_store, seller_id) if seller_id else current_seller_name
+    normalized_tax_id = normalize_venezuelan_rif(request.form.get("taxId", ""))
+    normalized_phone = normalize_venezuelan_phone(request.form.get("phone", ""))
+    normalized_whatsapp = normalize_venezuelan_phone(request.form.get("whatsapp", "")) or normalized_phone
+    normalized_state, normalized_city, _location_error = normalize_venezuelan_location(
+        request.form.get("state", ""),
+        request.form.get("city", ""),
+    )
 
     approval_allowed = role_allowed(CREDIT_APPROVAL_ROLES)
     requested_credit_status = request.form.get("creditRequestStatus", "none")
@@ -8042,12 +8083,12 @@ def client_payload(existing: dict | None = None) -> dict:
         "legalName": sanitize_text(request.form.get("legalName", ""), max_length=180, allow_newlines=False),
         "commercialName": sanitize_text(request.form.get("commercialName", ""), max_length=180, allow_newlines=False),
         "businessName": sanitize_text(request.form.get("businessName", ""), max_length=180, allow_newlines=False),
-        "taxId": sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False),
+        "taxId": normalized_tax_id,
         "contactName": sanitize_text(request.form.get("contactName", ""), max_length=160, allow_newlines=False),
         "administrativeContact": sanitize_text(request.form.get("administrativeContact", ""), max_length=160, allow_newlines=False),
         "receivingContact": sanitize_text(request.form.get("receivingContact", ""), max_length=160, allow_newlines=False),
-        "phone": sanitize_text(request.form.get("phone", ""), max_length=60, allow_newlines=False),
-        "whatsapp": sanitize_text(request.form.get("whatsapp", ""), max_length=60, allow_newlines=False),
+        "phone": normalized_phone,
+        "whatsapp": normalized_whatsapp,
         "email": email,
         "clientType": request.form.get("clientType", "ferretero"),
         "clientCategory": request.form.get("clientCategory", "standard"),
@@ -8058,8 +8099,8 @@ def client_payload(existing: dict | None = None) -> dict:
         "fiscalAddress": sanitize_text(request.form.get("fiscalAddress", ""), max_length=400),
         "shippingAddress": sanitize_text(request.form.get("shippingAddress", ""), max_length=400),
         "country": sanitize_text(request.form.get("country", "VE"), max_length=4, allow_newlines=False) or "VE",
-        "state": sanitize_text(request.form.get("state", ""), max_length=120, allow_newlines=False),
-        "city": sanitize_text(request.form.get("city", ""), max_length=120, allow_newlines=False),
+        "state": normalized_state,
+        "city": normalized_city,
         "deliveryZone": sanitize_text(request.form.get("deliveryZone", ""), max_length=120, allow_newlines=False),
         "assignedSellerId": seller_id,
         "assignedSellerName": seller_name,
@@ -8176,6 +8217,7 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         "collection_status_options": COLLECTION_STATUS_OPTIONS,
         "credit_status_options": CREDIT_REQUEST_STATUS_OPTIONS,
         "credit_risk_options": CREDIT_RISK_OPTIONS,
+        "venezuela_locations": VENEZUELA_STATE_CITIES,
         "can_approve_credit": can_module_action("credit", "approve"),
         "can_edit_clients": can_module_action("clients", "edit"),
         "can_create_clients": can_module_action("clients", "create"),
@@ -14357,6 +14399,18 @@ def api_mobile_seller_summary():
         }
     )
 
+@app.get("/api/v1/mobile/locations/venezuela")
+@app.get("/api/mobile/locations/venezuela")
+def api_mobile_locations_venezuela():
+    return jsonify(
+        {
+            "items": [
+                {"state": state, "cities": cities}
+                for state, cities in VENEZUELA_STATE_CITIES.items()
+            ]
+        }
+    )
+
 
 @app.route("/api/v1/mobile/seller/clients", methods=["GET", "POST"])
 @app.route("/api/mobile/seller/clients", methods=["GET", "POST"])
@@ -14372,6 +14426,24 @@ def api_mobile_seller_clients():
         business_name = str(payload.get("businessName") or payload.get("name") or "").strip()
         if not email or not business_name:
             return jsonify({"error": "Nombre comercial y email son obligatorios."}), 400
+        normalized_tax_id = normalize_venezuelan_rif(payload.get("taxId"))
+        normalized_phone = normalize_venezuelan_phone(payload.get("phone"))
+        normalized_whatsapp = normalize_venezuelan_phone(payload.get("whatsapp")) if payload.get("whatsapp") else normalized_phone
+        normalized_state, normalized_city, location_error = normalize_venezuelan_location(
+            payload.get("state"),
+            payload.get("city"),
+        )
+        field_errors = {}
+        if not normalized_tax_id:
+            field_errors["taxId"] = "Ingresa un RIF venezolano valido, por ejemplo J-12345678-9."
+        if not normalized_phone:
+            field_errors["phone"] = "Ingresa un telefono venezolano valido, por ejemplo 0412-1234567."
+        if payload.get("whatsapp") and not normalized_whatsapp:
+            field_errors["whatsapp"] = "Ingresa un WhatsApp venezolano valido."
+        if location_error:
+            field_errors["location"] = location_error
+        if field_errors:
+            return jsonify({"error": "Revisa los datos del cliente.", "errors": field_errors}), 400
         duplicated = any(str(client.get("email", "")).strip().lower() == email for client in store.get("clients", []))
         if not duplicated and use_sql_backend():
             try:
@@ -14382,6 +14454,12 @@ def api_mobile_seller_clients():
                 app.logger.exception("No se pudo validar duplicidad SQL para cliente movil.")
         if duplicated:
             return jsonify({"error": f"Ya existe un cliente con el email {email}."}), 409
+        duplicated_tax_id = any(
+            normalize_venezuelan_rif(client.get("taxId", "")).lower() == normalized_tax_id.lower()
+            for client in store.get("clients", [])
+        )
+        if duplicated_tax_id:
+            return jsonify({"error": f"Ya existe un cliente con el RIF {normalized_tax_id}."}), 409
 
         seller_id = user["id"]
         seller_name = user.get("name", "") or seller_name_for(store, seller_id)
@@ -14405,12 +14483,12 @@ def api_mobile_seller_clients():
             "legalName": str(payload.get("legalName") or business_name).strip(),
             "commercialName": str(payload.get("commercialName") or business_name).strip(),
             "businessName": business_name,
-            "taxId": str(payload.get("taxId") or "").strip(),
+            "taxId": normalized_tax_id,
             "contactName": str(payload.get("contactName") or "").strip(),
             "administrativeContact": str(payload.get("administrativeContact") or "").strip(),
             "receivingContact": str(payload.get("receivingContact") or "").strip(),
-            "phone": str(payload.get("phone") or "").strip(),
-            "whatsapp": str(payload.get("whatsapp") or payload.get("phone") or "").strip(),
+            "phone": normalized_phone,
+            "whatsapp": normalized_whatsapp,
             "email": email,
             "clientType": "ferretero",
             "clientCategory": str(payload.get("clientCategory") or "standard"),
@@ -14422,8 +14500,8 @@ def api_mobile_seller_clients():
             "fiscalAddress": str(payload.get("fiscalAddress") or payload.get("address") or "").strip(),
             "shippingAddress": str(payload.get("shippingAddress") or payload.get("address") or "").strip(),
             "country": str(payload.get("country") or "VE").strip(),
-            "state": str(payload.get("state") or "").strip(),
-            "city": str(payload.get("city") or "").strip(),
+            "state": normalized_state,
+            "city": normalized_city,
             "deliveryZone": str(payload.get("deliveryZone") or "").strip(),
             "assignedSellerId": seller_id,
             "assignedSellerName": seller_name,
