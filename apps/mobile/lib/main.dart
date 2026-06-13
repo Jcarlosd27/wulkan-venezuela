@@ -36,7 +36,7 @@ class _VenezuelanPhoneInputFormatter extends TextInputFormatter {
     var digits = newValue.text.replaceAll(RegExp(r'\D+'), '');
     if (digits.startsWith('0058')) {
       digits = digits.substring(4);
-    } else if (digits.startsWith('58') && digits.length > 10) {
+    } else if (digits.startsWith('58')) {
       digits = digits.substring(2);
     }
     if (digits.startsWith('0')) {

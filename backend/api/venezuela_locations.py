@@ -83,7 +83,7 @@ def normalize_venezuelan_phone(value: str | None) -> str:
     digits = re.sub(r"\D+", "", str(value or ""))
     if digits.startswith("0058"):
         digits = digits[4:]
-    elif digits.startswith("58") and len(digits) > 10:
+    elif digits.startswith("58"):
         digits = digits[2:]
     if digits.startswith("0") and len(digits) == 11:
         digits = digits[1:]
