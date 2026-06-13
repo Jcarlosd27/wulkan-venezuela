@@ -3273,6 +3273,8 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
 
 def mobile_admin_payload(user: dict, access_token: str) -> dict:
     role = user.get("role", "sales")
+    assigned_seller_id = user.get("id", "") if role in MOBILE_SALES_ROLES else ""
+    assigned_seller_name = user.get("name", "") if role in MOBILE_SALES_ROLES else ""
     return {
         "accessToken": access_token,
         "tokenType": "Bearer",
@@ -3299,8 +3301,8 @@ def mobile_admin_payload(user: dict, access_token: str) -> dict:
             "allowedPaymentTermsDays": [0],
             "defaultSaleType": "cash",
             "assignedSeller": {
-                "id": user["id"] if role == "sales" else "",
-                "name": user.get("name", "") if role == "sales" else "",
+                "id": assigned_seller_id,
+                "name": assigned_seller_name,
             },
             "mustChangePassword": bool(user.get("mustChangePassword")),
         },
@@ -14367,8 +14369,8 @@ def api_mobile_seller_clients():
         if duplicated:
             return jsonify({"error": f"Ya existe un cliente con el email {email}."}), 409
 
-        seller_id = user["id"] if user.get("role") == "sales" else str(payload.get("assignedSellerId") or "").strip()
-        seller_name = user.get("name", "") if user.get("role") == "sales" else seller_name_for(store, seller_id)
+        seller_id = user["id"]
+        seller_name = user.get("name", "") or seller_name_for(store, seller_id)
         requested_credit = float(payload.get("creditRequestedUsd") or 0)
         raw_terms = payload.get("allowedPaymentTermsDays") or [0]
         terms = [

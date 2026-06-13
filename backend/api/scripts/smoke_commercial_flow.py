@@ -236,6 +236,18 @@ def main() -> int:
     )
     assert seller_refresh_v1["customer"]["accountRole"] == "sales"
 
+    super_mobile_login = assert_status(
+        client.post(
+            "/api/v1/mobile/auth/login",
+            json={"email": "super.flow@wulkan.test", "password": "Super2026"},
+        ),
+        200,
+        "login super admin movil",
+    )
+    super_token = super_mobile_login["accessToken"]
+    assert super_mobile_login["customer"]["accountRole"] == "super_admin"
+    assert super_mobile_login["customer"]["assignedSeller"]["id"] == SUPER_ADMIN_ID
+
     new_client = assert_status(
         client.post(
             "/api/mobile/seller/clients",
@@ -283,6 +295,54 @@ def main() -> int:
     assert any(item["type"] == "client_assigned" for item in seller_notifications["items"])
     assert any(item["type"] == "client_created_by_seller" for item in state["notifications"])
     assert any(item["type"] == "credit_requested" for item in state["notifications"])
+
+    super_client = assert_status(
+        client.post(
+            "/api/v1/mobile/seller/clients",
+            headers={"Authorization": f"Bearer {super_token}"},
+            json={
+                "businessName": "Ferreteria Super Admin Flow",
+                "taxId": "J-98765432-1",
+                "contactName": "Comprador Super",
+                "phone": "+58 000-2222222",
+                "email": "ferreteria.super.flow@wulkan.test",
+                "address": "Av. Gerencia",
+                "state": "Distrito Capital",
+                "city": "Caracas",
+                "deliveryZone": "Capital",
+                "allowedPaymentTermsDays": [0],
+                "defaultSaleType": "cash",
+                "password": CLIENT_PASSWORD,
+            },
+        ),
+        201,
+        "crear cliente super admin movil",
+    )
+    super_client_id = super_client["client"]["id"]
+    assert super_client["client"]["assignedSeller"]["id"] == SUPER_ADMIN_ID
+
+    super_order = assert_status(
+        client.post(
+            "/api/v1/mobile/seller/orders",
+            headers={"Authorization": f"Bearer {super_token}"},
+            json={
+                "customerId": super_client_id,
+                "saleType": "cash",
+                "paymentTermDays": 0,
+                "items": [
+                    {
+                        "productId": "prod-flow-motosierra",
+                        "quantity": 1,
+                    }
+                ],
+                "preview": {"totalUsd": 162, "subtotalUsd": 162},
+            },
+        ),
+        201,
+        "crear pedido super admin movil",
+    )
+    assert super_order["order"]["sellerId"] == SUPER_ADMIN_ID
+
     mobile_quote = assert_status(
         client.post(
             "/api/v1/mobile/seller/quotes",
@@ -499,7 +559,7 @@ def main() -> int:
         "orden ferretero",
     )
 
-    created_order = state["orders"][0]
+    created_order = next(item for item in state["orders"] if item["orderId"] == order["orderId"])
     assert order["sellerId"] == "admin-seller-flow"
     assert created_order["salesChannel"] == "mobile"
     assert created_order["saleType"] == "credit_line"
