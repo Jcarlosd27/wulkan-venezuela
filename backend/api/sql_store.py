@@ -613,22 +613,22 @@ def sync_categories(session, store: dict[str, Any]) -> None:
     for category in store.get("categories", []):
         object_id = category["id"]
         live_ids.add(object_id)
-        upsert(
-            session,
-            Category,
-            object_id,
-            {
-                "id": object_id,
-                "name": category.get("name", ""),
-                "description": category.get("description", ""),
-                "image_url": category.get("imageUrl", ""),
-                "status": category.get("status", "active"),
-                "created_at": parse_dt(category.get("createdAt")),
-                "updated_at": parse_dt(category.get("updatedAt")),
-                "payload": category,
-            },
-        )
+        upsert(session, Category, object_id, category_sql_values(category, object_id))
     soft_prune(session, Category, live_ids)
+
+
+def category_sql_values(category: dict[str, Any], object_id: str | None = None) -> dict[str, Any]:
+    object_id = object_id or category["id"]
+    return {
+        "id": object_id,
+        "name": category.get("name", ""),
+        "description": category.get("description", ""),
+        "image_url": category.get("imageUrl", ""),
+        "status": category.get("status", "active"),
+        "created_at": parse_dt(category.get("createdAt")),
+        "updated_at": parse_dt(category.get("updatedAt")),
+        "payload": category,
+    }
 
 
 def sync_category_records(categories: list[dict[str, Any]], audit_events: list[dict[str, Any]] | None = None) -> None:
@@ -636,21 +636,7 @@ def sync_category_records(categories: list[dict[str, Any]], audit_events: list[d
     with SessionLocal() as session:
         for category in categories:
             object_id = category["id"]
-            upsert(
-                session,
-                Category,
-                object_id,
-                {
-                    "id": object_id,
-                    "name": category.get("name", ""),
-                    "description": category.get("description", ""),
-                    "image_url": category.get("imageUrl", ""),
-                    "status": category.get("status", "active"),
-                    "created_at": parse_dt(category.get("createdAt")),
-                    "updated_at": parse_dt(category.get("updatedAt")),
-                    "payload": category,
-                },
-            )
+            upsert(session, Category, object_id, category_sql_values(category, object_id))
         if audit_events:
             sync_audit_events(session, {"audit_events": audit_events})
         session.commit()
@@ -678,46 +664,79 @@ def ensure_category_for_product(session, product: dict[str, Any]) -> None:
     )
 
 
+def normalize_product_sql_identity(session, product: dict[str, Any]) -> str:
+    object_id = product["id"]
+    sku = str(product.get("sku") or "").strip()
+    if not sku:
+        return object_id
+
+    existing = session.query(Product).filter(Product.sku == sku).one_or_none()
+    if existing and existing.id != object_id:
+        object_id = existing.id
+        product["id"] = object_id
+    return object_id
+
+
+def product_sql_values(product: dict[str, Any], object_id: str | None = None) -> dict[str, Any]:
+    object_id = object_id or product["id"]
+    return {
+        "id": object_id,
+        "sku": product.get("sku", ""),
+        "title": product.get("title", ""),
+        "description": product.get("description", ""),
+        "product_type": product.get("productType", "machine"),
+        "category_id": product.get("categoryId", "uncategorized") or "uncategorized",
+        "category_name": product.get("categoryName", ""),
+        "public_price_usd": float(product.get("publicPriceUsd") or 0),
+        "original_price_usd": float(product.get("originalPriceUsd") or product.get("publicPriceUsd") or 0),
+        "discount_percent": float(product.get("discountPercent") or 0),
+        "b2b_price_usd": float(product.get("b2bPriceUsd") or 0),
+        "exchange_rate_usd_ves": float(product.get("exchangeRateUsdVes") or 38.5),
+        "stock": int(product.get("stock") or 0),
+        "reserved": int(product.get("reserved") or 0),
+        "status": product.get("status", "active"),
+        "image_url": product.get("imageUrl", ""),
+        "image_urls": product.get("imageUrls") or [],
+        "pdf_urls": product.get("pdfUrls") or [],
+        "variants": product.get("variants") or [],
+        "specifications": product.get("specifications") or {},
+        "requires_quote": bool(product.get("requiresQuote")),
+        "requires_technical_validation": bool(product.get("requiresTechnicalValidation")),
+        "rotation_last_30_days": int(product.get("rotationLast30Days") or 0),
+        "created_at": parse_dt(product.get("createdAt")),
+        "updated_at": parse_dt(product.get("updatedAt")),
+        "payload": product,
+    }
+
+
 def sync_products(session, store: dict[str, Any]) -> None:
     live_ids: set[str] = set()
     for product in store.get("products", []):
         ensure_category_for_product(session, product)
-        object_id = product["id"]
+        object_id = normalize_product_sql_identity(session, product)
         live_ids.add(object_id)
-        upsert(
-            session,
-            Product,
-            object_id,
-            {
-                "id": object_id,
-                "sku": product.get("sku", ""),
-                "title": product.get("title", ""),
-                "description": product.get("description", ""),
-                "product_type": product.get("productType", "machine"),
-                "category_id": product.get("categoryId", "uncategorized") or "uncategorized",
-                "category_name": product.get("categoryName", ""),
-                "public_price_usd": float(product.get("publicPriceUsd") or 0),
-                "original_price_usd": float(product.get("originalPriceUsd") or product.get("publicPriceUsd") or 0),
-                "discount_percent": float(product.get("discountPercent") or 0),
-                "b2b_price_usd": float(product.get("b2bPriceUsd") or 0),
-                "exchange_rate_usd_ves": float(product.get("exchangeRateUsdVes") or 38.5),
-                "stock": int(product.get("stock") or 0),
-                "reserved": int(product.get("reserved") or 0),
-                "status": product.get("status", "active"),
-                "image_url": product.get("imageUrl", ""),
-                "image_urls": product.get("imageUrls") or [],
-                "pdf_urls": product.get("pdfUrls") or [],
-                "variants": product.get("variants") or [],
-                "specifications": product.get("specifications") or {},
-                "requires_quote": bool(product.get("requiresQuote")),
-                "requires_technical_validation": bool(product.get("requiresTechnicalValidation")),
-                "rotation_last_30_days": int(product.get("rotationLast30Days") or 0),
-                "created_at": parse_dt(product.get("createdAt")),
-                "updated_at": parse_dt(product.get("updatedAt")),
-                "payload": product,
-            },
-        )
+        upsert(session, Product, object_id, product_sql_values(product, object_id))
     soft_prune(session, Product, live_ids)
+
+
+def sync_product_seed_records(
+    categories: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+    audit_events: list[dict[str, Any]] | None = None,
+) -> None:
+    init_database()
+    with SessionLocal() as session:
+        for category in categories:
+            object_id = category["id"]
+            upsert(session, Category, object_id, category_sql_values(category, object_id))
+        session.flush()
+        for product in products:
+            ensure_category_for_product(session, product)
+            object_id = normalize_product_sql_identity(session, product)
+            upsert(session, Product, object_id, product_sql_values(product, object_id))
+        if audit_events:
+            sync_audit_events(session, {"audit_events": audit_events})
+        session.commit()
 
 
 def sync_media_assets(session, store: dict[str, Any]) -> None:

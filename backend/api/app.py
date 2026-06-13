@@ -7635,6 +7635,43 @@ def persist_category_action(
         return False
 
 
+def persist_product_seed_action(
+    store: dict,
+    changed_categories: list[dict],
+    changed_products: list[dict],
+    audit_events_start: int,
+    fallback_detail: str,
+) -> bool:
+    try:
+        save_store(store)
+        return True
+    except Exception:
+        app.logger.exception("No se pudo sincronizar el store completo para productos base: %s", fallback_detail)
+        if use_sql_backend() and (changed_categories or changed_products):
+            try:
+                from sql_store import sync_product_seed_records
+
+                sync_product_seed_records(
+                    changed_categories,
+                    changed_products,
+                    store.get("audit_events", [])[audit_events_start:],
+                )
+                push_admin_toast(
+                    "Los productos base se aplicaron, pero se detecto una inconsistencia pendiente en otra tabla.",
+                    "warning",
+                    "Seed aplicado parcialmente",
+                )
+                return True
+            except Exception:
+                app.logger.exception("No se pudo aplicar fallback puntual de productos base: %s", fallback_detail)
+        push_admin_toast(
+            "No se pudieron crear los productos base Wulkan. Revisa los registros relacionados o intenta nuevamente.",
+            "danger",
+            "Productos no aplicados",
+        )
+        return False
+
+
 def category_form_error(store: dict, existing: dict | None = None) -> str:
     name = request.form.get("name", "").strip()
     slug = category_slug(request.form.get("slug", "").strip() or name)
@@ -10454,10 +10491,35 @@ def products_starter_wulkan():
         "products": len(store.get("products", [])),
         "categories": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
     }
-    result = create_wulkan_starter_products(store)
+    try:
+        result = create_wulkan_starter_products(store)
+    except Exception:
+        app.logger.exception("No se pudieron preparar productos base Wulkan")
+        push_admin_toast(
+            "No se pudieron preparar los productos base Wulkan. Revisa las categorias o intenta nuevamente.",
+            "danger",
+            "Seed no preparado",
+        )
+        return redirect(url_for("products"))
+
     created_count = len(result["created"])
     created_categories_count = len(result.get("categories", {}).get("created", []))
     if created_count or created_categories_count:
+        audit_events_start = len(store.get("audit_events", []))
+        created_skus = {item.get("sku", "").strip().upper() for item in result["created"]}
+        created_category_ids = {
+            item.get("id", "")
+            for item in result.get("categories", {}).get("created", [])
+            if item.get("id")
+        }
+        changed_products = [
+            product
+            for product in store.get("products", [])
+            if product.get("sku", "").strip().upper() in created_skus
+        ]
+        changed_categories = [
+            category for category in store.get("categories", []) if category.get("id") in created_category_ids
+        ]
         after = {
             "products": len(store.get("products", [])),
             "categories": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
@@ -10475,12 +10537,18 @@ def products_starter_wulkan():
             before,
             after,
         )
-        save_store(store)
-        push_admin_toast(
-            f"Se crearon {created_count} productos base Wulkan con SKU, imagen, precio y stock inicial.",
-            "success",
-            "Productos listos",
-        )
+        if persist_product_seed_action(
+            store,
+            changed_categories,
+            changed_products,
+            audit_events_start,
+            "productos base Wulkan",
+        ):
+            push_admin_toast(
+                f"Se crearon {created_count} productos base Wulkan con SKU, imagen, precio y stock inicial.",
+                "success",
+                "Productos listos",
+            )
     else:
         push_admin_toast(
             "Los productos base Wulkan ya existen o requieren revisar categorias faltantes.",

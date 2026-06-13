@@ -637,6 +637,46 @@ def assert_product_seed_creates_mobile_catalog(app, state_holder: dict, failures
         failures.append("Productos base Wulkan se duplicaron al ejecutar el seed por segunda vez.")
 
 
+def assert_product_seed_handles_full_sync_failure(app, state_holder: dict, failures: list[str]) -> None:
+    state_holder["state"] = base_store()
+    original_save_store = wulkan_app.save_store
+    original_use_sql_backend = wulkan_app.use_sql_backend
+
+    import sql_store
+
+    original_sync_product_seed_records = sql_store.sync_product_seed_records
+    fallback_calls: list[tuple[int, int, int]] = []
+
+    def failing_save_store(_store: dict) -> None:
+        raise RuntimeError("simulated full-store sync failure")
+
+    def fake_sync_product_seed_records(categories: list[dict], products: list[dict], audit_events=None) -> None:
+        fallback_calls.append((len(categories), len(products), len(audit_events or [])))
+
+    wulkan_app.save_store = failing_save_store
+    wulkan_app.use_sql_backend = lambda: True
+    sql_store.sync_product_seed_records = fake_sync_product_seed_records
+    try:
+        with app.test_client() as client:
+            authenticate(client)
+            response = client.post(
+                "/products/starter-wulkan",
+                data={"_csrf_token": CSRF},
+                follow_redirects=False,
+            )
+            if not safe_status_code(response):
+                failures.append(f"POST /products/starter-wulkan con fallback SQL: HTTP {response.status_code}")
+                return
+        if not fallback_calls:
+            failures.append("Productos base Wulkan no usaron fallback puntual cuando fallo el sync completo.")
+        elif fallback_calls[-1][1] == 0:
+            failures.append("Fallback puntual de productos base no recibio productos creados.")
+    finally:
+        wulkan_app.save_store = original_save_store
+        wulkan_app.use_sql_backend = original_use_sql_backend
+        sql_store.sync_product_seed_records = original_sync_product_seed_records
+
+
 def main() -> int:
     failures: list[str] = []
     collected_forms: list[tuple[str, dict]] = []
@@ -693,6 +733,7 @@ def main() -> int:
 
     assert_category_delete_preserves_children(app, state_holder, failures)
     assert_product_seed_creates_mobile_catalog(app, state_holder, failures)
+    assert_product_seed_handles_full_sync_failure(app, state_holder, failures)
 
     seen_links: set[str] = set()
     for page, href in collected_links:
