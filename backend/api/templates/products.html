@@ -113,15 +113,15 @@
 <section class="panel product-filter-panel mb-3">
   <form class="row g-2 align-items-end" method="get">
     <div class="col-12 col-xl-4">
-      <label class="form-label">Buscar producto</label>
+      <label class="form-label" for="productSearch">Buscar producto</label>
       <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="SKU, nombre, modelo, categoria o descripcion">
+        <input class="form-control" id="productSearch" name="q" value="{{ filters.q }}" placeholder="SKU, nombre, modelo, categoria o descripcion">
       </div>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Categoria</label>
-      <select class="form-select" name="category">
+      <label class="form-label" for="productCategoryFilter">Categoria</label>
+      <select class="form-select" id="productCategoryFilter" name="category">
         <option value="">Todas</option>
         {% for category in categories %}
         <option value="{{ category.id }}" {% if filters.category == category.id %}selected{% endif %}>{{ category.name }}</option>
@@ -129,8 +129,8 @@
       </select>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Estado</label>
-      <select class="form-select" name="status">
+      <label class="form-label" for="productStatusFilter">Estado</label>
+      <select class="form-select" id="productStatusFilter" name="status">
         <option value="">Todos</option>
         {% for value, label in product_status_options %}
         <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
@@ -138,8 +138,8 @@
       </select>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Stock</label>
-      <select class="form-select" name="stock">
+      <label class="form-label" for="productStockFilter">Stock</label>
+      <select class="form-select" id="productStockFilter" name="stock">
         <option value="">Todos</option>
         {% for value, label in stock_status_options %}
         <option value="{{ value }}" {% if filters.stock == value %}selected{% endif %}>{{ label }}</option>
@@ -147,8 +147,8 @@
       </select>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Publicacion</label>
-      <select class="form-select" name="visibility">
+      <label class="form-label" for="productVisibilityFilter">Publicacion</label>
+      <select class="form-select" id="productVisibilityFilter" name="visibility">
         <option value="">Todas</option>
         <option value="visible" {% if filters.visibility == 'visible' %}selected{% endif %}>Visible en app</option>
         <option value="hidden" {% if filters.visibility == 'hidden' %}selected{% endif %}>Oculto</option>
@@ -252,24 +252,24 @@
           </td>
           <td class="text-end">
             <div class="d-flex justify-content-end gap-2">
-              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#productDetail{{ loop.index }}">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#productDetail{{ loop.index }}" aria-label="Ver detalle de {{ product.title }}" title="Ver detalle">
                 <i class="bi bi-eye"></i>
               </button>
               {% if can_edit_products %}
-              <a class="btn btn-sm btn-outline-dark" href="{{ url_for('product_edit', product_id=product.id) }}">
+              <a class="btn btn-sm btn-outline-dark" href="{{ url_for('product_edit', product_id=product.id) }}" aria-label="Editar {{ product.title }}" title="Editar producto">
                 <i class="bi bi-pencil"></i>
               </a>
               {% endif %}
               {% if can_module_action('products', 'create') %}
               <form method="post" action="{{ url_for('product_duplicate', product_id=product.id) }}">
                 {{ csrf_field() }}
-                <button class="btn btn-sm btn-outline-primary" type="submit" title="Duplicar como borrador oculto"><i class="bi bi-copy"></i></button>
+                <button class="btn btn-sm btn-outline-primary" type="submit" aria-label="Duplicar {{ product.title }} como borrador oculto" title="Duplicar como borrador oculto"><i class="bi bi-copy"></i></button>
               </form>
               {% endif %}
               {% if can_module_action('products', 'delete') %}
               <form method="post" action="{{ url_for('product_delete', product_id=product.id) }}">
                 {{ csrf_field() }}
-                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+                <button class="btn btn-sm btn-outline-danger" type="submit" aria-label="Eliminar {{ product.title }}" title="Eliminar producto"><i class="bi bi-trash"></i></button>
               </form>
               {% endif %}
             </div>

@@ -307,12 +307,41 @@ def main() -> int:
             json={
                 "businessName": "Ferreteria Reutilizada SQL",
                 "email": "deleted.sql@wulkan.test",
-                "creditRequestedUsd": "no-es-numero",
+                "taxId": "J-55555555-5",
+                "contactName": "Comprador Reutilizado SQL",
+                "phone": "+58 412-5555555",
+                "address": "Av SQL Reutilizada",
+                "state": "Carabobo",
+                "city": "Valencia",
+                "creditRequestedUsd": 0,
                 "allowedPaymentTermsDays": "0,15,30",
             },
         )
         assert duplicate_mobile_client.status_code == 409, duplicate_mobile_client.get_data(as_text=True)
         assert duplicate_mobile_client.is_json
+        created_mobile_client = client.post(
+            "/api/mobile/seller/clients",
+            headers={
+                "Authorization": f"Bearer {mobile_login.get_json()['accessToken']}",
+                "Idempotency-Key": "sql-smoke-client-001",
+            },
+            json={
+                "businessName": "Ferreteria SQL Nueva",
+                "email": "ferreteria.sql.nueva@wulkan.test",
+                "taxId": "J-55555555-6",
+                "contactName": "Comprador SQL Nuevo",
+                "phone": "+58 412-5555556",
+                "address": "Av SQL Nueva",
+                "state": "Carabobo",
+                "city": "Valencia",
+                "creditRequestedUsd": 250,
+                "allowedPaymentTermsDays": [0, 15],
+                "defaultSaleType": "credit_line",
+                "password": "ClienteSql2026",
+            },
+        )
+        assert created_mobile_client.status_code == 201, created_mobile_client.get_data(as_text=True)
+        assert created_mobile_client.is_json
         authenticate(client)
         checks = [
             ("/clients/client-sql/delete", None),
@@ -332,10 +361,16 @@ def main() -> int:
 
     store = load_sql_store()
     client_record = next(item for item in store["clients"] if item["id"] == "client-sql")
+    mobile_client_record = next(
+        item for item in store["clients"] if item["email"] == "ferreteria.sql.nueva@wulkan.test"
+    )
     product_record = next(item for item in store["products"] if item["id"] == "prod-sql")
     category_record = next(item for item in store["categories"] if item["id"] == "cat-sql-root")
     child_category = next(item for item in store["categories"] if item["id"] == "cat-sql-child-preserved")
     assert client_record["status"] == "inactive", "cliente con orden debe quedar inactivo, no borrado fisico"
+    assert mobile_client_record["assignedSellerId"] == ADMIN_ID, "cliente movil debe quedar asignado al usuario que lo creo"
+    assert mobile_client_record["creditRequestStatus"] == "pending", "credito solicitado desde movil debe quedar pendiente"
+    assert mobile_client_record["idempotencyKey"] == "sql-smoke-client-001", "cliente movil debe conservar llave idempotente"
     assert product_record["status"] == "inactive", "producto con orden debe quedar inactivo, no borrado fisico"
     assert category_record["status"] == "inactive", "categoria con producto debe quedar inactiva"
     assert child_category.get("parentId") == "", "eliminar categoria padre debe conservar y promover la subcategoria"

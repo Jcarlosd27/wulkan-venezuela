@@ -149,6 +149,32 @@
     <script src="{{ url_for('static', filename='js/password-toggle.js') }}?v=20260610-admin-access"></script>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll("input:not([type='hidden']), select, textarea").forEach((control, index) => {
+          if (control.id || control.closest("label") || control.getAttribute("aria-label")) {
+            return;
+          }
+          const fieldContainer = control.closest(".col-12, .col-6, .col-md-3, .col-md-4, .col-md-6, .col-lg-3, .col-lg-4, .col-lg-6, .col-xl-2, .col-xl-3, .col-xl-4, .col-xl-6, .mb-3, .form-section");
+          const label = fieldContainer?.querySelector(".form-label:not(.form-check-label)");
+          if (!label) {
+            return;
+          }
+          const safeName = (control.name || control.placeholder || `field-${index}`)
+            .toString()
+            .replace(/[^A-Za-z0-9_-]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 60) || `field-${index}`;
+          control.id = `admin-${safeName}-${index}`;
+          label.setAttribute("for", control.id);
+        });
+
+        document.querySelectorAll("button, a.btn, a.icon-btn").forEach((action, index) => {
+          if (action.getAttribute("aria-label") || action.textContent.trim()) {
+            return;
+          }
+          const title = action.getAttribute("title");
+          action.setAttribute("aria-label", title || `Accion ${index + 1}`);
+        });
+
         const nav = document.querySelector(".sidebar-nav");
         const active = document.querySelector(".sidebar-nav .nav-link.active");
         if (nav && active) {

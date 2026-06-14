@@ -49,23 +49,23 @@
 <section class="panel audit-filter-panel mb-3">
   <form class="row g-2 align-items-end" method="get">
     <div class="col-12 col-xl-3">
-      <label class="form-label small text-secondary fw-semibold">Buscar</label>
+      <label class="form-label small text-secondary fw-semibold" for="auditSearch">Buscar</label>
       <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Actor, entidad, detalle u origen">
+        <input class="form-control" id="auditSearch" name="q" value="{{ filters.q }}" placeholder="Actor, entidad, detalle u origen">
       </div>
     </div>
     <div class="col-6 col-md-3 col-xl-2">
-      <label class="form-label small text-secondary fw-semibold">Desde</label>
-      <input class="form-control" type="date" name="date_from" value="{{ filters.date_from }}">
+      <label class="form-label small text-secondary fw-semibold" for="auditDateFrom">Desde</label>
+      <input class="form-control" id="auditDateFrom" type="date" name="date_from" value="{{ filters.date_from }}">
     </div>
     <div class="col-6 col-md-3 col-xl-2">
-      <label class="form-label small text-secondary fw-semibold">Hasta</label>
-      <input class="form-control" type="date" name="date_to" value="{{ filters.date_to }}">
+      <label class="form-label small text-secondary fw-semibold" for="auditDateTo">Hasta</label>
+      <input class="form-control" id="auditDateTo" type="date" name="date_to" value="{{ filters.date_to }}">
     </div>
     <div class="col-12 col-md-3 col-xl-2">
-      <label class="form-label small text-secondary fw-semibold">Criticidad</label>
-      <select class="form-select" name="severity">
+      <label class="form-label small text-secondary fw-semibold" for="auditSeverity">Criticidad</label>
+      <select class="form-select" id="auditSeverity" name="severity">
         <option value="">Todas</option>
         {% for value, label in severity_options %}
         <option value="{{ value }}" {% if filters.severity == value %}selected{% endif %}>{{ label }}</option>
@@ -73,8 +73,8 @@
       </select>
     </div>
     <div class="col-12 col-md-3 col-xl-2">
-      <label class="form-label small text-secondary fw-semibold">Accion</label>
-      <select class="form-select" name="action">
+      <label class="form-label small text-secondary fw-semibold" for="auditAction">Accion</label>
+      <select class="form-select" id="auditAction" name="action">
         <option value="">Todas</option>
         {% for action in action_options %}
         <option value="{{ action }}" {% if filters.action == action %}selected{% endif %}>{{ action }}</option>
@@ -82,8 +82,8 @@
       </select>
     </div>
     <div class="col-12 col-md-4 col-xl-2">
-      <label class="form-label small text-secondary fw-semibold">Modulo</label>
-      <select class="form-select" name="entity_type">
+      <label class="form-label small text-secondary fw-semibold" for="auditEntityType">Modulo</label>
+      <select class="form-select" id="auditEntityType" name="entity_type">
         <option value="">Todos</option>
         {% for entity in entity_options %}
         <option value="{{ entity }}" {% if filters.entity_type == entity %}selected{% endif %}>{{ entity }}</option>
@@ -91,8 +91,8 @@
       </select>
     </div>
     <div class="col-12 col-md-4 col-xl-2">
-      <label class="form-label small text-secondary fw-semibold">Actor</label>
-      <select class="form-select" name="actor">
+      <label class="form-label small text-secondary fw-semibold" for="auditActor">Actor</label>
+      <select class="form-select" id="auditActor" name="actor">
         <option value="">Todos</option>
         {% for actor in actor_options %}
         <option value="{{ actor }}" {% if filters.actor == actor %}selected{% endif %}>{{ actor }}</option>
@@ -152,7 +152,7 @@
         {% set value = graph["values"][loop.index0] %}
         <div class="graphify-row">
           <span class="graphify-label">{{ label }}</span>
-          <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if max_value == 0 else (value / max_value * 100) }}%"></span></span>
+          <progress class="graphify-progress" max="{{ max_value or 1 }}" value="{{ value }}" aria-label="{{ title }} {{ label }}"></progress>
           <strong>{{ value }}</strong>
         </div>
         {% else %}

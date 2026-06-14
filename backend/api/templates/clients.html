@@ -87,15 +87,15 @@
 <section class="panel client-filter-panel mb-3">
   <form class="row g-2 align-items-end" method="get">
     <div class="col-12 col-xl-4">
-      <label class="form-label">Buscar cliente</label>
+      <label class="form-label" for="clientSearch">Buscar cliente</label>
       <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Nombre, RIF, email, zona o telefono">
+        <input class="form-control" id="clientSearch" name="q" value="{{ filters.q }}" placeholder="Nombre, RIF, email, zona o telefono">
       </div>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Estado</label>
-      <select class="form-select" name="status">
+      <label class="form-label" for="clientStatusFilter">Estado</label>
+      <select class="form-select" id="clientStatusFilter" name="status">
         <option value="">Todos</option>
         {% for value, label in client_status_options %}
         <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
@@ -103,8 +103,8 @@
       </select>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Vendedor</label>
-      <select class="form-select" name="seller">
+      <label class="form-label" for="clientSellerFilter">Vendedor</label>
+      <select class="form-select" id="clientSellerFilter" name="seller">
         <option value="">Todos</option>
         {% for seller in sellers %}
         <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
@@ -112,8 +112,8 @@
       </select>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
-      <label class="form-label">Cobranza</label>
-      <select class="form-select" name="collection">
+      <label class="form-label" for="clientCollectionFilter">Cobranza</label>
+      <select class="form-select" id="clientCollectionFilter" name="collection">
         <option value="">Todas</option>
         {% for value, label in collection_status_options %}
         <option value="{{ value }}" {% if filters.collection == value %}selected{% endif %}>{{ label }}</option>
@@ -202,18 +202,18 @@
           </td>
           <td class="text-end">
             <div class="d-flex justify-content-end gap-2">
-              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#detailClient{{ loop.index }}">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#detailClient{{ loop.index }}" aria-label="Ver detalle de {{ client.businessName }}" title="Ver detalle">
                 <i class="bi bi-eye"></i>
               </button>
               {% if can_edit_clients %}
-              <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}">
+              <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}" aria-label="Editar {{ client.businessName }}">
                 <i class="bi bi-pencil"></i> Editar
               </button>
               {% endif %}
               {% if can_delete_data() %}
               <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}">
                 {{ csrf_field() }}
-                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+                <button class="btn btn-sm btn-outline-danger" type="submit" aria-label="Eliminar {{ client.businessName }}" title="Eliminar cliente"><i class="bi bi-trash"></i></button>
               </form>
               {% endif %}
             </div>

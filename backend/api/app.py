@@ -14725,6 +14725,8 @@ def api_mobile_seller_clients():
             "createdAt": now,
             "updatedAt": now,
         }
+        base_audit_ids = {str(event.get("id")) for event in store.get("audit_events", [])}
+        base_notification_ids = {str(item.get("id")) for item in store.get("notifications", [])}
         store["clients"].append(client)
         record_create_event(
             store,
@@ -14764,6 +14766,12 @@ def api_mobile_seller_clients():
             dedupe_key=f"seller-client-assigned-{client['id']}",
         )
         notify_credit_requested(store, client)
+        new_audit_events = [
+            event for event in store.get("audit_events", []) if str(event.get("id")) not in base_audit_ids
+        ]
+        new_notifications = [
+            item for item in store.get("notifications", []) if str(item.get("id")) not in base_notification_ids
+        ]
         try:
             save_store(store)
         except Exception as exc:
@@ -14778,6 +14786,28 @@ def api_mobile_seller_clients():
                 except Exception:
                     app.logger.exception("No se pudo resolver duplicidad luego de fallo SQL.")
                 return jsonify({"error": "Ya existe un cliente con ese correo o RIF. Revisa Clientes antes de reintentar."}), 409
+            if use_sql_backend():
+                try:
+                    from sql_store import sync_client_records
+
+                    sync_client_records(
+                        [client],
+                        audit_events=new_audit_events,
+                        notifications=new_notifications,
+                    )
+                    fresh_store = load_store()
+                    created_client = find_existing_mobile_client(fresh_store) or client
+                    response = mobile_seller_client_payload(created_client, fresh_store)
+                    response["temporaryPassword"] = temporary_password
+                    return jsonify(
+                        {
+                            "client": response,
+                            "alreadyExists": False,
+                            "message": "Cliente creado correctamente.",
+                        }
+                    ), 201
+                except Exception:
+                    app.logger.exception("No se pudo guardar cliente movil con persistencia puntual SQL.")
             return jsonify({"error": "No se pudo guardar el cliente. Intenta nuevamente o revisa los datos ingresados."}), 500
         response = mobile_seller_client_payload(client, store)
         response["temporaryPassword"] = temporary_password

@@ -623,37 +623,54 @@ def sync_admin_users(session, store: dict[str, Any]) -> None:
     soft_prune(session, AdminUser, live_ids)
 
 
+def client_sql_values(client: dict[str, Any], object_id: str | None = None) -> dict[str, Any]:
+    object_id = object_id or client["id"]
+    return {
+        "id": object_id,
+        "business_name": client.get("businessName", ""),
+        "tax_id": client.get("taxId", ""),
+        "contact_name": client.get("contactName", ""),
+        "phone": client.get("phone", ""),
+        "email": client.get("email", "").lower(),
+        "password_hash": client.get("passwordHash", ""),
+        "must_change_password": bool(client.get("mustChangePassword")),
+        "client_type": client.get("clientType", "ferretero"),
+        "status": client.get("status", "active"),
+        "credit_enabled": bool(client.get("creditEnabled")),
+        "credit_limit_usd": float(client.get("creditLimitUsd") or 0),
+        "credit_used_usd": float(client.get("creditUsedUsd") or 0),
+        "payment_terms_days": int(client.get("paymentTermsDays") or 0),
+        "notes": client.get("notes", ""),
+        "created_at": parse_dt(client.get("createdAt")),
+        "updated_at": parse_dt(client.get("updatedAt")),
+        "payload": client,
+    }
+
+
 def sync_clients(session, store: dict[str, Any]) -> None:
     live_ids: set[str] = set()
     for client in store.get("clients", []):
         object_id = client["id"]
         live_ids.add(object_id)
-        upsert(
-            session,
-            Client,
-            object_id,
-            {
-                "id": object_id,
-                "business_name": client.get("businessName", ""),
-                "tax_id": client.get("taxId", ""),
-                "contact_name": client.get("contactName", ""),
-                "phone": client.get("phone", ""),
-                "email": client.get("email", "").lower(),
-                "password_hash": client.get("passwordHash", ""),
-                "must_change_password": bool(client.get("mustChangePassword")),
-                "client_type": client.get("clientType", "ferretero"),
-                "status": client.get("status", "active"),
-                "credit_enabled": bool(client.get("creditEnabled")),
-                "credit_limit_usd": float(client.get("creditLimitUsd") or 0),
-                "credit_used_usd": float(client.get("creditUsedUsd") or 0),
-                "payment_terms_days": int(client.get("paymentTermsDays") or 0),
-                "notes": client.get("notes", ""),
-                "created_at": parse_dt(client.get("createdAt")),
-                "updated_at": parse_dt(client.get("updatedAt")),
-                "payload": client,
-            },
-        )
+        upsert(session, Client, object_id, client_sql_values(client, object_id))
     soft_prune(session, Client, live_ids)
+
+
+def sync_client_records(
+    clients: list[dict[str, Any]],
+    audit_events: list[dict[str, Any]] | None = None,
+    notifications: list[dict[str, Any]] | None = None,
+) -> None:
+    init_database()
+    with SessionLocal() as session:
+        for client in clients:
+            object_id = client["id"]
+            upsert(session, Client, object_id, client_sql_values(client, object_id))
+        if notifications:
+            sync_notification_records(session, notifications)
+        if audit_events:
+            sync_audit_events(session, {"audit_events": audit_events})
+        session.commit()
 
 
 def sync_categories(session, store: dict[str, Any]) -> None:
@@ -1035,37 +1052,43 @@ def sync_notifications(session, store: dict[str, Any]) -> None:
     for notification in store.get("notifications", []):
         object_id = notification["id"]
         live_ids.add(object_id)
-        notification_type = notification.get("notificationType") or notification.get("type", "info")
-        upsert(
-            session,
-            Notification,
-            object_id,
-            {
-                "id": object_id,
-                "title": notification.get("title", ""),
-                "body": notification.get("body", ""),
-                "notification_type": notification_type,
-                "channel": notification.get("channel", "web"),
-                "priority": notification.get("priority", "normal"),
-                "status": notification.get("status", "unread"),
-                "recipient_type": notification.get("recipientType", "admin"),
-                "recipient_id": notification.get("recipientId", ""),
-                "recipient_role": notification.get("recipientRole", ""),
-                "module": notification.get("module", "dashboard"),
-                "entity_type": notification.get("entityType", ""),
-                "entity_id": notification.get("entityId", ""),
-                "href": notification.get("href", ""),
-                "deep_link": notification.get("deepLink", ""),
-                "read_at": notification.get("readAt", ""),
-                "expires_at": notification.get("expiresAt", ""),
-                "created_at": parse_dt(notification.get("createdAt")),
-                "updated_at": parse_dt(notification.get("updatedAt")),
-                "payload": notification,
-            },
-        )
+        upsert(session, Notification, object_id, notification_sql_values(notification, object_id))
     for row in session.query(Notification).all():
         if row.id not in live_ids:
             session.delete(row)
+
+
+def notification_sql_values(notification: dict[str, Any], object_id: str | None = None) -> dict[str, Any]:
+    object_id = object_id or notification["id"]
+    notification_type = notification.get("notificationType") or notification.get("type", "info")
+    return {
+        "id": object_id,
+        "title": notification.get("title", ""),
+        "body": notification.get("body", ""),
+        "notification_type": notification_type,
+        "channel": notification.get("channel", "web"),
+        "priority": notification.get("priority", "normal"),
+        "status": notification.get("status", "unread"),
+        "recipient_type": notification.get("recipientType", "admin"),
+        "recipient_id": notification.get("recipientId", ""),
+        "recipient_role": notification.get("recipientRole", ""),
+        "module": notification.get("module", "dashboard"),
+        "entity_type": notification.get("entityType", ""),
+        "entity_id": notification.get("entityId", ""),
+        "href": notification.get("href", ""),
+        "deep_link": notification.get("deepLink", ""),
+        "read_at": notification.get("readAt", ""),
+        "expires_at": notification.get("expiresAt", ""),
+        "created_at": parse_dt(notification.get("createdAt")),
+        "updated_at": parse_dt(notification.get("updatedAt")),
+        "payload": notification,
+    }
+
+
+def sync_notification_records(session, notifications: list[dict[str, Any]]) -> None:
+    for notification in notifications:
+        object_id = notification["id"]
+        upsert(session, Notification, object_id, notification_sql_values(notification, object_id))
 
 
 def sync_service_technicians(session, store: dict[str, Any]) -> None:

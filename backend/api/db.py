@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from config import Config
@@ -19,7 +20,15 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def init_database() -> None:
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except SQLAlchemyError as exc:
+        message = str(exc).lower()
+        duplicate_index = "already exists" in message and "ix_" in message
+        if duplicate_index:
+            engine.dispose()
+            return
+        raise
 
 
 def drop_database() -> None:
