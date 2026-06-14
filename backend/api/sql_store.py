@@ -614,12 +614,27 @@ def admin_user_sql_values(user: dict[str, Any], object_id: str | None = None) ->
     }
 
 
+def upsert_admin_user(session, user: dict[str, Any], object_id: str | None = None) -> str:
+    object_id = object_id or user["id"]
+    values = admin_user_sql_values(user, object_id)
+    email = values.get("email") or ""
+    existing_by_email = session.query(AdminUser).filter(AdminUser.email == email).one_or_none() if email else None
+    if existing_by_email and existing_by_email.id != object_id:
+        object_id = existing_by_email.id
+        values["id"] = object_id
+        payload = copy_payload(values.get("payload") or {})
+        payload["id"] = object_id
+        values["payload"] = payload
+        user["id"] = object_id
+    upsert(session, AdminUser, object_id, values)
+    return object_id
+
+
 def sync_admin_users(session, store: dict[str, Any]) -> None:
     live_ids: set[str] = set()
     for user in store.get("admin_users", []):
-        object_id = user["id"]
+        object_id = upsert_admin_user(session, user, user["id"])
         live_ids.add(object_id)
-        upsert(session, AdminUser, object_id, admin_user_sql_values(user, object_id))
     soft_prune(session, AdminUser, live_ids)
 
 
@@ -632,9 +647,12 @@ def sync_admin_user_records(
 ) -> None:
     init_database()
     with SessionLocal() as session:
+        admin_id_aliases: dict[str, str] = {}
         for user in admin_users:
-            object_id = user["id"]
-            upsert(session, AdminUser, object_id, admin_user_sql_values(user, object_id))
+            original_id = user["id"]
+            object_id = upsert_admin_user(session, user, original_id)
+            if object_id != original_id:
+                admin_id_aliases[original_id] = object_id
         for user_id in deleted_admin_user_ids or []:
             row = session.get(AdminUser, user_id)
             if row:
@@ -653,6 +671,10 @@ def sync_admin_user_records(
             object_id = order["id"]
             upsert(session, Order, object_id, order_sql_values(order, customer_id, object_id))
         if audit_events:
+            if admin_id_aliases:
+                for event in audit_events:
+                    if event.get("entityId") in admin_id_aliases:
+                        event["entityId"] = admin_id_aliases[event["entityId"]]
             sync_audit_events(session, {"audit_events": audit_events})
         session.commit()
 

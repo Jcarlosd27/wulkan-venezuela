@@ -19,7 +19,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import app as wulkan_app
 from db import drop_database, init_database
-from sql_store import load_sql_store, sync_store_to_sql
+from sql_store import load_sql_store, sync_admin_user_records, sync_store_to_sql
 from store import normalize_store, utc_now
 from werkzeug.security import generate_password_hash
 
@@ -42,6 +42,22 @@ def base_store() -> dict:
                 "sessionVersion": 0,
                 "mustChangePassword": False,
                 "activeSessions": [],
+                "createdAt": now,
+                "updatedAt": now,
+            },
+            {
+                "id": "admin-seller-deleted",
+                "name": "Vendedor SQL Eliminado",
+                "email": "vendedor.eliminado.sql@wulkan.test",
+                "passwordHash": generate_password_hash("SellerSql2026"),
+                "role": "sales",
+                "status": "deleted",
+                "sessionVersion": 0,
+                "mustChangePassword": True,
+                "activeSessions": [],
+                "sellerCode": "VEN-SQL-DEL",
+                "zone": "Carabobo",
+                "commissionRate": 3.0,
                 "createdAt": now,
                 "updatedAt": now,
             }
@@ -292,6 +308,27 @@ def main() -> int:
     drop_database()
     init_database()
     sync_store_to_sql(base_store())
+    now = utc_now()
+    sync_admin_user_records(
+        [
+            {
+                "id": "admin-seller-new-id",
+                "name": "Vendedor SQL Reactivado",
+                "email": "vendedor.eliminado.sql@wulkan.test",
+                "passwordHash": generate_password_hash("SellerSql2026"),
+                "role": "sales",
+                "status": "active",
+                "sessionVersion": 0,
+                "mustChangePassword": True,
+                "activeSessions": [],
+                "sellerCode": "VEN-SQL-REACT",
+                "zone": "Carabobo",
+                "commissionRate": 4.0,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ]
+    )
     app = wulkan_app.app
     app.config.update(TESTING=True, SECRET_KEY="sql-integrity-smoke-secret", REQUIRE_MOBILE_TOKEN=True)
 
@@ -364,6 +401,9 @@ def main() -> int:
     mobile_client_record = next(
         item for item in store["clients"] if item["email"] == "ferreteria.sql.nueva@wulkan.test"
     )
+    reactivated_seller = next(
+        item for item in store["admin_users"] if item["email"] == "vendedor.eliminado.sql@wulkan.test"
+    )
     product_record = next(item for item in store["products"] if item["id"] == "prod-sql")
     category_record = next(item for item in store["categories"] if item["id"] == "cat-sql-root")
     child_category = next(item for item in store["categories"] if item["id"] == "cat-sql-child-preserved")
@@ -371,6 +411,9 @@ def main() -> int:
     assert mobile_client_record["assignedSellerId"] == ADMIN_ID, "cliente movil debe quedar asignado al usuario que lo creo"
     assert mobile_client_record["creditRequestStatus"] == "pending", "credito solicitado desde movil debe quedar pendiente"
     assert mobile_client_record["idempotencyKey"] == "sql-smoke-client-001", "cliente movil debe conservar llave idempotente"
+    assert reactivated_seller["id"] == "admin-seller-deleted", "vendedor con email historico debe reutilizar el registro SQL"
+    assert reactivated_seller["status"] == "active", "vendedor historico debe poder reactivarse sin 500"
+    assert reactivated_seller["sellerCode"] == "VEN-SQL-REACT", "vendedor reactivado debe guardar los nuevos datos"
     assert product_record["status"] == "inactive", "producto con orden debe quedar inactivo, no borrado fisico"
     assert category_record["status"] == "inactive", "categoria con producto debe quedar inactiva"
     assert child_category.get("parentId") == "", "eliminar categoria padre debe conservar y promover la subcategoria"
