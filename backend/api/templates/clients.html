@@ -5,12 +5,12 @@
 {% block top_action %}
 <div class="d-flex flex-wrap gap-2">
   {% if can_module_action('clients', 'import') %}
-  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#clientsImportModal">
+  <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#clientsImportModal" aria-label="Importar clientes desde Excel o CSV">
     <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel/CSV
   </button>
   {% endif %}
   {% if can_create_clients %}
-  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newClientModal">
+  <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#newClientModal" aria-label="Crear nuevo cliente">
     <i class="bi bi-plus-lg"></i> Nuevo cliente
   </button>
   {% endif %}
@@ -23,17 +23,17 @@
   <form method="post" action="{{ url_for('client_status_update', client_id=client.id) }}">
     {{ csrf_field() }}
     <input type="hidden" name="status" value="active">
-    <button class="btn btn-sm btn-outline-success" type="submit">Activar</button>
+    <button class="btn btn-sm btn-outline-success" type="submit" aria-label="Activar cliente">Activar</button>
   </form>
   <form method="post" action="{{ url_for('client_status_update', client_id=client.id) }}">
     {{ csrf_field() }}
     <input type="hidden" name="status" value="review">
-    <button class="btn btn-sm btn-outline-warning" type="submit">Revision</button>
+    <button class="btn btn-sm btn-outline-warning" type="submit" aria-label="Enviar cliente a revision">Revision</button>
   </form>
   <form method="post" action="{{ url_for('client_status_update', client_id=client.id) }}">
     {{ csrf_field() }}
     <input type="hidden" name="status" value="blocked_debt">
-    <button class="btn btn-sm btn-outline-danger" type="submit">Bloquear deuda</button>
+    <button class="btn btn-sm btn-outline-danger" type="submit" aria-label="Bloquear cliente por deuda">Bloquear deuda</button>
   </form>
   {% endif %}
 </div>
@@ -90,12 +90,12 @@
       <label class="form-label" for="clientSearch">Buscar cliente</label>
       <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input class="form-control" id="clientSearch" name="q" value="{{ filters.q }}" placeholder="Nombre, RIF, email, zona o telefono">
+        <input class="form-control" id="clientSearch" name="q" value="{{ filters.q }}" placeholder="Nombre, RIF, email, zona o telefono" aria-label="Buscar cliente">
       </div>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
       <label class="form-label" for="clientStatusFilter">Estado</label>
-      <select class="form-select" id="clientStatusFilter" name="status">
+      <select class="form-select" id="clientStatusFilter" name="status" aria-label="Filtrar clientes por estado">
         <option value="">Todos</option>
         {% for value, label in client_status_options %}
         <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
@@ -104,7 +104,7 @@
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
       <label class="form-label" for="clientSellerFilter">Vendedor</label>
-      <select class="form-select" id="clientSellerFilter" name="seller">
+      <select class="form-select" id="clientSellerFilter" name="seller" aria-label="Filtrar clientes por vendedor">
         <option value="">Todos</option>
         {% for seller in sellers %}
         <option value="{{ seller.id }}" {% if filters.seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
@@ -113,7 +113,7 @@
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
       <label class="form-label" for="clientCollectionFilter">Cobranza</label>
-      <select class="form-select" id="clientCollectionFilter" name="collection">
+      <select class="form-select" id="clientCollectionFilter" name="collection" aria-label="Filtrar clientes por cobranza">
         <option value="">Todas</option>
         {% for value, label in collection_status_options %}
         <option value="{{ value }}" {% if filters.collection == value %}selected{% endif %}>{{ label }}</option>
@@ -121,8 +121,8 @@
       </select>
     </div>
     <div class="col-6 col-lg-3 col-xl-2 d-flex gap-2">
-      <button class="btn btn-primary flex-fill" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
-      <a class="btn btn-light" href="{{ url_for('clients') }}" aria-label="Limpiar"><i class="bi bi-x-lg"></i></a>
+      <button class="btn btn-primary flex-fill" type="submit" aria-label="Filtrar clientes"><i class="bi bi-funnel"></i> Filtrar</button>
+      <a class="btn btn-light" href="{{ url_for('clients') }}" aria-label="Limpiar filtros de clientes"><i class="bi bi-x-lg"></i></a>
     </div>
   </form>
 </section>
@@ -206,7 +206,7 @@
                 <i class="bi bi-eye"></i>
               </button>
               {% if can_edit_clients %}
-              <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}" aria-label="Editar {{ client.businessName }}">
+              <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}" aria-label="Editar {{ client.businessName }}" title="Editar cliente">
                 <i class="bi bi-pencil"></i> Editar
               </button>
               {% endif %}
@@ -248,6 +248,7 @@
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
+        {% set field_prefix = "new-client" %}
         {% include "partials/client_fields.html" %}
       </div>
       <div class="modal-footer">
@@ -364,6 +365,7 @@
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
+        {% set field_prefix = "edit-client-" ~ loop.index %}
         {% include "partials/client_fields.html" %}
       </div>
       <div class="modal-footer">

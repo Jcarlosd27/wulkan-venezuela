@@ -10,19 +10,21 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
-        <label class="form-label fw-semibold">Archivo Excel o CSV</label>
+        <label class="form-label fw-semibold" for="{{ bulk_modal_id }}ImportFile">Archivo Excel o CSV</label>
         <input
           class="form-control"
+          id="{{ bulk_modal_id }}ImportFile"
           name="importFile"
           type="file"
           accept=".xlsx,.xlsm,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          aria-label="Archivo Excel o CSV"
           required
         >
         <div class="bg-light rounded-3 p-3 mt-3">
           <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <strong>Columnas sugeridas</strong>
             {% if can_access_module('import_templates') %}
-            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('import_templates') }}">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('import_templates') }}" aria-label="Ver plantillas de importacion">
               <i class="bi bi-download"></i> Ver plantillas
             </a>
             {% endif %}
@@ -39,7 +41,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
-        <button class="btn btn-primary" name="importMode" value="preview" type="submit">
+        <button class="btn btn-primary" name="importMode" value="preview" type="submit" aria-label="Previsualizar archivo de importacion">
           <i class="bi bi-eye"></i> Previsualizar archivo
         </button>
       </div>

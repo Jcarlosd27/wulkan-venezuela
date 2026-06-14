@@ -246,8 +246,8 @@
           pager.innerHTML = `
             <span></span>
             <div>
-              <button class="btn btn-light btn-sm" type="button" data-page-prev><i class="bi bi-chevron-left"></i></button>
-              <button class="btn btn-light btn-sm" type="button" data-page-next><i class="bi bi-chevron-right"></i></button>
+              <button class="btn btn-light btn-sm" type="button" data-page-prev aria-label="Pagina anterior" title="Pagina anterior"><i class="bi bi-chevron-left"></i></button>
+              <button class="btn btn-light btn-sm" type="button" data-page-next aria-label="Pagina siguiente" title="Pagina siguiente"><i class="bi bi-chevron-right"></i></button>
             </div>
           `;
           table.closest(".table-responsive").after(pager);

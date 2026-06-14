@@ -8,6 +8,7 @@
 {% set selected_risk = client.creditRiskLevel if client is defined else 'low' %}
 {% set selected_state = client.state if client is defined else '' %}
 {% set selected_city = client.city if client is defined else '' %}
+{% set field_id_prefix = field_prefix if field_prefix is defined else 'client' %}
 
 <div class="client-form-stack">
   <section class="form-section">
@@ -17,29 +18,29 @@
     </div>
     <div class="row g-3">
       <div class="col-12 col-lg-4">
-        <label class="form-label fw-semibold">Razon social</label>
-        <input class="form-control" name="legalName" value="{{ client.legalName if client is defined else '' }}" placeholder="Razon social fiscal">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-legalName">Razon social</label>
+        <input class="form-control" id="{{ field_id_prefix }}-legalName" name="legalName" value="{{ client.legalName if client is defined else '' }}" placeholder="Razon social fiscal" aria-label="Razon social">
       </div>
       <div class="col-12 col-lg-4">
-        <label class="form-label fw-semibold">Nombre comercial</label>
-        <input class="form-control" name="businessName" required value="{{ client.businessName if client is defined else '' }}" placeholder="Nombre visible">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-businessName">Nombre comercial</label>
+        <input class="form-control" id="{{ field_id_prefix }}-businessName" name="businessName" required value="{{ client.businessName if client is defined else '' }}" placeholder="Nombre visible" aria-label="Nombre comercial">
       </div>
       <div class="col-12 col-lg-4">
-        <label class="form-label fw-semibold">Alias comercial</label>
-        <input class="form-control" name="commercialName" value="{{ client.commercialName if client is defined else '' }}" placeholder="Alias o nombre corto">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-commercialName">Alias comercial</label>
+        <input class="form-control" id="{{ field_id_prefix }}-commercialName" name="commercialName" value="{{ client.commercialName if client is defined else '' }}" placeholder="Alias o nombre corto" aria-label="Alias comercial">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">RIF / documento fiscal</label>
-        <input class="form-control" name="taxId" required value="{{ client.taxId if client is defined else '' }}" placeholder="J-00000000-0" autocomplete="off" maxlength="14" pattern="[VvEeJjGgPp][- ]?[0-9]{7,9}[- ]?[0-9]?">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-taxId">RIF / documento fiscal</label>
+        <input class="form-control" id="{{ field_id_prefix }}-taxId" name="taxId" required value="{{ client.taxId if client is defined else '' }}" placeholder="J-00000000-0" autocomplete="off" maxlength="14" pattern="[VvEeJjGgPp][- ]?[0-9]{7,9}[- ]?[0-9]?" aria-label="RIF o documento fiscal">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Email / usuario movil</label>
-        <input class="form-control" name="email" type="email" required value="{{ client.email if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-email">Email / usuario movil</label>
+        <input class="form-control" id="{{ field_id_prefix }}-email" name="email" type="email" required value="{{ client.email if client is defined else '' }}" aria-label="Email o usuario movil">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Contrasena temporal</label>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-password">Contrasena temporal</label>
         <div class="input-group">
-          <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if client is defined else 'Minimo 10 caracteres' }}" {% if client is not defined %}required{% endif %}>
+          <input class="form-control" id="{{ field_id_prefix }}-password" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="{{ 'Dejar vacia para conservar' if client is defined else 'Minimo 10 caracteres' }}" aria-label="Contrasena temporal" {% if client is not defined %}required{% endif %}>
           <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
             <i class="bi bi-eye"></i>
           </button>
@@ -55,44 +56,44 @@
     </div>
     <div class="row g-3">
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Contacto principal</label>
-        <input class="form-control" name="contactName" value="{{ client.contactName if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-contactName">Contacto principal</label>
+        <input class="form-control" id="{{ field_id_prefix }}-contactName" name="contactName" value="{{ client.contactName if client is defined else '' }}" aria-label="Contacto principal">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Contacto administrativo</label>
-        <input class="form-control" name="administrativeContact" value="{{ client.administrativeContact if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-administrativeContact">Contacto administrativo</label>
+        <input class="form-control" id="{{ field_id_prefix }}-administrativeContact" name="administrativeContact" value="{{ client.administrativeContact if client is defined else '' }}" aria-label="Contacto administrativo">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Contacto recepcion</label>
-        <input class="form-control" name="receivingContact" value="{{ client.receivingContact if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-receivingContact">Contacto recepcion</label>
+        <input class="form-control" id="{{ field_id_prefix }}-receivingContact" name="receivingContact" value="{{ client.receivingContact if client is defined else '' }}" aria-label="Contacto recepcion">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Telefono</label>
-        <input class="form-control" name="phone" required value="{{ client.phone if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-phone">Telefono</label>
+        <input class="form-control" id="{{ field_id_prefix }}-phone" name="phone" required value="{{ client.phone if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel" aria-label="Telefono">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">WhatsApp</label>
-        <input class="form-control" name="whatsapp" value="{{ client.whatsapp if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-whatsapp">WhatsApp</label>
+        <input class="form-control" id="{{ field_id_prefix }}-whatsapp" name="whatsapp" value="{{ client.whatsapp if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel" aria-label="WhatsApp">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Pais</label>
-        <input class="form-control" name="country" value="{{ client.country if client is defined else 'VE' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-country">Pais</label>
+        <input class="form-control" id="{{ field_id_prefix }}-country" name="country" value="{{ client.country if client is defined else 'VE' }}" aria-label="Pais">
       </div>
       <div class="col-12 col-lg-4">
-        <label class="form-label fw-semibold">Direccion general</label>
-        <input class="form-control" name="address" value="{{ client.address if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-address">Direccion general</label>
+        <input class="form-control" id="{{ field_id_prefix }}-address" name="address" value="{{ client.address if client is defined else '' }}" aria-label="Direccion general">
       </div>
       <div class="col-12 col-lg-4">
-        <label class="form-label fw-semibold">Direccion fiscal</label>
-        <input class="form-control" name="fiscalAddress" value="{{ client.fiscalAddress if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-fiscalAddress">Direccion fiscal</label>
+        <input class="form-control" id="{{ field_id_prefix }}-fiscalAddress" name="fiscalAddress" value="{{ client.fiscalAddress if client is defined else '' }}" aria-label="Direccion fiscal">
       </div>
       <div class="col-12 col-lg-4">
-        <label class="form-label fw-semibold">Direccion despacho</label>
-        <input class="form-control" name="shippingAddress" value="{{ client.shippingAddress if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-shippingAddress">Direccion despacho</label>
+        <input class="form-control" id="{{ field_id_prefix }}-shippingAddress" name="shippingAddress" value="{{ client.shippingAddress if client is defined else '' }}" aria-label="Direccion despacho">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Estado / region</label>
-        <select class="form-select" name="state" required data-venezuela-state>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-state">Estado / region</label>
+        <select class="form-select" id="{{ field_id_prefix }}-state" name="state" required data-venezuela-state aria-label="Estado o region">
           <option value="">Selecciona estado</option>
           {% for state in venezuela_locations.keys() %}
           <option value="{{ state }}" {% if selected_state == state %}selected{% endif %}>{{ state }}</option>
@@ -100,14 +101,14 @@
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Ciudad</label>
-        <select class="form-select" name="city" required data-venezuela-city data-selected-city="{{ selected_city }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-city">Ciudad</label>
+        <select class="form-select" id="{{ field_id_prefix }}-city" name="city" required data-venezuela-city data-selected-city="{{ selected_city }}" aria-label="Ciudad">
           <option value="">Selecciona ciudad</option>
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Zona comercial</label>
-        <input class="form-control" name="deliveryZone" value="{{ client.deliveryZone if client is defined else '' }}" placeholder="Ruta o zona">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-deliveryZone">Zona comercial</label>
+        <input class="form-control" id="{{ field_id_prefix }}-deliveryZone" name="deliveryZone" value="{{ client.deliveryZone if client is defined else '' }}" placeholder="Ruta o zona" aria-label="Zona comercial">
       </div>
     </div>
   </section>
@@ -119,49 +120,49 @@
     </div>
     <div class="row g-3">
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Tipo de cliente</label>
-        <select class="form-select" name="clientType">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-clientType">Tipo de cliente</label>
+        <select class="form-select" id="{{ field_id_prefix }}-clientType" name="clientType" aria-label="Tipo de cliente">
           {% for value, label in client_type_options %}
           <option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Categoria comercial</label>
-        <select class="form-select" name="clientCategory">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-clientCategory">Categoria comercial</label>
+        <select class="form-select" id="{{ field_id_prefix }}-clientCategory" name="clientCategory" aria-label="Categoria comercial">
           {% for value, label in client_category_options %}
           <option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Estado cliente</label>
-        <select class="form-select" name="status">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-status">Estado cliente</label>
+        <select class="form-select" id="{{ field_id_prefix }}-status" name="status" aria-label="Estado cliente">
           {% for value, label in client_status_options %}
           <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Lista de precios</label>
-        <select class="form-select" name="priceList">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-priceList">Lista de precios</label>
+        <select class="form-select" id="{{ field_id_prefix }}-priceList" name="priceList" aria-label="Lista de precios">
           {% for value, label in price_list_options %}
           <option value="{{ value }}" {% if selected_price_list == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Descuento autorizado %</label>
-        <input class="form-control" name="authorizedDiscountPercent" inputmode="decimal" value="{{ client.authorizedDiscountPercent if client is defined else 0 }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-authorizedDiscountPercent">Descuento autorizado %</label>
+        <input class="form-control" id="{{ field_id_prefix }}-authorizedDiscountPercent" name="authorizedDiscountPercent" inputmode="decimal" value="{{ client.authorizedDiscountPercent if client is defined else 0 }}" aria-label="Descuento autorizado">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Vendedor asignado</label>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-assignedSellerId">Vendedor asignado</label>
         {% if current_admin_role() == 'sales' %}
           <input type="hidden" name="assignedSellerId" value="{{ session.get('admin_user_id', '') }}">
-          <input class="form-control" readonly value="{{ session.get('admin_name', 'Vendedor') }}">
+          <input class="form-control" id="{{ field_id_prefix }}-assignedSellerId" readonly value="{{ session.get('admin_name', 'Vendedor') }}" aria-label="Vendedor asignado">
         {% else %}
           {% set selected_seller = client.assignedSellerId if client is defined else '' %}
-          <select class="form-select" name="assignedSellerId">
+          <select class="form-select" id="{{ field_id_prefix }}-assignedSellerId" name="assignedSellerId" aria-label="Vendedor asignado">
             <option value="">Sin asignar</option>
             {% for seller in sellers %}
             <option value="{{ seller.id }}" {% if selected_seller == seller.id %}selected{% endif %}>{{ seller.name }}</option>
@@ -170,15 +171,15 @@
         {% endif %}
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Tipo de venta default</label>
-        <select class="form-select" name="defaultSaleType">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-defaultSaleType">Tipo de venta default</label>
+        <select class="form-select" id="{{ field_id_prefix }}-defaultSaleType" name="defaultSaleType" aria-label="Tipo de venta default">
           {% for value, label in sale_type_options %}
           <option value="{{ value }}" {% if selected_sale_type == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-8">
-        <label class="form-label fw-semibold">Terminos permitidos</label>
+        <label class="form-label fw-semibold" id="{{ field_id_prefix }}-paymentTermsLabel">Terminos permitidos</label>
         <div class="product-checks flex-wrap">
           {% for term in payment_terms %}
           <label class="form-check mb-0">
@@ -199,25 +200,25 @@
     <div class="row g-3">
       {% if can_approve_credit %}
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Estado credito</label>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestStatus">Estado credito</label>
         {% set selected_credit_status = client.creditRequestStatus if client is defined else 'none' %}
-        <select class="form-select" name="creditRequestStatus">
+        <select class="form-select" id="{{ field_id_prefix }}-creditRequestStatus" name="creditRequestStatus" aria-label="Estado credito">
           {% for value, label in credit_status_options %}
           <option value="{{ value }}" {% if selected_credit_status == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Credito solicitado USD</label>
-        <input class="form-control" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestedUsd">Credito solicitado USD</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditRequestedUsd" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}" aria-label="Credito solicitado USD">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Limite credito USD</label>
-        <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditLimitUsd">Limite credito USD</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditLimitUsd" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}" aria-label="Limite credito USD">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Dias credito</label>
-        <input class="form-control" name="paymentTermsDays" inputmode="numeric" value="{{ client.paymentTermsDays if client is defined else 0 }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-paymentTermsDays">Dias credito</label>
+        <input class="form-control" id="{{ field_id_prefix }}-paymentTermsDays" name="paymentTermsDays" inputmode="numeric" value="{{ client.paymentTermsDays if client is defined else 0 }}" aria-label="Dias credito">
       </div>
       <div class="col-12">
         <label class="form-check mb-0">
@@ -227,65 +228,65 @@
       </div>
       {% else %}
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Solicitud credito</label>
+        <label class="form-label fw-semibold" id="{{ field_id_prefix }}-requestCreditLabel">Solicitud credito</label>
         <label class="form-check mb-0">
           <input class="form-check-input" type="checkbox" name="requestCredit" {% if client is defined and client.creditRequestStatus == 'pending' %}checked{% endif %}>
           <span class="form-check-label">Solicitar revision</span>
         </label>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Monto solicitado USD</label>
-        <input class="form-control" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestedUsd">Monto solicitado USD</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditRequestedUsd" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}" aria-label="Monto solicitado USD">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Estado actual</label>
-        <input class="form-control" readonly value="{{ client.creditRequestStatus if client is defined else 'none' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-currentCreditStatus">Estado actual</label>
+        <input class="form-control" id="{{ field_id_prefix }}-currentCreditStatus" readonly value="{{ client.creditRequestStatus if client is defined else 'none' }}" aria-label="Estado actual del credito">
       </div>
       {% endif %}
 
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Credito usado manual USD</label>
-        <input class="form-control" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}" {% if not can_approve_credit %}readonly{% endif %}>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditUsedUsd">Credito usado manual USD</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditUsedUsd" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}" aria-label="Credito usado manual USD" {% if not can_approve_credit %}readonly{% endif %}>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Estado cobranza</label>
-        <select class="form-select" name="collectionStatus">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-collectionStatus">Estado cobranza</label>
+        <select class="form-select" id="{{ field_id_prefix }}-collectionStatus" name="collectionStatus" aria-label="Estado cobranza">
           {% for value, label in collection_status_options %}
           <option value="{{ value }}" {% if selected_collection == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Riesgo credito</label>
-        <select class="form-select" name="creditRiskLevel">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRiskLevel">Riesgo credito</label>
+        <select class="form-select" id="{{ field_id_prefix }}-creditRiskLevel" name="creditRiskLevel" aria-label="Riesgo credito">
           {% for value, label in credit_risk_options %}
           <option value="{{ value }}" {% if selected_risk == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Score interno</label>
-        <input class="form-control" name="creditScore" inputmode="numeric" value="{{ client.creditScore if client is defined else 0 }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditScore">Score interno</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditScore" name="creditScore" inputmode="numeric" value="{{ client.creditScore if client is defined else 0 }}" aria-label="Score interno">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Disponible calculado</label>
-        <input class="form-control" readonly value="{{ money_usd(client.creditAvailableUsd) if client is defined else money_usd(0) }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditAvailable">Disponible calculado</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditAvailable" readonly value="{{ money_usd(client.creditAvailableUsd) if client is defined else money_usd(0) }}" aria-label="Disponible calculado">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Saldo abierto</label>
-        <input class="form-control" readonly value="{{ money_usd(client.openBalanceUsd) if client is defined else money_usd(0) }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-openBalance">Saldo abierto</label>
+        <input class="form-control" id="{{ field_id_prefix }}-openBalance" readonly value="{{ money_usd(client.openBalanceUsd) if client is defined else money_usd(0) }}" aria-label="Saldo abierto">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold">Aprobado por</label>
-        <input class="form-control" readonly value="{{ client.creditApprovedBy if client is defined else '' }}">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditApprovedBy">Aprobado por</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditApprovedBy" readonly value="{{ client.creditApprovedBy if client is defined else '' }}" aria-label="Aprobado por">
       </div>
       <div class="col-12">
-        <label class="form-label fw-semibold">Observacion de gerencia</label>
-        <textarea class="form-control" name="creditManagerNote" rows="2" placeholder="Motivo comercial, restriccion de cupo o condicion especial">{{ client.creditManagerNote if client is defined else '' }}</textarea>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditManagerNote">Observacion de gerencia</label>
+        <textarea class="form-control" id="{{ field_id_prefix }}-creditManagerNote" name="creditManagerNote" rows="2" placeholder="Motivo comercial, restriccion de cupo o condicion especial" aria-label="Observacion de gerencia">{{ client.creditManagerNote if client is defined else '' }}</textarea>
       </div>
       <div class="col-12">
-        <label class="form-label fw-semibold">Notas internas</label>
-        <textarea class="form-control" name="notes" rows="3" placeholder="Observaciones comerciales, condiciones especiales o alertas internas">{{ client.notes if client is defined else '' }}</textarea>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-notes">Notas internas</label>
+        <textarea class="form-control" id="{{ field_id_prefix }}-notes" name="notes" rows="3" placeholder="Observaciones comerciales, condiciones especiales o alertas internas" aria-label="Notas internas">{{ client.notes if client is defined else '' }}</textarea>
       </div>
     </div>
   </section>
