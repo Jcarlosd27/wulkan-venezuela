@@ -7672,6 +7672,47 @@ def persist_product_seed_action(
         return False
 
 
+def persist_seller_action(
+    store: dict,
+    changed_users: list[dict],
+    audit_events_start: int,
+    fallback_detail: str,
+    deleted_user_ids: list[str] | None = None,
+    changed_clients: list[dict] | None = None,
+    changed_orders: list[dict] | None = None,
+) -> bool:
+    try:
+        save_store(store)
+        return True
+    except Exception:
+        app.logger.exception("No se pudo sincronizar el store completo para vendedores: %s", fallback_detail)
+        if use_sql_backend() and (changed_users or deleted_user_ids):
+            try:
+                from sql_store import sync_admin_user_records
+
+                sync_admin_user_records(
+                    changed_users,
+                    store.get("audit_events", [])[audit_events_start:],
+                    deleted_user_ids or [],
+                    changed_clients or [],
+                    changed_orders or [],
+                )
+                push_admin_toast(
+                    "El cambio se aplico en vendedores, pero se detecto una inconsistencia pendiente en otra tabla.",
+                    "warning",
+                    "Vendedor actualizado",
+                )
+                return True
+            except Exception:
+                app.logger.exception("No se pudo aplicar fallback puntual de vendedores: %s", fallback_detail)
+        push_admin_toast(
+            "No se pudo guardar el vendedor. Revisa los registros relacionados o intenta nuevamente.",
+            "danger",
+            "Accion no aplicada",
+        )
+        return False
+
+
 def category_form_error(store: dict, existing: dict | None = None) -> str:
     name = request.form.get("name", "").strip()
     slug = category_slug(request.form.get("slug", "").strip() or name)
@@ -7943,7 +7984,7 @@ def admin_user_form_error(store: dict, existing: dict | None = None) -> str:
     if not email:
         return "El email del usuario admin es obligatorio."
     duplicated = any(
-        user.get("email", "").lower() == email
+        str(user.get("email") or "").lower() == email
         and (existing is None or user.get("id") != existing.get("id"))
         for user in store["admin_users"]
     )
@@ -7970,7 +8011,7 @@ def seller_form_error(store: dict, existing: dict | None = None) -> str:
     if goal < 0:
         return "La meta mensual no puede ser negativa."
     duplicated = any(
-        user.get("email", "").lower() == email
+        str(user.get("email") or "").lower() == email
         and (existing is None or user.get("id") != existing.get("id"))
         for user in store["admin_users"]
     )
@@ -8006,7 +8047,7 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
     if location_error:
         return location_error
     duplicated = any(
-        client.get("email", "").lower() == email
+        str(client.get("email") or "").lower() == email
         and (existing is None or client.get("id") != existing.get("id"))
         for client in store["clients"]
     )
@@ -8044,6 +8085,7 @@ def admin_user_payload(existing: dict | None = None) -> dict:
     if first_name or last_name:
         display_name = f"{first_name} {last_name}".strip()
     mobile_access_values = request.form.getlist("mobileAccessEnabled")
+    truthy_values = {"on", "1", "true", "yes", "si", "sí"}
     payload = {
         "firstName": first_name or (existing or {}).get("firstName", ""),
         "lastName": last_name or (existing or {}).get("lastName", ""),
@@ -8057,7 +8099,11 @@ def admin_user_payload(existing: dict | None = None) -> dict:
         "sellerSupervisor": sanitize_text(request.form.get("sellerSupervisor", ""), max_length=160, allow_newlines=False),
         "phone": sanitize_text(request.form.get("phone", ""), max_length=60, allow_newlines=False),
         "hiredAt": sanitize_text(request.form.get("hiredAt", ""), max_length=32, allow_newlines=False),
-        "mobileAccessEnabled": "on" in mobile_access_values if mobile_access_values else bool((existing or {}).get("mobileAccessEnabled", True)),
+        "mobileAccessEnabled": (
+            any(str(value).strip().lower() in truthy_values for value in mobile_access_values)
+            if mobile_access_values
+            else bool((existing or {}).get("mobileAccessEnabled", True))
+        ),
         "internalNotes": sanitize_text(request.form.get("internalNotes", ""), max_length=1000),
         "commissionRatePercent": safe_float(
             request.form.get("commissionRatePercent"),
@@ -10141,9 +10187,16 @@ def sellers():
         seller["role"] = "sales"
         if not seller.get("sellerCode"):
             seller["sellerCode"] = seller["id"].replace("admin-", "VEN-").upper()[:24]
+        audit_events_start = len(store.get("audit_events", []))
         store["admin_users"].append(seller)
         record_create_event(store, "seller", seller["id"], f"Vendedor creado: {seller['name']}.", seller)
-        save_store(store)
+        if not persist_seller_action(store, [seller], audit_events_start, "crear vendedor"):
+            store["admin_users"] = [
+                item for item in store.get("admin_users", [])
+                if item.get("id") != seller.get("id")
+            ]
+            error = "No se pudo guardar el vendedor. Intenta nuevamente."
+            return render_template("sellers.html", **sellers_page_context(store, error))
         return redirect(url_for("sellers"))
 
     return render_template("sellers.html", **sellers_page_context(store))
@@ -10171,12 +10224,19 @@ def seller_edit(seller_id: str):
             updated if item["id"] == seller_id else item
             for item in store["admin_users"]
         ]
+        changed_clients: list[dict] = []
         for client in store.get("clients", []):
             if client.get("assignedSellerId") == seller_id:
                 client["assignedSellerName"] = updated.get("name", "")
+                client["updatedAt"] = utc_now()
+                changed_clients.append(client)
+        changed_orders: list[dict] = []
         for order in store.get("orders", []):
             if order.get("sellerId") == seller_id:
                 order["sellerName"] = updated.get("name", "")
+                order["updatedAt"] = utc_now()
+                changed_orders.append(order)
+        audit_events_start = len(store.get("audit_events", []))
         record_change_event(
             store,
             "update",
@@ -10186,7 +10246,20 @@ def seller_edit(seller_id: str):
             before,
             updated,
         )
-        save_store(store)
+        if not persist_seller_action(
+            store,
+            [updated],
+            audit_events_start,
+            "editar vendedor",
+            changed_clients=changed_clients,
+            changed_orders=changed_orders,
+        ):
+            store["admin_users"] = [
+                before if item["id"] == seller_id else item
+                for item in store["admin_users"]
+            ]
+            error = "No se pudo actualizar el vendedor. Intenta nuevamente."
+            return render_template("sellers.html", **sellers_page_context(store, error))
     return redirect(url_for("sellers"))
 
 
@@ -10208,6 +10281,7 @@ def seller_delete(seller_id: str):
     else:
         store["admin_users"] = [item for item in store.get("admin_users", []) if item.get("id") != seller_id]
         after = None
+    audit_events_start = len(store.get("audit_events", []))
     record_change_event(
         store,
         "delete",
@@ -10222,7 +10296,18 @@ def seller_delete(seller_id: str):
         "warning",
         "Vendedor actualizado",
     )
-    save_store(store)
+    if not persist_seller_action(
+        store,
+        [after] if after else [],
+        audit_events_start,
+        "eliminar vendedor",
+        deleted_user_ids=[] if after else [seller_id],
+    ):
+        if after:
+            seller.update(before)
+        else:
+            store["admin_users"].append(before)
+        return redirect(url_for("sellers"))
     return redirect(url_for("sellers"))
 
 

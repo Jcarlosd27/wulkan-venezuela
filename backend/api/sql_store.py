@@ -597,30 +597,64 @@ def sync_business_settings(session, store: dict[str, Any]) -> None:
     )
 
 
+def admin_user_sql_values(user: dict[str, Any], object_id: str | None = None) -> dict[str, Any]:
+    object_id = object_id or user["id"]
+    return {
+        "id": object_id,
+        "name": user.get("name", ""),
+        "email": str(user.get("email") or "").lower(),
+        "password_hash": user.get("passwordHash", ""),
+        "role": user.get("role", "operator"),
+        "status": user.get("status", "active"),
+        "must_change_password": bool(user.get("mustChangePassword")),
+        "last_login_at": parse_dt(user.get("lastLoginAt")) if user.get("lastLoginAt") else None,
+        "created_at": parse_dt(user.get("createdAt")),
+        "updated_at": parse_dt(user.get("updatedAt")),
+        "payload": user,
+    }
+
+
 def sync_admin_users(session, store: dict[str, Any]) -> None:
     live_ids: set[str] = set()
     for user in store.get("admin_users", []):
         object_id = user["id"]
         live_ids.add(object_id)
-        upsert(
-            session,
-            AdminUser,
-            object_id,
-            {
-                "id": object_id,
-                "name": user.get("name", ""),
-                "email": user.get("email", "").lower(),
-                "password_hash": user.get("passwordHash", ""),
-                "role": user.get("role", "operator"),
-                "status": user.get("status", "active"),
-                "must_change_password": bool(user.get("mustChangePassword")),
-                "last_login_at": parse_dt(user.get("lastLoginAt")) if user.get("lastLoginAt") else None,
-                "created_at": parse_dt(user.get("createdAt")),
-                "updated_at": parse_dt(user.get("updatedAt")),
-                "payload": user,
-            },
-        )
+        upsert(session, AdminUser, object_id, admin_user_sql_values(user, object_id))
     soft_prune(session, AdminUser, live_ids)
+
+
+def sync_admin_user_records(
+    admin_users: list[dict[str, Any]],
+    audit_events: list[dict[str, Any]] | None = None,
+    deleted_admin_user_ids: list[str] | None = None,
+    clients: list[dict[str, Any]] | None = None,
+    orders: list[dict[str, Any]] | None = None,
+) -> None:
+    init_database()
+    with SessionLocal() as session:
+        for user in admin_users:
+            object_id = user["id"]
+            upsert(session, AdminUser, object_id, admin_user_sql_values(user, object_id))
+        for user_id in deleted_admin_user_ids or []:
+            row = session.get(AdminUser, user_id)
+            if row:
+                row.status = "deleted"
+                payload = copy_payload(row.payload)
+                payload["status"] = "deleted"
+                payload["deletedAt"] = utc_now()
+                row.payload = payload
+                row.updated_at = utc_now_dt()
+        for client in clients or []:
+            object_id = client["id"]
+            upsert(session, Client, object_id, client_sql_values(client, object_id))
+        session.flush()
+        for order in orders or []:
+            customer_id = ensure_client_for_order(session, order)
+            object_id = order["id"]
+            upsert(session, Order, object_id, order_sql_values(order, customer_id, object_id))
+        if audit_events:
+            sync_audit_events(session, {"audit_events": audit_events})
+        session.commit()
 
 
 def client_sql_values(client: dict[str, Any], object_id: str | None = None) -> dict[str, Any]:
@@ -908,40 +942,40 @@ def ensure_client_for_order(session, order: dict[str, Any]) -> str:
     return customer_id
 
 
+def order_sql_values(order: dict[str, Any], customer_id: str, object_id: str | None = None) -> dict[str, Any]:
+    object_id = object_id or order["id"]
+    return {
+        "id": object_id,
+        "order_number": order.get("orderId", object_id),
+        "customer_id": customer_id,
+        "status": order.get("status", "credit_review"),
+        "credit_status": order.get("creditStatus", "manual_review"),
+        "payment_status": order.get("paymentStatus", "pending"),
+        "total_usd": float(order.get("totalUsd") or 0),
+        "total_ves": float(order.get("totalVes") or 0),
+        "exchange_rate_usd_ves": float(order.get("exchangeRateUsdVes") or 38.5),
+        "paid_usd": float(order.get("paidUsd") or 0),
+        "balance_usd": float(order.get("balanceUsd") or order.get("totalUsd") or 0),
+        "credit_before_usd": float(order.get("creditBeforeUsd") or 0),
+        "credit_after_usd": float(order.get("creditAfterUsd") or 0),
+        "inventory_status": order.get("inventoryStatus", ""),
+        "stock_status": order.get("stockStatus", ""),
+        "managed_by": order.get("managedBy", ""),
+        "managed_at": order.get("managedAt", ""),
+        "items": order.get("items") or [],
+        "customer_snapshot": order.get("customer") or {},
+        "status_history": order.get("statusHistory") or [],
+        "created_at": parse_dt(order.get("createdAt")),
+        "updated_at": parse_dt(order.get("updatedAt")),
+        "payload": order,
+    }
+
+
 def sync_orders(session, store: dict[str, Any]) -> None:
     for order in store.get("orders", []):
         customer_id = ensure_client_for_order(session, order)
         object_id = order["id"]
-        upsert(
-            session,
-            Order,
-            object_id,
-            {
-                "id": object_id,
-                "order_number": order.get("orderId", object_id),
-                "customer_id": customer_id,
-                "status": order.get("status", "credit_review"),
-                "credit_status": order.get("creditStatus", "manual_review"),
-                "payment_status": order.get("paymentStatus", "pending"),
-                "total_usd": float(order.get("totalUsd") or 0),
-                "total_ves": float(order.get("totalVes") or 0),
-                "exchange_rate_usd_ves": float(order.get("exchangeRateUsdVes") or 38.5),
-                "paid_usd": float(order.get("paidUsd") or 0),
-                "balance_usd": float(order.get("balanceUsd") or order.get("totalUsd") or 0),
-                "credit_before_usd": float(order.get("creditBeforeUsd") or 0),
-                "credit_after_usd": float(order.get("creditAfterUsd") or 0),
-                "inventory_status": order.get("inventoryStatus", ""),
-                "stock_status": order.get("stockStatus", ""),
-                "managed_by": order.get("managedBy", ""),
-                "managed_at": order.get("managedAt", ""),
-                "items": order.get("items") or [],
-                "customer_snapshot": order.get("customer") or {},
-                "status_history": order.get("statusHistory") or [],
-                "created_at": parse_dt(order.get("createdAt")),
-                "updated_at": parse_dt(order.get("updatedAt")),
-                "payload": order,
-            },
-        )
+        upsert(session, Order, object_id, order_sql_values(order, customer_id, object_id))
 
 
 def sync_quotes(session, store: dict[str, Any]) -> None:

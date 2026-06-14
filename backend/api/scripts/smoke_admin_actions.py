@@ -677,6 +677,155 @@ def assert_product_seed_handles_full_sync_failure(app, state_holder: dict, failu
         sql_store.sync_product_seed_records = original_sync_product_seed_records
 
 
+def seller_form_payload(
+    *,
+    name: str = "Vendedor Smoke",
+    email: str = "vendedor.smoke@wulkan.test",
+    seller_code: str = "VEN-SMOKE-001",
+    password: str = "Vendedor2026",
+) -> dict:
+    return {
+        "_csrf_token": CSRF,
+        "name": name,
+        "email": email,
+        "password": password,
+        "sellerCode": seller_code,
+        "sellerZone": "Caracas",
+        "sellerTerritory": "Centro",
+        "sellerSupervisor": "Gerencia Comercial",
+        "phone": "+58 412-1234567",
+        "hiredAt": "2026-06-14",
+        "status": "active",
+        "mobileAccessEnabled": "on",
+        "commissionRatePercent": "4.5",
+        "salesGoalUsd": "1500",
+        "internalNotes": "Prueba automatica de vendedores.",
+    }
+
+
+def find_seller(store: dict, email: str) -> dict | None:
+    email = email.lower()
+    return next(
+        (
+            user
+            for user in store.get("admin_users", [])
+            if user.get("role") == "sales" and str(user.get("email", "")).lower() == email
+        ),
+        None,
+    )
+
+
+def assert_seller_crud(app, state_holder: dict, failures: list[str]) -> None:
+    state_holder["state"] = base_store()
+    seller_email = "vendedor.smoke@wulkan.test"
+    with app.test_client() as client:
+        authenticate(client)
+        response = client.post(
+            "/sellers",
+            data=seller_form_payload(email=seller_email),
+            follow_redirects=False,
+        )
+        if not safe_status_code(response):
+            failures.append(f"POST /sellers crear vendedor: HTTP {response.status_code}")
+            return
+
+    seller = find_seller(state_holder["state"], seller_email)
+    if not seller:
+        failures.append("Crear vendedor no dejo registro sales en admin_users.")
+        return
+    if seller.get("sellerCode") != "VEN-SMOKE-001":
+        failures.append("Crear vendedor no guardo el codigo comercial.")
+    if not seller.get("mobileAccessEnabled"):
+        failures.append("Crear vendedor no habilito acceso movil.")
+
+    with app.test_client() as client:
+        authenticate(client)
+        response = client.post(
+            f"/sellers/{seller['id']}/edit",
+            data=seller_form_payload(
+                name="Vendedor Smoke Editado",
+                email=seller_email,
+                seller_code="VEN-SMOKE-002",
+                password="",
+            ),
+            follow_redirects=False,
+        )
+        if not safe_status_code(response):
+            failures.append(f"POST /sellers/{seller['id']}/edit: HTTP {response.status_code}")
+            return
+
+    edited = find_seller(state_holder["state"], seller_email)
+    if not edited or edited.get("name") != "Vendedor Smoke Editado":
+        failures.append("Editar vendedor no actualizo el nombre.")
+    if edited and edited.get("sellerCode") != "VEN-SMOKE-002":
+        failures.append("Editar vendedor no actualizo el codigo comercial.")
+
+    with app.test_client() as client:
+        authenticate(client)
+        response = client.post(
+            f"/sellers/{seller['id']}/delete",
+            data={"_csrf_token": CSRF},
+            follow_redirects=False,
+        )
+        if not safe_status_code(response):
+            failures.append(f"POST /sellers/{seller['id']}/delete: HTTP {response.status_code}")
+            return
+
+    deleted = find_seller(state_holder["state"], seller_email)
+    if deleted:
+        failures.append("Eliminar vendedor sin cartera no removio el registro.")
+
+
+def assert_seller_create_handles_full_sync_failure(app, state_holder: dict, failures: list[str]) -> None:
+    state_holder["state"] = base_store()
+    original_save_store = wulkan_app.save_store
+    original_use_sql_backend = wulkan_app.use_sql_backend
+
+    import sql_store
+
+    original_sync_admin_user_records = sql_store.sync_admin_user_records
+    fallback_calls: list[tuple[int, int, int]] = []
+
+    def failing_save_store(_store: dict) -> None:
+        raise RuntimeError("simulated full-store sync failure")
+
+    def fake_sync_admin_user_records(
+        admin_users: list[dict],
+        audit_events: list[dict] | None = None,
+        deleted_admin_user_ids: list[str] | None = None,
+        clients: list[dict] | None = None,
+        orders: list[dict] | None = None,
+    ) -> None:
+        fallback_calls.append((len(admin_users), len(audit_events or []), len(deleted_admin_user_ids or [])))
+
+    wulkan_app.save_store = failing_save_store
+    wulkan_app.use_sql_backend = lambda: True
+    sql_store.sync_admin_user_records = fake_sync_admin_user_records
+    try:
+        with app.test_client() as client:
+            authenticate(client)
+            response = client.post(
+                "/sellers",
+                data=seller_form_payload(
+                    name="Vendedor Fallback",
+                    email="vendedor.fallback@wulkan.test",
+                    seller_code="VEN-FALLBACK-001",
+                ),
+                follow_redirects=False,
+            )
+            if not safe_status_code(response):
+                failures.append(f"POST /sellers con fallback SQL: HTTP {response.status_code}")
+                return
+        if not fallback_calls:
+            failures.append("Crear vendedor no uso fallback puntual cuando fallo el sync completo.")
+        elif fallback_calls[-1][0] != 1 or fallback_calls[-1][1] < 1:
+            failures.append("Fallback puntual de vendedor no recibio usuario y auditoria del cambio.")
+    finally:
+        wulkan_app.save_store = original_save_store
+        wulkan_app.use_sql_backend = original_use_sql_backend
+        sql_store.sync_admin_user_records = original_sync_admin_user_records
+
+
 def main() -> int:
     failures: list[str] = []
     collected_forms: list[tuple[str, dict]] = []
@@ -732,6 +881,8 @@ def main() -> int:
                 )
 
     assert_category_delete_preserves_children(app, state_holder, failures)
+    assert_seller_crud(app, state_holder, failures)
+    assert_seller_create_handles_full_sync_failure(app, state_holder, failures)
     assert_product_seed_creates_mobile_catalog(app, state_holder, failures)
     assert_product_seed_handles_full_sync_failure(app, state_holder, failures)
 
