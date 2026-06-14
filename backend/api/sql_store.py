@@ -662,11 +662,19 @@ def sync_admin_user_records(
                 payload["deletedAt"] = utc_now()
                 row.payload = payload
                 row.updated_at = utc_now_dt()
+        client_id_aliases: dict[str, str] = {}
         for client in clients or []:
-            object_id = client["id"]
-            upsert(session, Client, object_id, client_sql_values(client, object_id))
+            original_id = client["id"]
+            object_id = upsert_client(session, client, original_id)
+            if object_id != original_id:
+                client_id_aliases[original_id] = object_id
         session.flush()
         for order in orders or []:
+            customer_id_value = str(order.get("customerId") or (order.get("customer") or {}).get("id") or "")
+            if customer_id_value in client_id_aliases:
+                order["customerId"] = client_id_aliases[customer_id_value]
+                if isinstance(order.get("customer"), dict):
+                    order["customer"]["id"] = client_id_aliases[customer_id_value]
             customer_id = ensure_client_for_order(session, order)
             object_id = order["id"]
             upsert(session, Order, object_id, order_sql_values(order, customer_id, object_id))
@@ -675,6 +683,10 @@ def sync_admin_user_records(
                 for event in audit_events:
                     if event.get("entityId") in admin_id_aliases:
                         event["entityId"] = admin_id_aliases[event["entityId"]]
+            if client_id_aliases:
+                for event in audit_events:
+                    if event.get("entityId") in client_id_aliases:
+                        event["entityId"] = client_id_aliases[event["entityId"]]
             sync_audit_events(session, {"audit_events": audit_events})
         session.commit()
 
@@ -703,12 +715,27 @@ def client_sql_values(client: dict[str, Any], object_id: str | None = None) -> d
     }
 
 
+def upsert_client(session, client: dict[str, Any], object_id: str | None = None) -> str:
+    object_id = object_id or client["id"]
+    values = client_sql_values(client, object_id)
+    email = values.get("email") or ""
+    existing_by_email = session.query(Client).filter(Client.email == email).one_or_none() if email else None
+    if existing_by_email and existing_by_email.id != object_id:
+        object_id = existing_by_email.id
+        values["id"] = object_id
+        payload = copy_payload(values.get("payload") or {})
+        payload["id"] = object_id
+        values["payload"] = payload
+        client["id"] = object_id
+    upsert(session, Client, object_id, values)
+    return object_id
+
+
 def sync_clients(session, store: dict[str, Any]) -> None:
     live_ids: set[str] = set()
     for client in store.get("clients", []):
-        object_id = client["id"]
+        object_id = upsert_client(session, client, client["id"])
         live_ids.add(object_id)
-        upsert(session, Client, object_id, client_sql_values(client, object_id))
     soft_prune(session, Client, live_ids)
 
 
@@ -719,12 +746,26 @@ def sync_client_records(
 ) -> None:
     init_database()
     with SessionLocal() as session:
+        client_id_aliases: dict[str, str] = {}
         for client in clients:
-            object_id = client["id"]
-            upsert(session, Client, object_id, client_sql_values(client, object_id))
+            original_id = client["id"]
+            object_id = upsert_client(session, client, original_id)
+            if object_id != original_id:
+                client_id_aliases[original_id] = object_id
         if notifications:
+            if client_id_aliases:
+                for notification in notifications:
+                    if notification.get("entityId") in client_id_aliases:
+                        notification["entityId"] = client_id_aliases[notification["entityId"]]
+                    metadata = notification.get("metadata")
+                    if isinstance(metadata, dict) and metadata.get("clientId") in client_id_aliases:
+                        metadata["clientId"] = client_id_aliases[metadata["clientId"]]
             sync_notification_records(session, notifications)
         if audit_events:
+            if client_id_aliases:
+                for event in audit_events:
+                    if event.get("entityId") in client_id_aliases:
+                        event["entityId"] = client_id_aliases[event["entityId"]]
             sync_audit_events(session, {"audit_events": audit_events})
         session.commit()
 

@@ -19,7 +19,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import app as wulkan_app
 from db import drop_database, init_database
-from sql_store import load_sql_store, sync_admin_user_records, sync_store_to_sql
+from sql_store import load_sql_store, sync_admin_user_records, sync_client_records, sync_store_to_sql
 from store import normalize_store, utc_now
 from werkzeug.security import generate_password_hash
 
@@ -329,6 +329,33 @@ def main() -> int:
             }
         ]
     )
+    sync_client_records(
+        [
+            {
+                "id": "client-sql-new-id",
+                "businessName": "Ferreteria SQL Reactivada",
+                "contactName": "Comprador Reactivado SQL",
+                "email": "deleted.sql@wulkan.test",
+                "passwordHash": generate_password_hash("ClientSql2026"),
+                "status": "active",
+                "clientType": "ferretero",
+                "taxId": "J-44444444-4",
+                "phone": "+580000000005",
+                "address": "Av SQL Reactivada",
+                "city": "Valencia",
+                "state": "Carabobo",
+                "creditEnabled": False,
+                "creditLimitUsd": 0,
+                "creditUsedUsd": 0,
+                "creditRequestStatus": "none",
+                "paymentTermsDays": 0,
+                "allowedPaymentTermsDays": [0],
+                "defaultSaleType": "cash",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ]
+    )
     app = wulkan_app.app
     app.config.update(TESTING=True, SECRET_KEY="sql-integrity-smoke-secret", REQUIRE_MOBILE_TOKEN=True)
 
@@ -354,7 +381,8 @@ def main() -> int:
                 "allowedPaymentTermsDays": "0,15,30",
             },
         )
-        assert duplicate_mobile_client.status_code == 409, duplicate_mobile_client.get_data(as_text=True)
+        assert duplicate_mobile_client.status_code == 200, duplicate_mobile_client.get_data(as_text=True)
+        assert duplicate_mobile_client.get_json()["alreadyExists"] is True
         assert duplicate_mobile_client.is_json
         created_mobile_client = client.post(
             "/api/mobile/seller/clients",
@@ -401,6 +429,7 @@ def main() -> int:
     mobile_client_record = next(
         item for item in store["clients"] if item["email"] == "ferreteria.sql.nueva@wulkan.test"
     )
+    reactivated_client = next(item for item in store["clients"] if item["email"] == "deleted.sql@wulkan.test")
     reactivated_seller = next(
         item for item in store["admin_users"] if item["email"] == "vendedor.eliminado.sql@wulkan.test"
     )
@@ -411,6 +440,9 @@ def main() -> int:
     assert mobile_client_record["assignedSellerId"] == ADMIN_ID, "cliente movil debe quedar asignado al usuario que lo creo"
     assert mobile_client_record["creditRequestStatus"] == "pending", "credito solicitado desde movil debe quedar pendiente"
     assert mobile_client_record["idempotencyKey"] == "sql-smoke-client-001", "cliente movil debe conservar llave idempotente"
+    assert reactivated_client["id"] == "client-sql-deleted", "cliente con email historico debe reutilizar el registro SQL"
+    assert reactivated_client["status"] == "active", "cliente historico debe poder reactivarse sin 500"
+    assert reactivated_client["businessName"] == "Ferreteria SQL Reactivada", "cliente reactivado debe guardar datos nuevos"
     assert reactivated_seller["id"] == "admin-seller-deleted", "vendedor con email historico debe reutilizar el registro SQL"
     assert reactivated_seller["status"] == "active", "vendedor historico debe poder reactivarse sin 500"
     assert reactivated_seller["sellerCode"] == "VEN-SQL-REACT", "vendedor reactivado debe guardar los nuevos datos"
