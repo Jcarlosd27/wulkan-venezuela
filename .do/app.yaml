@@ -1,12 +1,12 @@
-name: wulkan-venezuela
+name: fventas-chile
 region: nyc
 
 services:
-  - name: wulkan-admin
+  - name: fventas-admin
     source_dir: backend/api
     dockerfile_path: backend/api/Dockerfile
     github:
-      repo: Jcarlosd27/wulkan-venezuela
+      repo: Jcarlosd27/fventas-chile
       branch: main
       deploy_on_push: true
     http_port: 5000
@@ -15,50 +15,50 @@ services:
     health_check:
       http_path: /healthz
     envs:
-      - key: WULKAN_ENV
+      - key: FVENTAS_ENV
         scope: RUN_TIME
         value: production
-      - key: WULKAN_APP_VERSION
+      - key: FVENTAS_APP_VERSION
         scope: RUN_TIME
         value: "1.0.0"
-      - key: WULKAN_BUILD_SHA
+      - key: FVENTAS_BUILD_SHA
         scope: RUN_TIME
         value: digitalocean-main
-      - key: WULKAN_SECRET_KEY
+      - key: FVENTAS_SECRET_KEY
         scope: RUN_TIME
         type: SECRET
         value: replace-with-a-long-random-secret
-      - key: WULKAN_DATA_BACKEND
+      - key: FVENTAS_DATA_BACKEND
         scope: RUN_TIME
         value: sql
-      - key: WULKAN_DATABASE_URL
+      - key: FVENTAS_DATABASE_URL
         scope: RUN_TIME
-        value: ${wulkan-db.DATABASE_URL}
-      - key: WULKAN_SQL_FALLBACK_TO_JSON
+        value: ${fventas-db.DATABASE_URL}
+      - key: FVENTAS_SQL_FALLBACK_TO_JSON
         scope: RUN_TIME
         value: "0"
-      - key: WULKAN_REQUIRE_MOBILE_TOKEN
+      - key: FVENTAS_REQUIRE_MOBILE_TOKEN
         scope: RUN_TIME
         value: "1"
-      - key: WULKAN_STORAGE_BACKEND
+      - key: FVENTAS_STORAGE_BACKEND
         scope: RUN_TIME
         value: s3
-      - key: WULKAN_STORAGE_PUBLIC_BASE_URL
+      - key: FVENTAS_STORAGE_PUBLIC_BASE_URL
         scope: RUN_TIME
-        value: https://wulkan-assets.atl1.cdn.digitaloceanspaces.com
-      - key: WULKAN_S3_BUCKET
+        value: https://fventas-assets.atl1.cdn.digitaloceanspaces.com
+      - key: FVENTAS_S3_BUCKET
         scope: RUN_TIME
-        value: wulkan-assets
-      - key: WULKAN_S3_REGION
+        value: fventas-assets
+      - key: FVENTAS_S3_REGION
         scope: RUN_TIME
         value: atl1
-      - key: WULKAN_S3_ENDPOINT_URL
+      - key: FVENTAS_S3_ENDPOINT_URL
         scope: RUN_TIME
         value: https://atl1.digitaloceanspaces.com
-      - key: WULKAN_S3_PREFIX
+      - key: FVENTAS_S3_PREFIX
         scope: RUN_TIME
         value: production
-      - key: WULKAN_S3_ACL
+      - key: FVENTAS_S3_ACL
         scope: RUN_TIME
         value: public-read
       - key: AWS_ACCESS_KEY_ID
@@ -69,54 +69,54 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: replace-with-digitalocean-spaces-secret
-      - key: WULKAN_LOGIN_MAX_ATTEMPTS
+      - key: FVENTAS_LOGIN_MAX_ATTEMPTS
         scope: RUN_TIME
         value: "5"
-      - key: WULKAN_LOGIN_WINDOW_SECONDS
+      - key: FVENTAS_LOGIN_WINDOW_SECONDS
         scope: RUN_TIME
         value: "300"
-      - key: WULKAN_MAX_UPLOAD_MB
+      - key: FVENTAS_MAX_UPLOAD_MB
         scope: RUN_TIME
         value: "16"
-      - key: WULKAN_BACKUP_DIR
+      - key: FVENTAS_BACKUP_DIR
         scope: RUN_TIME
         value: backups
-      - key: WULKAN_LOG_LEVEL
+      - key: FVENTAS_LOG_LEVEL
         scope: RUN_TIME
         value: INFO
-      - key: WULKAN_WEB_WORKERS
+      - key: FVENTAS_WEB_WORKERS
         scope: RUN_TIME
         value: "1"
-      - key: WULKAN_WEB_THREADS
+      - key: FVENTAS_WEB_THREADS
         scope: RUN_TIME
         value: "4"
-      - key: WULKAN_GUNICORN_TIMEOUT
+      - key: FVENTAS_GUNICORN_TIMEOUT
         scope: RUN_TIME
         value: "60"
-      - key: WULKAN_GUNICORN_MAX_REQUESTS
+      - key: FVENTAS_GUNICORN_MAX_REQUESTS
         scope: RUN_TIME
         value: "600"
-      - key: WULKAN_GUNICORN_MAX_REQUESTS_JITTER
+      - key: FVENTAS_GUNICORN_MAX_REQUESTS_JITTER
         scope: RUN_TIME
         value: "60"
-      - key: WULKAN_DB_POOL_SIZE
+      - key: FVENTAS_DB_POOL_SIZE
         scope: RUN_TIME
         value: "2"
-      - key: WULKAN_DB_MAX_OVERFLOW
+      - key: FVENTAS_DB_MAX_OVERFLOW
         scope: RUN_TIME
         value: "2"
-      - key: WULKAN_DB_POOL_RECYCLE_SECONDS
+      - key: FVENTAS_DB_POOL_RECYCLE_SECONDS
         scope: RUN_TIME
         value: "1800"
-      - key: WULKAN_RUN_MIGRATIONS
+      - key: FVENTAS_RUN_MIGRATIONS
         scope: RUN_TIME
         value: "1"
-      - key: WULKAN_HARDEN_DEFAULT_ACCOUNTS
+      - key: FVENTAS_HARDEN_DEFAULT_ACCOUNTS
         scope: RUN_TIME
         value: "1"
 
 databases:
-  - name: wulkan-db
+  - name: fventas-db
     engine: PG
     version: "16"
     production: true

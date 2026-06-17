@@ -5,20 +5,20 @@ import sys
 import tempfile
 from pathlib import Path
 
-db_file = Path(tempfile.gettempdir()) / "wulkan_sql_integrity_smoke.db"
+db_file = Path(tempfile.gettempdir()) / "FVENTAS_sql_integrity_smoke.db"
 if db_file.exists():
     db_file.unlink()
 
-os.environ["WULKAN_DATA_BACKEND"] = "sql"
-os.environ["WULKAN_DATABASE_URL"] = f"sqlite:///{db_file.as_posix()}"
-os.environ["WULKAN_SQL_FALLBACK_TO_JSON"] = "0"
+os.environ["FVENTAS_DATA_BACKEND"] = "sql"
+os.environ["FVENTAS_DATABASE_URL"] = f"sqlite:///{db_file.as_posix()}"
+os.environ["FVENTAS_SQL_FALLBACK_TO_JSON"] = "0"
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import app as wulkan_app
-from db import drop_database, init_database
+import app as FVENTAS_app
+from core.db import drop_database, init_database
 from sql_store import load_sql_store, sync_admin_user_records, sync_client_records, sync_store_to_sql
 from store import normalize_store, utc_now
 from werkzeug.security import generate_password_hash
@@ -35,7 +35,7 @@ def base_store() -> dict:
             {
                 "id": ADMIN_ID,
                 "name": "Admin SQL Smoke",
-                "email": "admin.sql@wulkan.test",
+                "email": "admin.sql@FVENTAS.test",
                 "passwordHash": generate_password_hash("AdminSql2026"),
                 "role": "super_admin",
                 "status": "active",
@@ -48,15 +48,15 @@ def base_store() -> dict:
             {
                 "id": "admin-seller-deleted",
                 "name": "Vendedor SQL Eliminado",
-                "email": "vendedor.eliminado.sql@wulkan.test",
+                "email": "vendedor.eliminado.sql@FVENTAS.test",
                 "passwordHash": generate_password_hash("SellerSql2026"),
                 "role": "sales",
                 "status": "deleted",
                 "sessionVersion": 0,
                 "mustChangePassword": True,
                 "activeSessions": [],
-                "sellerCode": "VEN-SQL-DEL",
-                "zone": "Carabobo",
+                "sellerCode": "CL-SQL-DEL",
+                "zone": "Metropolitana",
                 "commissionRate": 3.0,
                 "createdAt": now,
                 "updatedAt": now,
@@ -105,7 +105,7 @@ def base_store() -> dict:
         "products": [
             {
                 "id": "prod-sql",
-                "sku": "WUL-SQL-01",
+                "sku": "FVT-SQL-01",
                 "title": "Producto SQL",
                 "description": "Producto para integridad SQL.",
                 "productType": "machine",
@@ -126,7 +126,7 @@ def base_store() -> dict:
             },
             {
                 "id": "prod-sql-free",
-                "sku": "WUL-SQL-FREE",
+                "sku": "FVT-SQL-FREE",
                 "title": "Producto SQL sin historial",
                 "description": "Producto eliminable.",
                 "productType": "part",
@@ -149,17 +149,17 @@ def base_store() -> dict:
         "clients": [
             {
                 "id": "client-sql",
-                "businessName": "Ferreteria SQL",
+                "businessName": "Cliente SQL",
                 "contactName": "Comprador SQL",
-                "email": "client.sql@wulkan.test",
+                "email": "client.sql@FVENTAS.test",
                 "passwordHash": generate_password_hash("ClientSql2026"),
                 "status": "active",
-                "clientType": "ferretero",
-                "taxId": "J-33333333-3",
-                "phone": "+580000000003",
+                "clientType": "b2b",
+                "taxId": "33.333.333-3",
+                "phone": "+56 9 1000 0003",
                 "address": "Av SQL",
-                "city": "Valencia",
-                "state": "Carabobo",
+                "city": "Santiago",
+                "state": "Metropolitana",
                 "creditEnabled": True,
                 "creditLimitUsd": 500,
                 "creditUsedUsd": 90,
@@ -172,17 +172,17 @@ def base_store() -> dict:
             },
             {
                 "id": "client-sql-deleted",
-                "businessName": "Ferreteria SQL Eliminada",
+                "businessName": "Cliente SQL Eliminado",
                 "contactName": "Comprador Eliminado",
-                "email": "deleted.sql@wulkan.test",
+                "email": "deleted.sql@FVENTAS.test",
                 "passwordHash": generate_password_hash("DeletedSql2026"),
                 "status": "deleted",
-                "clientType": "ferretero",
-                "taxId": "J-44444444-4",
-                "phone": "+580000000005",
+                "clientType": "b2b",
+                "taxId": "44.444.444-4",
+                "phone": "+56 9 1000 0005",
                 "address": "Av SQL Eliminada",
-                "city": "Valencia",
-                "state": "Carabobo",
+                "city": "Santiago",
+                "state": "Metropolitana",
                 "creditEnabled": False,
                 "creditLimitUsd": 0,
                 "creditUsedUsd": 0,
@@ -199,11 +199,11 @@ def base_store() -> dict:
                 "id": "order-sql",
                 "orderId": "order-sql",
                 "customerId": "client-sql",
-                "customer": {"id": "client-sql", "name": "Ferreteria SQL"},
+                "customer": {"id": "client-sql", "name": "Cliente SQL"},
                 "items": [
                     {
                         "productId": "prod-sql",
-                        "sku": "WUL-SQL-01",
+                        "sku": "FVT-SQL-01",
                         "title": "Producto SQL",
                         "quantity": 1,
                         "unitPriceUsd": 90,
@@ -261,11 +261,11 @@ def base_store() -> dict:
                 "name": "Servicio SQL",
                 "companyName": "Servicio SQL",
                 "contactName": "Tecnico SQL",
-                "phone": "+580000000004",
-                "whatsapp": "+580000000004",
-                "email": "svc.sql@wulkan.test",
-                "state": "Carabobo",
-                "city": "Valencia",
+                "phone": "+56 9 1000 0004",
+                "whatsapp": "+56 9 1000 0004",
+                "email": "svc.sql@FVENTAS.test",
+                "state": "Metropolitana",
+                "city": "Santiago",
                 "address": "Zona SQL",
                 "specialties": ["Motosierras"],
                 "coverage": "Centro",
@@ -314,15 +314,15 @@ def main() -> int:
             {
                 "id": "admin-seller-new-id",
                 "name": "Vendedor SQL Reactivado",
-                "email": "vendedor.eliminado.sql@wulkan.test",
+                "email": "vendedor.eliminado.sql@FVENTAS.test",
                 "passwordHash": generate_password_hash("SellerSql2026"),
                 "role": "sales",
                 "status": "active",
                 "sessionVersion": 0,
                 "mustChangePassword": True,
                 "activeSessions": [],
-                "sellerCode": "VEN-SQL-REACT",
-                "zone": "Carabobo",
+                "sellerCode": "CL-SQL-REACT",
+                "zone": "Metropolitana",
                 "commissionRate": 4.0,
                 "createdAt": now,
                 "updatedAt": now,
@@ -333,17 +333,17 @@ def main() -> int:
         [
             {
                 "id": "client-sql-new-id",
-                "businessName": "Ferreteria SQL Reactivada",
+                "businessName": "Cliente SQL Reactivado",
                 "contactName": "Comprador Reactivado SQL",
-                "email": "deleted.sql@wulkan.test",
+                "email": "deleted.sql@FVENTAS.test",
                 "passwordHash": generate_password_hash("ClientSql2026"),
                 "status": "active",
-                "clientType": "ferretero",
-                "taxId": "J-44444444-4",
-                "phone": "+580000000005",
+                "clientType": "b2b",
+                "taxId": "44.444.444-4",
+                "phone": "+56 9 1000 0005",
                 "address": "Av SQL Reactivada",
-                "city": "Valencia",
-                "state": "Carabobo",
+                "city": "Santiago",
+                "state": "Metropolitana",
                 "creditEnabled": False,
                 "creditLimitUsd": 0,
                 "creditUsedUsd": 0,
@@ -356,27 +356,27 @@ def main() -> int:
             }
         ]
     )
-    app = wulkan_app.app
+    app = FVENTAS_app.app
     app.config.update(TESTING=True, SECRET_KEY="sql-integrity-smoke-secret", REQUIRE_MOBILE_TOKEN=True)
 
     with app.test_client() as client:
         mobile_login = client.post(
             "/api/mobile/auth/login",
-            json={"email": "admin.sql@wulkan.test", "password": "AdminSql2026"},
+            json={"email": "admin.sql@FVENTAS.test", "password": "AdminSql2026"},
         )
         assert mobile_login.status_code == 200, mobile_login.get_data(as_text=True)
         duplicate_mobile_client = client.post(
             "/api/mobile/seller/clients",
             headers={"Authorization": f"Bearer {mobile_login.get_json()['accessToken']}"},
             json={
-                "businessName": "Ferreteria Reutilizada SQL",
-                "email": "deleted.sql@wulkan.test",
-                "taxId": "J-55555555-5",
+                "businessName": "Cliente Reutilizado SQL",
+                "email": "deleted.sql@FVENTAS.test",
+                "taxId": "77.777.777-7",
                 "contactName": "Comprador Reutilizado SQL",
-                "phone": "+58 412-5555555",
+                "phone": "+56 9 5555 5555",
                 "address": "Av SQL Reutilizada",
-                "state": "Carabobo",
-                "city": "Valencia",
+                "state": "Metropolitana",
+                "city": "Santiago",
                 "creditRequestedUsd": 0,
                 "allowedPaymentTermsDays": "0,15,30",
             },
@@ -391,14 +391,14 @@ def main() -> int:
                 "Idempotency-Key": "sql-smoke-client-001",
             },
             json={
-                "businessName": "Ferreteria SQL Nueva",
-                "email": "ferreteria.sql.nueva@wulkan.test",
-                "taxId": "J-55555555-6",
+                "businessName": "Cliente SQL Nuevo",
+                "email": "cliente.sql.nuevo@FVENTAS.test",
+                "taxId": "55.555.555-5",
                 "contactName": "Comprador SQL Nuevo",
-                "phone": "+58 412-5555556",
+                "phone": "+56 9 5555 5556",
                 "address": "Av SQL Nueva",
-                "state": "Carabobo",
-                "city": "Valencia",
+                "state": "Metropolitana",
+                "city": "Santiago",
                 "creditRequestedUsd": 250,
                 "allowedPaymentTermsDays": [0, 15],
                 "defaultSaleType": "credit_line",
@@ -427,11 +427,15 @@ def main() -> int:
     store = load_sql_store()
     client_record = next(item for item in store["clients"] if item["id"] == "client-sql")
     mobile_client_record = next(
-        item for item in store["clients"] if item["email"] == "ferreteria.sql.nueva@wulkan.test"
+        item for item in store["clients"] if str(item.get("email", "")).lower() == "cliente.sql.nuevo@fventas.test"
     )
-    reactivated_client = next(item for item in store["clients"] if item["email"] == "deleted.sql@wulkan.test")
+    reactivated_client = next(
+        item for item in store["clients"] if str(item.get("email", "")).lower() == "deleted.sql@fventas.test"
+    )
     reactivated_seller = next(
-        item for item in store["admin_users"] if item["email"] == "vendedor.eliminado.sql@wulkan.test"
+        item
+        for item in store["admin_users"]
+        if str(item.get("email", "")).lower() == "vendedor.eliminado.sql@fventas.test"
     )
     product_record = next(item for item in store["products"] if item["id"] == "prod-sql")
     category_record = next(item for item in store["categories"] if item["id"] == "cat-sql-root")
@@ -442,14 +446,14 @@ def main() -> int:
     assert mobile_client_record["idempotencyKey"] == "sql-smoke-client-001", "cliente movil debe conservar llave idempotente"
     assert reactivated_client["id"] == "client-sql-deleted", "cliente con email historico debe reutilizar el registro SQL"
     assert reactivated_client["status"] == "active", "cliente historico debe poder reactivarse sin 500"
-    assert reactivated_client["businessName"] == "Ferreteria SQL Reactivada", "cliente reactivado debe guardar datos nuevos"
+    assert reactivated_client["businessName"] == "Cliente SQL Reactivado", "cliente reactivado debe guardar datos nuevos"
     assert reactivated_seller["id"] == "admin-seller-deleted", "vendedor con email historico debe reutilizar el registro SQL"
     assert reactivated_seller["status"] == "active", "vendedor historico debe poder reactivarse sin 500"
-    assert reactivated_seller["sellerCode"] == "VEN-SQL-REACT", "vendedor reactivado debe guardar los nuevos datos"
+    assert reactivated_seller["sellerCode"] == "CL-SQL-REACT", "vendedor reactivado debe guardar los nuevos datos"
     assert product_record["status"] == "inactive", "producto con orden debe quedar inactivo, no borrado fisico"
     assert category_record["status"] == "inactive", "categoria con producto debe quedar inactiva"
     assert child_category.get("parentId") == "", "eliminar categoria padre debe conservar y promover la subcategoria"
-    print("Graphify SQL integrity smoke")
+    print("FVENTAS Insights SQL integrity smoke")
     print("----------------------------")
     print("OK: acciones destructivas no rompen integridad SQL ni generan 500.")
     return 0

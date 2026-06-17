@@ -2,10 +2,10 @@
 <html lang="es">
   <head>
     <meta charset="utf-8">
-    <title>Reporte {{ report_title }} - Wulkan</title>
+    <title>Reporte {{ report_title }} - FVENTAS</title>
     <style>
       body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
-      header { border-bottom: 2px solid #ff4b0b; margin-bottom: 20px; padding-bottom: 12px; }
+      header { border-bottom: 2px solid #0d6efd; margin-bottom: 20px; padding-bottom: 12px; }
       h1 { margin: 0; font-size: 24px; }
       p { margin: 6px 0 0; color: #64748b; }
       .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
@@ -22,7 +22,7 @@
   </head>
   <body>
     <header>
-      <h1>Reporte {{ report_title }} - Wulkan Venezuela</h1>
+      <h1>Reporte {{ report_title }} - FVENTAS {{ market_country_label }}</h1>
       <p>Generado {{ now or "" }} | filtros: {{ filters }}</p>
     </header>
     <section class="metrics">

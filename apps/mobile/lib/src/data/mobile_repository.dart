@@ -30,7 +30,7 @@ class MockMobileRepository implements MobileRepository {
     MobileCategory(
       id: "machinery-garden",
       name: "Maquinaria y jardin",
-      description: "Equipos, accesorios y repuestos Wulkan",
+      description: "Equipos, accesorios y repuestos FVENTAS",
       icon: "bi-tools",
       sortOrder: 10,
     ),
@@ -53,8 +53,8 @@ class MockMobileRepository implements MobileRepository {
   static const _products = [
     MobileProduct(
       id: "prod-motosierra-45cc",
-      sku: "WUL-MOT-45CC",
-      name: "Motosierra Wulkan 45cc",
+      sku: "FVT-MOT-45CC",
+      name: "Motosierra FVENTAS 45cc",
       verticalName: "Maquinaria y jardin",
       description: "Equipo de corte para uso tecnico, finca y jardin.",
       publicPriceUsd: 185,
@@ -64,7 +64,7 @@ class MockMobileRepository implements MobileRepository {
       requiresQuote: false,
       requiresTechnicalValidation: false,
       compatibilityNotes: [
-        "Compatible con cadena WUL-REP-CAD18",
+        "Compatible con cadena FVT-REP-CAD18",
         "Validar largo de espada antes de entregar",
       ],
       productType: "machine",
@@ -77,10 +77,10 @@ class MockMobileRepository implements MobileRepository {
     ),
     MobileProduct(
       id: "prod-cadena-18",
-      sku: "WUL-REP-CAD18",
+      sku: "FVT-REP-CAD18",
       name: "Cadena 18 pulgadas compatible",
       verticalName: "Repuestos",
-      description: "Repuesto compatible con motosierras seleccionadas Wulkan.",
+      description: "Repuesto compatible con motosierras seleccionadas FVENTAS.",
       publicPriceUsd: 18,
       b2bPriceUsd: 15,
       availableStock: 4,
@@ -88,7 +88,7 @@ class MockMobileRepository implements MobileRepository {
       requiresQuote: false,
       requiresTechnicalValidation: true,
       compatibilityNotes: [
-        "Compatible con WUL-MOT-45CC",
+        "Compatible con FVT-MOT-45CC",
         "Validar serie antes de despachar",
       ],
       productType: "spare_part",
@@ -96,8 +96,8 @@ class MockMobileRepository implements MobileRepository {
     ),
     MobileProduct(
       id: "prod-motobomba-3x3",
-      sku: "WUL-MB-3X3",
-      name: "Motobomba 3x3 alta presion Wulkan",
+      sku: "FVT-MB-3X3",
+      name: "Motobomba 3x3 alta presion FVENTAS",
       verticalName: "Industrial",
       description: "Motobomba para trabajo agricola e industrial.",
       publicPriceUsd: 535,
@@ -116,21 +116,21 @@ class MockMobileRepository implements MobileRepository {
 
   static const _locations = [
     MobileLocation(
-      id: "loc-caracas-chacao",
-      name: "Punto autorizado Caracas",
-      subtitle: "Retiro, soporte tecnico y recepcion de casos - Chacao",
-      phone: "+58 212 000 0000",
-      whatsapp: "+58 412 000 0000",
-      address: "Chacao, Caracas",
-      specialties: ["Motosierras", "Garantia", "Retiro"],
+      id: "loc-santiago-centro",
+      name: "Punto autorizado principal",
+      subtitle: "Retiro, soporte tecnico y recepcion de casos",
+      phone: "+56 2 2000 0000",
+      whatsapp: "+56 9 4000 0000",
+      address: "Sucursal principal",
+      specialties: ["Catalogo", "Garantia", "Retiro"],
     ),
     MobileLocation(
-      id: "loc-valencia-service",
-      name: "Servicio tecnico Valencia",
-      subtitle: "Diagnostico, garantia y entrega asistida - Carabobo",
-      phone: "+58 241 000 0000",
-      whatsapp: "+58 414 000 0000",
-      address: "Valencia, Carabobo",
+      id: "loc-valparaiso-service",
+      name: "Servicio tecnico Valparaiso",
+      subtitle: "Diagnostico, garantia y entrega asistida - Valparaiso",
+      phone: "+56 32 200 0000",
+      whatsapp: "+56 9 5000 0000",
+      address: "Valparaiso, Valparaiso",
       specialties: ["Motobombas", "Repuestos", "Diagnostico"],
     ),
   ];
@@ -138,13 +138,13 @@ class MockMobileRepository implements MobileRepository {
   static final _announcements = [
     MobileAnnouncement(
       id: "ann-home-local",
-      title: "Catalogo Wulkan",
+      title: "Catalogo FVENTAS",
       body:
           "Conecta la app al backend productivo para ver productos reales del admin.",
       placement: "home",
       priority: 100,
       ctaLabel: "Ver catalogo",
-      ctaUrl: "wulkan://catalog",
+      ctaUrl: "fventas://catalog",
       startsAt: DateTime(2026, 1, 1),
       status: "active",
     ),
@@ -208,8 +208,8 @@ class MockMobileRepository implements MobileRepository {
       allowedPaymentTermsDays: const [0],
       defaultSaleType: "cash",
       assignedSeller: const MobileSellerSnapshot(
-        id: "seller-local-wulkan",
-        name: "Vendedor Wulkan",
+        id: "seller-local-fventas",
+        name: "Vendedor FVENTAS",
       ),
     );
   }
@@ -228,8 +228,8 @@ class MockMobileRepository implements MobileRepository {
   @override
   Future<MobileSellerSummary> getSellerSummary() async {
     return const MobileSellerSummary(
-      sellerId: "seller-local-wulkan",
-      sellerName: "Vendedor Wulkan",
+      sellerId: "seller-local-fventas",
+      sellerName: "Vendedor FVENTAS",
       roleLabel: "Vendedor",
       clientsCount: 0,
       ordersCount: 0,
@@ -290,7 +290,7 @@ class ApiMobileRepository implements MobileRepository {
         .map(
           (item) => MobileCategory(
             id: _asString(item["id"]),
-            name: _asString(item["name"], fallback: "Categoria Wulkan"),
+            name: _asString(item["name"], fallback: "Categoria FVENTAS"),
             description: _asString(item["description"]),
             slug: _asString(item["slug"]),
             imageUrl: _asString(item["imageUrl"]),
@@ -369,7 +369,7 @@ class ApiMobileRepository implements MobileRepository {
         .map(
           (item) => MobileLocation(
             id: _asString(item["id"]),
-            name: _asString(item["name"], fallback: "Punto Wulkan"),
+            name: _asString(item["name"], fallback: "Punto FVENTAS"),
             subtitle: _asString(item["subtitle"]),
             phone: _asString(item["phone"]),
             whatsapp: _asString(item["whatsapp"]),
@@ -693,7 +693,7 @@ MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
     name: _asString(data["name"] ?? data["title"], fallback: id),
     verticalName: _asString(
       data["verticalName"] ?? data["categoryName"],
-      fallback: "Categoria Wulkan",
+      fallback: "Categoria FVENTAS",
     ),
     description: _asString(data["description"]),
     publicPriceUsd: price,
@@ -709,7 +709,7 @@ MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
     requiresTechnicalValidation: requiresTechnicalValidation,
     compatibilityNotes: notes is List
         ? notes.map((note) => note.toString()).toList()
-        : const ["Validar compatibilidad con Wulkan"],
+        : const ["Validar compatibilidad con FVENTAS"],
     productType: _asString(data["productType"], fallback: "machine"),
     imageUrls: imageUrls,
     discountPercent: _asDouble(data["discountPercent"]),
@@ -724,7 +724,7 @@ MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
 MobileAnnouncement mapApiAnnouncement(String id, Map<String, dynamic> data) {
   return MobileAnnouncement(
     id: id,
-    title: _asString(data["title"], fallback: "Anuncio Wulkan"),
+    title: _asString(data["title"], fallback: "Anuncio FVENTAS"),
     body: _asString(data["body"]),
     placement: _asString(data["placement"], fallback: "home"),
     priority: _asInt(data["priority"], fallback: 50),
@@ -740,7 +740,7 @@ MobileAnnouncement mapApiAnnouncement(String id, Map<String, dynamic> data) {
 MobileNotification mapApiNotification(Map<String, dynamic> data) {
   return MobileNotification(
     id: _asString(data["id"], fallback: "notification"),
-    title: _asString(data["title"], fallback: "Notificacion Wulkan"),
+    title: _asString(data["title"], fallback: "Notificacion FVENTAS"),
     body: _asString(data["body"]),
     type: _asString(data["type"], fallback: "info"),
     typeLabel: _asString(data["typeLabel"], fallback: "Informacion"),
@@ -783,7 +783,7 @@ MobileOrderSummary mapApiOrder(Map<String, dynamic> data) {
 MobileSellerSummary mapApiSellerSummary(Map<String, dynamic> data) {
   return MobileSellerSummary(
     sellerId: _asString(data["sellerId"]),
-    sellerName: _asString(data["sellerName"], fallback: "Vendedor Wulkan"),
+    sellerName: _asString(data["sellerName"], fallback: "Vendedor FVENTAS"),
     roleLabel: _asString(data["roleLabel"], fallback: "Vendedor"),
     sellerCode: _asString(data["sellerCode"]),
     sellerZone: _asString(data["sellerZone"]),
@@ -809,7 +809,7 @@ MobileSellerSummary mapApiSellerSummary(Map<String, dynamic> data) {
 MobileSellerClient mapApiSellerClient(Map<String, dynamic> data) {
   return MobileSellerClient(
     id: _asString(data["id"]),
-    businessName: _asString(data["businessName"], fallback: "Cliente Wulkan"),
+    businessName: _asString(data["businessName"], fallback: "Cliente FVENTAS"),
     email: _asString(data["email"]),
     phone: _asString(data["phone"]),
     city: _asString(data["city"]),

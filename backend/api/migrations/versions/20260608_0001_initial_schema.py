@@ -51,7 +51,7 @@ def upgrade() -> None:
         sa.Column("payload", sa.JSON(), nullable=False),
         *timestamps(),
     )
-    op.create_index("ix_clients_email", "clients", ["email"], unique=True)
+    op.create_index("ix_clients_email", "clients", ["email"])
 
     op.create_table(
         "categories",
@@ -92,7 +92,7 @@ def upgrade() -> None:
         sa.Column("payload", sa.JSON(), nullable=False),
         *timestamps(),
     )
-    op.create_index("ix_products_sku", "products", ["sku"], unique=True)
+    op.create_index("ix_products_sku", "products", ["sku"])
 
     op.create_table(
         "media_assets",

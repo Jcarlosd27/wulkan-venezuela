@@ -9,12 +9,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import app as wulkan_app
+import app as FVENTAS_app
 from store import utc_now
 from werkzeug.security import generate_password_hash
 
 
-SELLER_EMAIL = "vendedor.flow@wulkan.test"
+SELLER_EMAIL = "vendedor.flow@FVENTAS.test"
 SELLER_PASSWORD = "Vendedor2026"
 SUPER_ADMIN_ID = "admin-super-flow"
 MANAGER_ID = "admin-manager-flow"
@@ -24,12 +24,39 @@ CLIENT_NEW_PASSWORD = "ClienteFinal2026"
 
 def base_store() -> dict:
     now = utc_now()
+    company_id = "company-fventas-chile"
     return {
+        "companies": [
+            {
+                "id": company_id,
+                "name": "FVENTAS",
+                "country": "CL",
+                "currency": "CLP",
+                "status": "active",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
+        "subscriptions": [
+            {
+                "id": "sub-flow-fventas",
+                "companyId": company_id,
+                "planId": "plan-fventas-pro",
+                "status": "active",
+                "amountClp": 69990,
+                "startedAt": now,
+                "currentPeriodStart": now,
+                "currentPeriodEnd": "2099-12-31T23:59:59Z",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
         "categories": [
             {
                 "id": "cat-maquinaria-flow",
+                "companyId": company_id,
                 "name": "Maquinaria profesional",
-                "description": "Equipos Wulkan para venta B2B.",
+                "description": "Equipos FVENTAS para venta B2B.",
                 "imageUrl": "https://cdn.example.com/categorias/maquinaria.jpg",
                 "status": "active",
                 "createdAt": now,
@@ -39,8 +66,9 @@ def base_store() -> dict:
         "products": [
             {
                 "id": "prod-flow-motosierra",
-                "sku": "WUL-FLOW-45CC",
-                "title": "Motosierra Wulkan 45cc Flow",
+                "companyId": company_id,
+                "sku": "FVT-FLOW-45CC",
+                "title": "Motosierra FVENTAS 45cc Flow",
                 "description": "Producto realista para smoke comercial.",
                 "productType": "machine",
                 "categoryId": "cat-maquinaria-flow",
@@ -49,7 +77,7 @@ def base_store() -> dict:
                 "originalPriceUsd": 215.0,
                 "discountPercent": 14.0,
                 "b2bPriceUsd": 162.0,
-                "exchangeRateUsdVes": 38.5,
+                "exchangeRateUsdClp": 950.0,
                 "stock": 12,
                 "reserved": 0,
                 "status": "active",
@@ -68,13 +96,14 @@ def base_store() -> dict:
         "announcements": [
             {
                 "id": "ann-flow-home",
-                "title": "Promocion Wulkan Flow",
+                "companyId": company_id,
+                "title": "Promocion FVENTAS Flow",
                 "body": "Banner cargado desde admin para carrusel.",
                 "placement": "home",
                 "priority": 90,
                 "ctaLabel": "Ver catalogo",
-                "ctaUrl": "wulkan://catalog",
-                "imageUrl": "https://cdn.example.com/banners/wulkan-flow.jpg",
+                "ctaUrl": "FVENTAS://catalog",
+                "imageUrl": "https://cdn.example.com/banners/FVENTAS-flow.jpg",
                 "startsAt": now,
                 "endsAt": "",
                 "status": "active",
@@ -85,8 +114,9 @@ def base_store() -> dict:
         "admin_users": [
             {
                 "id": SUPER_ADMIN_ID,
+                "companyId": company_id,
                 "name": "Super Admin Flow",
-                "email": "super.flow@wulkan.test",
+                "email": "super.flow@FVENTAS.test",
                 "passwordHash": generate_password_hash("Super2026"),
                 "role": "super_admin",
                 "status": "active",
@@ -95,8 +125,9 @@ def base_store() -> dict:
             },
             {
                 "id": MANAGER_ID,
+                "companyId": company_id,
                 "name": "Gerente Flow",
-                "email": "gerente.flow@wulkan.test",
+                "email": "gerente.flow@FVENTAS.test",
                 "passwordHash": generate_password_hash("Gerente2026"),
                 "role": "commercial_manager",
                 "status": "active",
@@ -105,12 +136,13 @@ def base_store() -> dict:
             },
             {
                 "id": "admin-seller-flow",
+                "companyId": company_id,
                 "name": "Vendedor Flow",
                 "email": SELLER_EMAIL,
                 "passwordHash": generate_password_hash(SELLER_PASSWORD),
                 "role": "sales",
                 "status": "active",
-                "sellerCode": "VEN-FLOW",
+                "sellerCode": "CL-FLOW",
                 "sellerZone": "Centro",
                 "commissionRatePercent": 5.0,
                 "salesGoalUsd": 1000.0,
@@ -123,15 +155,16 @@ def base_store() -> dict:
         "notifications": [],
         "service_technicians": [
             {
-                "id": "svc-flow-valencia",
-                "name": "Servicio Wulkan Valencia Flow",
-                "companyName": "Servicio Wulkan Valencia",
+                "id": "svc-flow-Santiago",
+                "companyId": company_id,
+                "name": "Servicio FVENTAS Santiago Flow",
+                "companyName": "Servicio FVENTAS Santiago",
                 "contactName": "Tecnico principal",
-                "phone": "+58 412-1000000",
-                "whatsapp": "+58 412-1000000",
-                "email": "servicio.flow@wulkan.test",
-                "state": "Carabobo",
-                "city": "Valencia",
+                "phone": "+56 9 1000 0000",
+                "whatsapp": "+56 9 1000 0000",
+                "email": "servicio.flow@FVENTAS.test",
+                "state": "Metropolitana",
+                "city": "Santiago",
                 "address": "Zona industrial",
                 "specialties": ["Motosierras"],
                 "coverage": "Centro occidente",
@@ -169,12 +202,12 @@ def main() -> int:
         state.clear()
         state.update(snapshot)
 
-    wulkan_app.load_store = load_store_override
-    wulkan_app.save_store = save_store_override
-    wulkan_app.app.config["REQUIRE_MOBILE_TOKEN"] = True
-    wulkan_app.app.config["TESTING"] = True
+    FVENTAS_app.load_store = load_store_override
+    FVENTAS_app.save_store = save_store_override
+    FVENTAS_app.app.config["REQUIRE_MOBILE_TOKEN"] = True
+    FVENTAS_app.app.config["TESTING"] = True
 
-    client = wulkan_app.app.test_client()
+    client = FVENTAS_app.app.test_client()
 
     with client.session_transaction() as session:
         session["admin_authenticated"] = True
@@ -191,7 +224,7 @@ def main() -> int:
                 "importFile": (
                     io.BytesIO(
                         b"sku,nombre,categoria,precio_publico_usd,precio_b2b_usd,stock,imagenes\n"
-                        b"WUL-FLOW-45CC,Motosierra Wulkan 45cc Flow,Maquinaria profesional,185,162,12,https://cdn.example.com/productos/motosierra.jpg|https://cdn.example.com/productos/motosierra-lateral.jpg\n"
+                        b"FVT-FLOW-45CC,Motosierra FVENTAS 45cc Flow,Maquinaria profesional,185,162,12,https://cdn.example.com/productos/motosierra.jpg|https://cdn.example.com/productos/motosierra-lateral.jpg\n"
                     ),
                     "products.csv",
                 ),
@@ -239,7 +272,7 @@ def main() -> int:
     super_mobile_login = assert_status(
         client.post(
             "/api/v1/mobile/auth/login",
-            json={"email": "super.flow@wulkan.test", "password": "Super2026"},
+            json={"email": "super.flow@FVENTAS.test", "password": "Super2026"},
         ),
         200,
         "login super admin movil",
@@ -253,17 +286,17 @@ def main() -> int:
             "/api/mobile/seller/clients",
             headers={
                 "Authorization": f"Bearer {seller_token}",
-                "Idempotency-Key": "invalid-rif-flow",
+                "Idempotency-Key": "invalid-rut-flow",
             },
             json={
-                "businessName": "Ferreteria Rif Incompleto Flow",
-                "taxId": "J-12345678",
-                "contactName": "Comprador Rif",
-                "phone": "+58 412-1111112",
-                "email": "ferreteria.rif.incompleto@wulkan.test",
+                "businessName": "Cliente Rif Incompleto Flow",
+                "taxId": "76.000.000-1",
+                "contactName": "Comprador Rut",
+                "phone": "+56 9 1111 1112",
+                "email": "cliente.rut.incompleto@FVENTAS.test",
                 "address": "Av. Validacion",
-                "state": "Carabobo",
-                "city": "Valencia",
+                "state": "Metropolitana",
+                "city": "Santiago",
                 "deliveryZone": "Centro",
                 "creditRequestedUsd": 0,
                 "allowedPaymentTermsDays": [0],
@@ -272,7 +305,7 @@ def main() -> int:
             },
         ),
         400,
-        "rechazar cliente movil con RIF incompleto",
+        "rechazar cliente movil con RUT incompleto",
     )
     assert "taxId" in invalid_client.get("errors", {})
 
@@ -281,14 +314,14 @@ def main() -> int:
             "/api/mobile/seller/clients",
             headers={"Authorization": f"Bearer {seller_token}"},
             json={
-                "businessName": "Ferreteria Flow Valencia",
-                "taxId": "J-12345678-9",
+                "businessName": "Cliente Flow Santiago",
+                "taxId": "76.000.000-0",
                 "contactName": "Comprador Flow",
-                "phone": "+58 412-1111111",
-                "email": "ferreteria.flow@wulkan.test",
+                "phone": "+56 9 1111 1111",
+                "email": "cliente.flow@FVENTAS.test",
                 "address": "Av. Industrial",
-                "state": "Carabobo",
-                "city": "Valencia",
+                "state": "Metropolitana",
+                "city": "Santiago",
                 "deliveryZone": "Centro",
                 "creditRequestedUsd": 500,
                 "allowedPaymentTermsDays": [0, 15, 30],
@@ -329,15 +362,15 @@ def main() -> int:
             "/api/v1/mobile/seller/clients",
             headers={"Authorization": f"Bearer {super_token}"},
             json={
-                "businessName": "Ferreteria Super Admin Flow",
-                "taxId": "J-98765432-1",
+                "businessName": "Cliente Super Admin Flow",
+                "taxId": "77.777.777-7",
                 "contactName": "Comprador Super",
-                "phone": "+58 412-2222222",
-                "email": "ferreteria.super.flow@wulkan.test",
+                "phone": "+56 9 2222 2222",
+                "email": "cliente.super.flow@FVENTAS.test",
                 "address": "Av. Gerencia",
-                "state": "Distrito Capital",
-                "city": "Caracas",
-                "deliveryZone": "Capital",
+                "state": "Metropolitana",
+                "city": "Santiago",
+                "deliveryZone": "Centro",
                 "allowedPaymentTermsDays": [0],
                 "defaultSaleType": "cash",
                 "password": CLIENT_PASSWORD,
@@ -374,18 +407,18 @@ def main() -> int:
     state["clients"].append(
         {
             "id": "client-unassigned-super-flow",
-            "legalName": "Ferreteria Sin Vendedor Flow",
-            "commercialName": "Ferreteria Sin Vendedor Flow",
-            "businessName": "Ferreteria Sin Vendedor Flow",
-            "email": "sin.vendedor.flow@wulkan.test",
-            "clientType": "ferretero",
+            "legalName": "Cliente Sin Vendedor Flow",
+            "commercialName": "Cliente Sin Vendedor Flow",
+            "businessName": "Cliente Sin Vendedor Flow",
+            "email": "sin.vendedor.flow@FVENTAS.test",
+            "clientType": "b2b",
             "clientCategory": "standard",
             "priceList": "b2b",
             "status": "active",
             "address": "Av. Libre",
-            "country": "VE",
-            "state": "Carabobo",
-            "city": "Valencia",
+            "country": "CL",
+            "state": "Metropolitana",
+            "city": "Santiago",
             "assignedSellerId": "",
             "assignedSellerName": "",
             "defaultSaleType": "cash",
@@ -529,10 +562,10 @@ def main() -> int:
     customer_login = assert_status(
         client.post(
             "/api/mobile/auth/login",
-            json={"email": "ferreteria.flow@wulkan.test", "password": CLIENT_PASSWORD},
+            json={"email": "cliente.flow@FVENTAS.test", "password": CLIENT_PASSWORD},
         ),
         200,
-        "login ferretero temporal",
+        "login cliente B2B temporal",
     )
     customer_token = customer_login["accessToken"]
 
@@ -546,16 +579,16 @@ def main() -> int:
             },
         ),
         200,
-        "cambio clave ferretero",
+        "cambio clave cliente B2B",
     )
 
     customer_login = assert_status(
         client.post(
             "/api/mobile/auth/login",
-            json={"email": "ferreteria.flow@wulkan.test", "password": CLIENT_NEW_PASSWORD},
+            json={"email": "cliente.flow@FVENTAS.test", "password": CLIENT_NEW_PASSWORD},
         ),
         200,
-        "login ferretero final",
+        "login cliente B2B final",
     )
     customer_token = customer_login["accessToken"]
     customer_profile_v1 = assert_status(
@@ -564,7 +597,7 @@ def main() -> int:
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
-        "perfil ferretero v1",
+        "perfil cliente B2B v1",
     )
     assert customer_profile_v1["profile"]["accountRole"] == "client"
     customer_notifications_credit = assert_status(
@@ -573,7 +606,7 @@ def main() -> int:
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
-        "notificaciones ferretero credito v1",
+        "notificaciones cliente B2B credito v1",
     )
     assert any(item["type"] == "credit_approved" for item in customer_notifications_credit["items"])
     customer_home_v1 = assert_status(
@@ -582,7 +615,7 @@ def main() -> int:
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
-        "home ferretero v1",
+        "home cliente B2B v1",
     )
     assert customer_home_v1["home"]["banners"]
     product_detail_v1 = assert_status(
@@ -593,17 +626,17 @@ def main() -> int:
         200,
         "detalle producto v1",
     )
-    assert product_detail_v1["product"]["sku"] == "WUL-FLOW-45CC"
+    assert product_detail_v1["product"]["sku"] == "FVT-FLOW-45CC"
     products_paged_v1 = assert_status(
         client.get(
-            "/api/v1/mobile/products?limit=1&q=WUL-FLOW&sort=price_desc",
+            "/api/v1/mobile/products?limit=1&q=FVT-FLOW&sort=price_desc",
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
         "catalogo paginado v1",
     )
     assert products_paged_v1["meta"]["pagination"]["limit"] == 1
-    assert products_paged_v1["items"][0]["sku"] == "WUL-FLOW-45CC"
+    assert products_paged_v1["items"][0]["sku"] == "FVT-FLOW-45CC"
     cart_v1 = assert_status(
         client.get(
             "/api/v1/mobile/cart",
@@ -624,17 +657,17 @@ def main() -> int:
                 "items": [
                     {
                         "productId": "prod-flow-motosierra",
-                        "sku": "WUL-FLOW-45CC",
+                        "sku": "FVT-FLOW-45CC",
                         "quantity": 2,
                     }
                 ],
                 "preview": {
-                    "exchangeRateUsdVes": 38.5,
+                    "exchangeRateUsdVes": 950.0,
                 },
             },
         ),
         201,
-        "orden ferretero",
+        "orden cliente B2B",
     )
 
     created_order = next(item for item in state["orders"] if item["orderId"] == order["orderId"])
@@ -651,7 +684,7 @@ def main() -> int:
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
-        "notificaciones ferretero orden v1",
+        "notificaciones cliente B2B orden v1",
     )
     assert any(item["type"] == "order_received" for item in customer_notifications_order["items"])
     orders_v1 = assert_status(
@@ -660,7 +693,7 @@ def main() -> int:
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
-        "ordenes ferretero v1",
+        "ordenes cliente B2B v1",
     )
     assert orders_v1["items"]
     orders_filtered_v1 = assert_status(
@@ -669,7 +702,7 @@ def main() -> int:
             headers={"Authorization": f"Bearer {customer_token}"},
         ),
         200,
-        "ordenes ferretero filtradas v1",
+        "ordenes cliente B2B filtradas v1",
     )
     assert orders_filtered_v1["meta"]["filters"]["saleType"] == "credit_line"
     assert orders_filtered_v1["items"][0]["saleType"] == "credit_line"
@@ -684,17 +717,17 @@ def main() -> int:
                 "items": [
                     {
                         "productId": "prod-flow-motosierra",
-                        "sku": "WUL-FLOW-45CC",
+                        "sku": "FVT-FLOW-45CC",
                         "quantity": 1,
                     }
                 ],
                 "preview": {
-                    "exchangeRateUsdVes": 38.5,
+                    "exchangeRateUsdVes": 950.0,
                 },
             },
         ),
         201,
-        "orden ferretero contado",
+        "orden cliente B2B contado",
     )
     cash_order = next(item for item in state["orders"] if item["orderId"] == cash_order_response["orderId"])
     assert cash_order_response["saleType"] == "cash"
@@ -730,7 +763,7 @@ def main() -> int:
                 "amountUsd": str(cash_order["balanceUsd"]),
                 "method": "cash",
                 "reference": "EFECTIVO-FLOW",
-                "exchangeRateUsdVes": "38.5",
+                "exchangeRateUsdVes": "950.0",
             },
             follow_redirects=False,
         ),
@@ -758,17 +791,17 @@ def main() -> int:
                 "items": [
                     {
                         "productId": "prod-flow-motosierra",
-                        "sku": "WUL-FLOW-45CC",
+                        "sku": "FVT-FLOW-45CC",
                         "quantity": 1,
                     }
                 ],
                 "preview": {
-                    "exchangeRateUsdVes": 38.5,
+                    "exchangeRateUsdVes": 950.0,
                 },
             },
         ),
         201,
-        "orden ferretero credito por dias",
+        "orden cliente B2B credito por dias",
     )
     term_order = next(item for item in state["orders"] if item["orderId"] == term_order_response["orderId"])
     assert term_order_response["saleType"] == "term_credit"
@@ -803,17 +836,17 @@ def main() -> int:
     assert "creditLimitUsd" in credit_event["metadata"]["changedFields"]
     assert any(event["action"] == "create" and event["entityType"] == "order" for event in audit_events)
 
-    print("Graphify smoke comercial")
+    print("FVENTAS Insights smoke comercial")
     print("------------------------")
     print("OK vendedor crea cliente y queda asignado")
     print("OK carga masiva actualiza producto y galeria movil")
     print("OK gerente aprueba credito B2B con auditoria before/after")
-    print("OK ferretero cambia clave temporal")
-    print("OK ferretero crea orden con linea de credito")
+    print("OK cliente B2B cambia clave temporal")
+    print("OK cliente B2B crea orden con linea de credito")
     print("OK orden registra vendedor, comision, stock reservado y credito restante")
-    print("OK ferretero crea orden contado y admin ve pago externo por validar")
+    print("OK cliente B2B crea orden contado y admin ve pago externo por validar")
     print("OK orden contado registra abono efectivo sin consumir linea de credito")
-    print("OK ferretero crea credito por dias y admin puede validarlo sin linea")
+    print("OK cliente B2B crea credito por dias y admin puede validarlo sin linea")
     return 0
 
 

@@ -12,20 +12,20 @@ def postgres_url(value: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create a PostgreSQL custom-format backup for Wulkan.")
-    parser.add_argument("--database-url", default=os.environ.get("WULKAN_DATABASE_URL", ""))
-    parser.add_argument("--output-dir", default=os.environ.get("WULKAN_BACKUP_DIR", "backups"))
+    parser = argparse.ArgumentParser(description="Create a PostgreSQL custom-format backup for FVENTAS.")
+    parser.add_argument("--database-url", default=os.environ.get("FVENTAS_DATABASE_URL", ""))
+    parser.add_argument("--output-dir", default=os.environ.get("FVENTAS_BACKUP_DIR", "backups"))
     args = parser.parse_args()
 
     if not args.database_url:
-        raise SystemExit("WULKAN_DATABASE_URL es obligatorio.")
+        raise SystemExit("FVENTAS_DATABASE_URL es obligatorio.")
     if not args.database_url.startswith("postgresql"):
         raise SystemExit("Backup productivo solo soporta PostgreSQL.")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    output_file = output_dir / f"wulkan-{timestamp}.dump"
+    output_file = output_dir / f"fventas-{timestamp}.dump"
     command = [
         "pg_dump",
         "--format=custom",

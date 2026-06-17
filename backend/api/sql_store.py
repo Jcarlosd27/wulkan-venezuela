@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from db import SessionLocal, init_database
+from core.db import SessionLocal, init_database
 from models import (
     AdminUser,
     Announcement,
@@ -52,20 +52,84 @@ def iso_dt(value: str | datetime | None) -> str:
     return utc_now()
 
 
-def copy_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
-    return dict(payload or {})
+def copy_payload(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return dict(payload)
+    if isinstance(payload, list):
+        return [copy_payload(item) if isinstance(item, (dict, list)) else item for item in payload]
+    return {}
 
 
-def client_email_exists(email: str, *, exclude_id: str = "") -> bool:
+DEFAULT_COMPANY_ID = "company-fventas-chile"
+DEFAULT_LOCAL_CURRENCY = "CLP"
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def payload_company_id(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return DEFAULT_COMPANY_ID
+    return str(payload.get("companyId") or DEFAULT_COMPANY_ID)
+
+
+def payload_local_currency(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return DEFAULT_LOCAL_CURRENCY
+    return str(payload.get("localCurrencyCode") or payload.get("currencyCode") or DEFAULT_LOCAL_CURRENCY).upper()
+
+
+def payload_exchange_rate_usd_local(payload: dict[str, Any] | None) -> float:
+    if not isinstance(payload, dict):
+        return 950.0
+    return safe_float(
+        payload.get("exchangeRateUsdLocal")
+        or payload.get("exchangeRateUsdClp")
+        or payload.get("exchangeRateUsdVes"),
+        950.0,
+    )
+
+
+def payload_total_local(payload: dict[str, Any] | None) -> float:
+    if not isinstance(payload, dict):
+        return 0.0
+    return safe_float(payload.get("totalLocal") or payload.get("totalClp") or payload.get("totalVes"), 0.0)
+
+
+def payload_amount_local(payload: dict[str, Any] | None) -> float:
+    if not isinstance(payload, dict):
+        return 0.0
+    return safe_float(payload.get("amountLocal") or payload.get("amountClp") or payload.get("amountVes"), 0.0)
+
+
+def row_company_id(row: Any) -> str:
+    return payload_company_id(getattr(row, "payload", {}) or {})
+
+
+def row_matches_company(row: Any, company_id: str = "") -> bool:
+    if not company_id:
+        return True
+    return row_company_id(row) == str(company_id)
+
+
+def client_email_exists(email: str, *, exclude_id: str = "", company_id: str = "") -> bool:
     normalized = str(email or "").strip().lower()
     if not normalized:
         return False
     init_database()
     with SessionLocal() as session:
-        query = session.query(Client.id).filter(Client.email == normalized)
+        query = session.query(Client).filter(Client.email == normalized)
         if exclude_id:
             query = query.filter(Client.id != exclude_id)
-        return query.first() is not None
+        if not company_id:
+            return query.first() is not None
+        return any(row_matches_company(row, company_id) for row in query.limit(200).all())
 
 
 def client_identity_exists(
@@ -73,6 +137,7 @@ def client_identity_exists(
     email: str = "",
     tax_id: str = "",
     exclude_id: str = "",
+    company_id: str = "",
 ) -> dict[str, str] | None:
     normalized_email = str(email or "").strip().lower()
     normalized_tax_id = str(tax_id or "").strip()
@@ -82,12 +147,10 @@ def client_identity_exists(
     init_database()
     with SessionLocal() as session:
         if normalized_email:
-            query = session.query(Client.id, Client.email, Client.tax_id, Client.status).filter(
-                Client.email == normalized_email
-            )
+            query = session.query(Client).filter(Client.email == normalized_email)
             if exclude_id:
                 query = query.filter(Client.id != exclude_id)
-            row = query.first()
+            row = next((candidate for candidate in query.limit(200).all() if row_matches_company(candidate, company_id)), None)
             if row is not None:
                 return {
                     "id": row.id,
@@ -98,12 +161,10 @@ def client_identity_exists(
                 }
 
         if normalized_tax_id:
-            query = session.query(Client.id, Client.email, Client.tax_id, Client.status).filter(
-                Client.tax_id == normalized_tax_id
-            )
+            query = session.query(Client).filter(Client.tax_id == normalized_tax_id)
             if exclude_id:
                 query = query.filter(Client.id != exclude_id)
-            row = query.first()
+            row = next((candidate for candidate in query.limit(200).all() if row_matches_company(candidate, company_id)), None)
             if row is not None:
                 return {
                     "id": row.id,
@@ -238,6 +299,10 @@ def product_to_dict(row: Product) -> dict[str, Any]:
             "originalPriceUsd": row.original_price_usd,
             "discountPercent": row.discount_percent,
             "b2bPriceUsd": row.b2b_price_usd,
+            "currencyCode": "USD",
+            "localCurrencyCode": payload_local_currency(payload),
+            "exchangeRateUsdLocal": row.exchange_rate_usd_ves,
+            "exchangeRateUsdClp": row.exchange_rate_usd_ves,
             "exchangeRateUsdVes": row.exchange_rate_usd_ves,
             "stock": row.stock,
             "reserved": row.reserved,
@@ -328,7 +393,13 @@ def order_to_dict(row: Order) -> dict[str, Any]:
             "creditStatus": row.credit_status,
             "paymentStatus": row.payment_status,
             "totalUsd": row.total_usd,
+            "currencyCode": "USD",
+            "localCurrencyCode": payload_local_currency(payload),
+            "totalLocal": row.total_ves,
+            "totalClp": row.total_ves,
             "totalVes": row.total_ves,
+            "exchangeRateUsdLocal": row.exchange_rate_usd_ves,
+            "exchangeRateUsdClp": row.exchange_rate_usd_ves,
             "exchangeRateUsdVes": row.exchange_rate_usd_ves,
             "paidUsd": row.paid_usd,
             "balanceUsd": row.balance_usd,
@@ -361,7 +432,13 @@ def quote_to_dict(row: Quote) -> dict[str, Any]:
             "saleType": row.sale_type,
             "paymentTermDays": row.payment_terms_days,
             "totalUsd": row.total_usd,
+            "currencyCode": "USD",
+            "localCurrencyCode": payload_local_currency(payload),
+            "totalLocal": row.total_ves,
+            "totalClp": row.total_ves,
             "totalVes": row.total_ves,
+            "exchangeRateUsdLocal": row.exchange_rate_usd_ves,
+            "exchangeRateUsdClp": row.exchange_rate_usd_ves,
             "exchangeRateUsdVes": row.exchange_rate_usd_ves,
             "items": row.items or [],
             "versions": row.versions or [],
@@ -414,7 +491,13 @@ def credit_movement_to_dict(row: CreditMovement) -> dict[str, Any]:
             "clientId": row.client_id,
             "orderId": row.order_id,
             "amountUsd": row.amount_usd,
+            "currencyCode": "USD",
+            "localCurrencyCode": payload_local_currency(payload),
+            "amountLocal": row.amount_ves,
+            "amountClp": row.amount_ves,
             "amountVes": row.amount_ves,
+            "exchangeRateUsdLocal": row.exchange_rate_usd_ves,
+            "exchangeRateUsdClp": row.exchange_rate_usd_ves,
             "exchangeRateUsdVes": row.exchange_rate_usd_ves,
             "method": row.method,
             "reference": row.reference,
@@ -506,6 +589,7 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
     init_database()
     with SessionLocal() as session:
         settings = session.get(BusinessSetting, "default")
+        settings_payload = copy_payload(settings.payload if settings else {})
         return {
             "admin_users": [
                 admin_user_to_dict(row)
@@ -551,7 +635,9 @@ def load_sql_store() -> dict[str, list[dict[str, Any]]]:
                 audit_event_to_dict(row)
                 for row in session.query(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(1000).all()
             ],
-            "business_settings": copy_payload(settings.payload if settings else {}),
+            "business_settings": settings_payload,
+            "companies": copy_payload(settings_payload.get("companies", [])),
+            "subscriptions": copy_payload(settings_payload.get("subscriptions", [])),
         }
 
 
@@ -584,6 +670,8 @@ def sync_store_to_sql(store: dict[str, list[dict[str, Any]]]) -> None:
 
 def sync_business_settings(session, store: dict[str, Any]) -> None:
     payload = copy_payload(store.get("business_settings") or {})
+    payload["companies"] = copy_payload(store.get("companies", []))
+    payload["subscriptions"] = copy_payload(store.get("subscriptions", []))
     upsert(
         session,
         BusinessSetting,
@@ -618,7 +706,14 @@ def upsert_admin_user(session, user: dict[str, Any], object_id: str | None = Non
     object_id = object_id or user["id"]
     values = admin_user_sql_values(user, object_id)
     email = values.get("email") or ""
-    existing_by_email = session.query(AdminUser).filter(AdminUser.email == email).one_or_none() if email else None
+    existing_by_email = (
+        session.query(AdminUser)
+        .filter(AdminUser.email == email)
+        .order_by(AdminUser.updated_at.desc(), AdminUser.created_at.desc())
+        .first()
+        if email
+        else None
+    )
     if existing_by_email and existing_by_email.id != object_id:
         object_id = existing_by_email.id
         values["id"] = object_id
@@ -702,7 +797,7 @@ def client_sql_values(client: dict[str, Any], object_id: str | None = None) -> d
         "email": client.get("email", "").lower(),
         "password_hash": client.get("passwordHash", ""),
         "must_change_password": bool(client.get("mustChangePassword")),
-        "client_type": client.get("clientType", "ferretero"),
+        "client_type": client.get("clientType", "b2b"),
         "status": client.get("status", "active"),
         "credit_enabled": bool(client.get("creditEnabled")),
         "credit_limit_usd": float(client.get("creditLimitUsd") or 0),
@@ -719,7 +814,17 @@ def upsert_client(session, client: dict[str, Any], object_id: str | None = None)
     object_id = object_id or client["id"]
     values = client_sql_values(client, object_id)
     email = values.get("email") or ""
-    existing_by_email = session.query(Client).filter(Client.email == email).one_or_none() if email else None
+    company_id = payload_company_id(client)
+    existing_by_email = None
+    if email:
+        email_matches = (
+            session.query(Client)
+            .filter(Client.email == email)
+            .order_by(Client.updated_at.desc(), Client.created_at.desc())
+            .limit(200)
+            .all()
+        )
+        existing_by_email = next((row for row in email_matches if row_company_id(row) == company_id), None)
     if existing_by_email and existing_by_email.id != object_id:
         object_id = existing_by_email.id
         values["id"] = object_id
@@ -743,6 +848,7 @@ def sync_client_records(
     clients: list[dict[str, Any]],
     audit_events: list[dict[str, Any]] | None = None,
     notifications: list[dict[str, Any]] | None = None,
+    deleted_client_ids: list[str] | None = None,
 ) -> None:
     init_database()
     with SessionLocal() as session:
@@ -767,6 +873,17 @@ def sync_client_records(
                     if event.get("entityId") in client_id_aliases:
                         event["entityId"] = client_id_aliases[event["entityId"]]
             sync_audit_events(session, {"audit_events": audit_events})
+        for deleted_id in deleted_client_ids or []:
+            row = session.get(Client, deleted_id)
+            if row is None:
+                continue
+            payload = copy_payload(row.payload)
+            payload["status"] = "deleted"
+            payload["deletedAt"] = utc_now()
+            payload["updatedAt"] = payload["deletedAt"]
+            row.status = "deleted"
+            row.payload = payload
+            row.updated_at = utc_now_dt()
         session.commit()
 
 
@@ -832,7 +949,9 @@ def normalize_product_sql_identity(session, product: dict[str, Any]) -> str:
     if not sku:
         return object_id
 
-    existing = session.query(Product).filter(Product.sku == sku).one_or_none()
+    company_id = payload_company_id(product)
+    sku_matches = session.query(Product).filter(Product.sku == sku).limit(200).all()
+    existing = next((row for row in sku_matches if row_company_id(row) == company_id), None)
     if existing and existing.id != object_id:
         object_id = existing.id
         product["id"] = object_id
@@ -853,7 +972,7 @@ def product_sql_values(product: dict[str, Any], object_id: str | None = None) ->
         "original_price_usd": float(product.get("originalPriceUsd") or product.get("publicPriceUsd") or 0),
         "discount_percent": float(product.get("discountPercent") or 0),
         "b2b_price_usd": float(product.get("b2bPriceUsd") or 0),
-        "exchange_rate_usd_ves": float(product.get("exchangeRateUsdVes") or 38.5),
+        "exchange_rate_usd_ves": payload_exchange_rate_usd_local(product),
         "stock": int(product.get("stock") or 0),
         "reserved": int(product.get("reserved") or 0),
         "status": product.get("status", "active"),
@@ -989,7 +1108,7 @@ def ensure_client_for_order(session, order: dict[str, Any]) -> str:
             tax_id="",
             contact_name="",
             phone="",
-            email=f"{customer_id}@wulkan.local",
+            email=f"{customer_id}@fventas.local",
             password_hash="",
             must_change_password=False,
             client_type="guest",
@@ -1015,8 +1134,8 @@ def order_sql_values(order: dict[str, Any], customer_id: str, object_id: str | N
         "credit_status": order.get("creditStatus", "manual_review"),
         "payment_status": order.get("paymentStatus", "pending"),
         "total_usd": float(order.get("totalUsd") or 0),
-        "total_ves": float(order.get("totalVes") or 0),
-        "exchange_rate_usd_ves": float(order.get("exchangeRateUsdVes") or 38.5),
+        "total_ves": payload_total_local(order),
+        "exchange_rate_usd_ves": payload_exchange_rate_usd_local(order),
         "paid_usd": float(order.get("paidUsd") or 0),
         "balance_usd": float(order.get("balanceUsd") or order.get("totalUsd") or 0),
         "credit_before_usd": float(order.get("creditBeforeUsd") or 0),
@@ -1064,8 +1183,8 @@ def sync_quotes(session, store: dict[str, Any]) -> None:
                 "sale_type": quote.get("saleType", "cash"),
                 "payment_terms_days": int(quote.get("paymentTermDays") or 0),
                 "total_usd": float(quote.get("totalUsd") or 0),
-                "total_ves": float(quote.get("totalVes") or 0),
-                "exchange_rate_usd_ves": float(quote.get("exchangeRateUsdVes") or 38.5),
+                "total_ves": payload_total_local(quote),
+                "exchange_rate_usd_ves": payload_exchange_rate_usd_local(quote),
                 "items": quote.get("items") or [],
                 "client_snapshot": quote.get("client") or {},
                 "versions": quote.get("versions") or [],
@@ -1132,8 +1251,8 @@ def sync_credit_movements(session, store: dict[str, Any]) -> None:
                 "client_id": movement.get("clientId", ""),
                 "order_id": movement.get("orderId", ""),
                 "amount_usd": float(movement.get("amountUsd") or 0),
-                "amount_ves": float(movement.get("amountVes") or 0),
-                "exchange_rate_usd_ves": float(movement.get("exchangeRateUsdVes") or 38.5),
+                "amount_ves": payload_amount_local(movement),
+                "exchange_rate_usd_ves": payload_exchange_rate_usd_local(movement),
                 "method": movement.get("method", "other"),
                 "reference": movement.get("reference", ""),
                 "note": movement.get("note", ""),
@@ -1224,22 +1343,23 @@ def sync_service_technicians(session, store: dict[str, Any]) -> None:
 def sync_audit_events(session, store: dict[str, Any]) -> None:
     for event in store.get("audit_events", [])[-1000:]:
         object_id = event["id"]
-        if session.get(AuditEvent, object_id):
-            continue
-        session.add(
-            AuditEvent(
-                id=object_id,
-                actor_id=event.get("actorId", ""),
-                actor_name=event.get("actorName", ""),
-                actor_role=event.get("actorRole", ""),
-                action=event.get("action", ""),
-                entity_type=event.get("entityType", ""),
-                entity_id=event.get("entityId", ""),
-                detail=event.get("detail", ""),
-                ip_address=event.get("ipAddress", ""),
-                path=event.get("path", ""),
-                method=event.get("method", ""),
-                created_at=parse_dt(event.get("createdAt")),
-                payload=copy_payload(event),
-            )
+        upsert(
+            session,
+            AuditEvent,
+            object_id,
+            {
+                "id": object_id,
+                "actor_id": event.get("actorId", ""),
+                "actor_name": event.get("actorName", ""),
+                "actor_role": event.get("actorRole", ""),
+                "action": event.get("action", ""),
+                "entity_type": event.get("entityType", ""),
+                "entity_id": event.get("entityId", ""),
+                "detail": event.get("detail", ""),
+                "ip_address": event.get("ipAddress", ""),
+                "path": event.get("path", ""),
+                "method": event.get("method", ""),
+                "created_at": parse_dt(event.get("createdAt")),
+                "payload": copy_payload(event),
+            },
         )

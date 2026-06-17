@@ -1,35 +1,6 @@
-from __future__ import annotations
+"""Compatibility wrapper for legacy imports.
 
-from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
+New backend code should import from ``core.db``.
+"""
 
-from config import Config
-from models import Base
-
-
-engine = create_engine(
-    Config.DATABASE_URL,
-    future=True,
-    pool_pre_ping=True,
-    pool_size=Config.DB_POOL_SIZE,
-    max_overflow=Config.DB_MAX_OVERFLOW,
-    pool_recycle=Config.DB_POOL_RECYCLE_SECONDS,
-)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
-
-
-def init_database() -> None:
-    try:
-        Base.metadata.create_all(bind=engine)
-    except SQLAlchemyError as exc:
-        message = str(exc).lower()
-        duplicate_index = "already exists" in message and "ix_" in message
-        if duplicate_index:
-            engine.dispose()
-            return
-        raise
-
-
-def drop_database() -> None:
-    Base.metadata.drop_all(bind=engine)
+from core.db import *  # noqa: F401,F403

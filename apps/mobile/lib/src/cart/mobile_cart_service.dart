@@ -27,14 +27,14 @@ class MobileCartService {
 
   MobileCheckoutPreview calculatePreview(
     List<MobileCartItem> items, {
-    double? exchangeRateUsdVes,
+    double? exchangeRateUsdLocal,
   }) {
     final subtotalUsd = _roundMoney(
       items.fold<double>(
           0, (total, item) => total + item.quantity * item.unitPriceUsd),
     );
     final exchangeRate =
-        exchangeRateUsdVes ?? mobileEnvironment.exchangeRateUsdVes;
+        exchangeRateUsdLocal ?? mobileEnvironment.exchangeRateUsdLocal;
     final blockingReasons = <String>{
       for (final item in items)
         if (item.requiresQuote) "requires_quote",
@@ -45,8 +45,8 @@ class MobileCartService {
     return MobileCheckoutPreview(
       subtotalUsd: subtotalUsd,
       totalUsd: subtotalUsd,
-      totalVes: _roundMoney(subtotalUsd * exchangeRate),
-      exchangeRateUsdVes: exchangeRate,
+      totalLocal: _roundMoney(subtotalUsd * exchangeRate),
+      exchangeRateUsdLocal: exchangeRate,
       requiresOperatorReview: blockingReasons.isNotEmpty,
       blockingReasons: blockingReasons,
     );
@@ -68,7 +68,7 @@ class SecureMobileCartStorage implements MobileCartStorage {
     FlutterSecureStorage storage = const FlutterSecureStorage(),
   }) : _storage = storage;
 
-  static const _cartKey = "wulkan_mobile_cart_v1";
+  static const _cartKey = "fventas_mobile_cart_v1";
 
   final FlutterSecureStorage _storage;
 
@@ -112,7 +112,7 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
   }
 
   void addProduct(MobileProduct product, {int quantity = 1}) {
-    if (product.ferreteroPriceUsd <= 0) {
+    if (product.effectiveB2bPriceUsd <= 0) {
       return;
     }
     final normalizedQuantity = quantity < 1 ? 1 : quantity;
@@ -137,7 +137,7 @@ class MobileCartController extends ValueNotifier<List<MobileCartItem>> {
         sku: product.sku,
         title: product.name,
         quantity: normalizedQuantity,
-        unitPriceUsd: product.ferreteroPriceUsd,
+        unitPriceUsd: product.effectiveB2bPriceUsd,
         requiresQuote: product.requiresQuote,
         requiresTechnicalValidation: product.requiresTechnicalValidation,
         imageUrl: product.primaryImageUrl,

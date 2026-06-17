@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set heading = "Historial de credito" %}
-{% set description = "Abonos externos registrados por Wulkan, trazabilidad y referencias de cobranza." %}
+{% set description = "Abonos externos registrados por FVENTAS, trazabilidad y referencias de cobranza." %}
 
 {% block page_actions %}
 {% if can_export_credit %}
@@ -44,7 +44,7 @@
   <div class="panel-header">
     <div>
       <h2>Historial de abonos externos</h2>
-      <span>Pagos manuales registrados por Wulkan, sin pasarela online.</span>
+      <span>Pagos manuales registrados por FVENTAS, sin pasarela online.</span>
     </div>
     <span>{{ payments | length }} movimientos</span>
   </div>
@@ -74,7 +74,7 @@
           <td>{{ payment.reference or 'Sin referencia' }}</td>
           <td>
             <strong>{{ money_usd(payment.amountUsd) }}</strong>
-            <small class="d-block text-secondary">VES {{ payment.amountVes }}</small>
+            <small class="d-block text-secondary">{{ money_currency(payment.amountClp or payment.amountVes or 0, local_currency) }}</small>
           </td>
           <td>{{ payment.createdBy }}</td>
         </tr>

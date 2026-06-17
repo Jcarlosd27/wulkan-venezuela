@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set heading = "Clientes ferreteros" %}
+{% set heading = "Clientes B2B" %}
 {% set description = "Administra cartera B2B, acceso movil, credito, cobranza y trazabilidad comercial." %}
 
 {% block top_action %}
@@ -90,7 +90,7 @@
       <label class="form-label" for="clientSearch">Buscar cliente</label>
       <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input class="form-control" id="clientSearch" name="q" value="{{ filters.q }}" placeholder="Nombre, RIF, email, zona o telefono" aria-label="Buscar cliente">
+        <input class="form-control" id="clientSearch" name="q" value="{{ filters.q }}" placeholder="Nombre, {{ market_profile.taxLabel }}, email, zona o telefono" aria-label="Buscar cliente">
       </div>
     </div>
     <div class="col-6 col-lg-3 col-xl-2">
@@ -130,7 +130,7 @@
 <section class="panel category-panel client-panel">
   <div class="panel-header">
     <div>
-      <h2>Cartera de ferreteros</h2>
+      <h2>Cartera de clientes B2B</h2>
       <span>Acceso movil, condicion comercial, credito disponible y cobranza.</span>
     </div>
     <span>{{ clients | length }} registros</span>
@@ -158,7 +158,7 @@
               <div class="category-thumb"><i class="bi bi-shop"></i></div>
               <div>
                 <strong>{{ client.businessName }}</strong>
-                <small>{{ client.taxId or 'Sin RIF' }} - {{ client.city or 'Sin ciudad' }}</small>
+                <small>{{ client.taxId or ('Sin ' ~ market_profile.taxLabel) }} - {{ client.city or 'Sin ciudad' }}</small>
                 <span class="badge {{ client.status | badge_class }} mt-1">{{ client.statusLabel }}</span>
               </div>
             </div>
@@ -171,7 +171,7 @@
           <td>
             <strong class="d-block">{{ client.assignedSellerName or 'Sin vendedor' }}</strong>
             <small class="d-block text-secondary">{{ client.deliveryZone or client.state or 'Sin zona' }}</small>
-            <small class="d-block text-secondary">{{ client.country or 'VE' }}</small>
+            <small class="d-block text-secondary">{{ client.country or market_profile.code }}</small>
           </td>
           <td>
             <span class="badge text-bg-light">{{ client.clientTypeLabel }}</span>
@@ -196,7 +196,12 @@
           </td>
           <td>
             <span class="badge text-bg-light">{{ client.createdViaLabel or client_origin_label(client.createdVia) }}</span>
-            <strong class="d-block mt-1">{{ client.createdByName or 'Sistema Wulkan' }}</strong>
+            {% if client.deletionStatus in ['requested', 'processing', 'approved'] %}
+            <span class="badge text-bg-danger mt-1">Eliminacion solicitada</span>
+            {% elif client.deletionStatus == 'deleted' %}
+            <span class="badge text-bg-dark mt-1">Cuenta eliminada</span>
+            {% endif %}
+            <strong class="d-block mt-1">{{ client.createdByName or 'Sistema FVENTAS' }}</strong>
             <small class="d-block text-secondary">Creado {{ client.createdAt or 'Sin fecha' }}</small>
             <small class="d-block text-secondary">{{ client.ordersCount }} ordenes - {{ client.lastOrderId or 'Sin orden' }}</small>
           </td>
@@ -209,6 +214,12 @@
               <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#editClient{{ loop.index }}" aria-label="Editar {{ client.businessName }}" title="Editar cliente">
                 <i class="bi bi-pencil"></i> Editar
               </button>
+              {% endif %}
+              {% if can_delete_data() and client.deletionStatus in ['requested', 'processing', 'approved'] %}
+              <form method="post" action="{{ url_for('client_account_deletion_complete', client_id=client.id) }}">
+                {{ csrf_field() }}
+                <button class="btn btn-sm btn-outline-danger" type="submit" aria-label="Cerrar solicitud de eliminacion de {{ client.businessName }}" title="Anonimizar y cerrar cuenta"><i class="bi bi-person-x"></i></button>
+              </form>
               {% endif %}
               {% if can_delete_data() %}
               <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}">
@@ -225,7 +236,7 @@
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-shop"></i></div>
               <strong>Sin clientes registrados</strong>
-              <span>Importa la plantilla oficial o crea el primer ferretero desde este modulo.</span>
+              <span>Importa la plantilla oficial o crea el primer cliente B2B desde este modulo.</span>
             </div>
           </td>
         </tr>
@@ -242,7 +253,7 @@
       {{ csrf_field() }}
       <div class="modal-header">
         <div>
-          <h2 class="modal-title h5">Nuevo cliente ferretero</h2>
+          <h2 class="modal-title h5">Nuevo cliente B2B</h2>
           <p class="mb-0 text-secondary">Crea acceso movil, cartera comercial y condiciones B2B.</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -268,7 +279,7 @@
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">{{ client.businessName }}</h2>
-          <p class="mb-0 text-secondary">{{ client.taxId or 'Sin RIF' }} · {{ client.email }}</p>
+          <p class="mb-0 text-secondary">{{ client.taxId or ('Sin ' ~ market_profile.taxLabel) }} - {{ client.email }}</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
@@ -307,10 +318,13 @@
           <div class="col-12 col-lg-4">
             <h3 class="client-detail-title">Trazabilidad</h3>
             <p class="mb-1"><strong>Origen:</strong> {{ client.createdViaLabel or client_origin_label(client.createdVia) }}</p>
-            <p class="mb-1"><strong>Creado por:</strong> {{ client.createdByName or 'Sistema Wulkan' }}</p>
+            <p class="mb-1"><strong>Creado por:</strong> {{ client.createdByName or 'Sistema FVENTAS' }}</p>
             <p class="mb-1"><strong>Creado:</strong> {{ client.createdAt or 'Sin fecha' }}</p>
-            <p class="mb-1"><strong>Ultima actualizacion:</strong> {{ client.updatedViaLabel or client_origin_label(client.updatedVia) }} - {{ client.updatedByName or 'Sistema Wulkan' }}</p>
+            <p class="mb-1"><strong>Ultima actualizacion:</strong> {{ client.updatedViaLabel or client_origin_label(client.updatedVia) }} - {{ client.updatedByName or 'Sistema FVENTAS' }}</p>
             <p class="mb-1"><strong>Actualizado:</strong> {{ client.updatedAt or 'Sin fecha' }}</p>
+            {% if client.deletionStatus %}
+            <p class="mb-1"><strong>Eliminacion:</strong> {{ client.deletionStatus }}{% if client.deletionRequestedAt %} - {{ client.deletionRequestedAt }}{% endif %}</p>
+            {% endif %}
             <p class="mb-0"><strong>Ultima compra:</strong> {{ client.lastPurchaseAt or 'Sin compra' }}</p>
           </div>
         </div>
@@ -380,17 +394,17 @@
 
 {% set bulk_modal_id = "clientsImportModal" %}
 {% set bulk_action = url_for("clients_import") %}
-{% set bulk_title = "Importar clientes ferreteros" %}
+{% set bulk_title = "Importar clientes B2B" %}
 {% set bulk_help = "Crea o actualiza clientes B2B, asignacion de vendedor, direcciones, contactos, condiciones comerciales y solicitudes de credito." %}
-{% set bulk_columns = ["cliente", "email", "rif", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "estado_ubicacion", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "estado_credito", "credito_solicitado_usd", "cupo_usd", "dias_credito", "score_credito", "observacion_gerencia"] %}
+{% set bulk_columns = ["cliente", "email", "documento_fiscal", "telefono", "whatsapp", "direccion_fiscal", "direccion_despacho", "estado_ubicacion", "ciudad", "vendedor_email", "tipo_cliente", "lista_precios", "estado_credito", "credito_solicitado_usd", "cupo_usd", "dias_credito", "score_credito", "observacion_gerencia"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script>
   (() => {
-    const locations = {{ venezuela_locations|tojson }};
-    const stateSelects = document.querySelectorAll("[data-venezuela-state]");
+    const locations = {{ chile_locations|tojson }};
+    const stateSelects = document.querySelectorAll("[data-chile-region]");
 
     const buildOption = (value, selectedValue) => {
       const option = document.createElement("option");
@@ -402,7 +416,7 @@
 
     stateSelects.forEach((stateSelect) => {
       const form = stateSelect.closest("form") || document;
-      const citySelect = form.querySelector("[data-venezuela-city]");
+      const citySelect = form.querySelector("[data-chile-city]");
       if (!citySelect) {
         return;
       }
@@ -411,8 +425,8 @@
         const selectedCity = citySelect.dataset.selectedCity || citySelect.value;
         const cities = locations[stateSelect.value] || [];
         citySelect.innerHTML = "";
-        citySelect.appendChild(buildOption("Selecciona ciudad", ""));
-        citySelect.options[0].value = "";
+        citySelect.appendChild(buildOption("", selectedCity));
+        citySelect.options[0].textContent = "Selecciona ciudad/comuna";
         cities.forEach((city) => citySelect.appendChild(buildOption(city, selectedCity)));
         if (!cities.includes(selectedCity)) {
           citySelect.value = "";

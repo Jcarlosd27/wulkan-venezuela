@@ -43,3 +43,4 @@ commandlinetools-win-latest.zip
 Thumbs.db
 .vscode/
 .idea/
+*.iml

@@ -15,7 +15,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from db import SessionLocal, init_database
+from core.db import SessionLocal, init_database
 from models import AuditEvent, Client
 
 
@@ -56,7 +56,7 @@ def build_payload(args: argparse.Namespace, client_id: str, password_hash: str, 
         "phone": args.phone.strip(),
         "whatsapp": args.whatsapp.strip() or args.phone.strip(),
         "email": args.email.strip().lower(),
-        "clientType": "ferretero",
+        "clientType": "b2b",
         "clientCategory": "review",
         "priceList": "b2b",
         "authorizedDiscountPercent": 0.0,
@@ -65,7 +65,7 @@ def build_payload(args: argparse.Namespace, client_id: str, password_hash: str, 
         "address": args.address.strip(),
         "fiscalAddress": args.address.strip(),
         "shippingAddress": args.address.strip(),
-        "country": args.country.strip() or "VE",
+        "country": args.country.strip() or "CL",
         "state": args.state.strip(),
         "city": args.city.strip(),
         "deliveryZone": "Google Play Review",
@@ -95,17 +95,17 @@ def build_payload(args: argparse.Namespace, client_id: str, password_hash: str, 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create or reset a mobile ferretero client account.")
+    parser = argparse.ArgumentParser(description="Create or reset a mobile B2B client account.")
     parser.add_argument("--email", required=True)
-    parser.add_argument("--business-name", default="Google Play Reviewer Wulkan")
+    parser.add_argument("--business-name", default="Google Play Reviewer FVENTAS")
     parser.add_argument("--legal-name", default="")
     parser.add_argument("--commercial-name", default="")
-    parser.add_argument("--tax-id", default="J-00000000-0")
+    parser.add_argument("--tax-id", default="11.111.111-1")
     parser.add_argument("--contact-name", default="Google Play Reviewer")
     parser.add_argument("--phone", default="")
     parser.add_argument("--whatsapp", default="")
     parser.add_argument("--address", default="Cuenta tecnica de revision")
-    parser.add_argument("--country", default="VE")
+    parser.add_argument("--country", default="CL")
     parser.add_argument("--state", default="")
     parser.add_argument("--city", default="")
     parser.add_argument("--password", default="")
@@ -146,7 +146,7 @@ def main() -> None:
         client.email = email
         client.password_hash = password_hash
         client.must_change_password = False
-        client.client_type = "ferretero"
+        client.client_type = "b2b"
         client.status = "active"
         client.credit_enabled = False
         client.credit_limit_usd = 0.0

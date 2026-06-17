@@ -7,23 +7,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config import Config
+from core.config import Config
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-STORE_PATH = DATA_DIR / "wulkan_store.json"
+STORE_PATH = DATA_DIR / "fventas_store.json"
 SQL_BACKEND_NAMES = {"sql", "database", "db"}
 PRODUCTION_ENV_NAME = "production"
-INSECURE_PRODUCTION_ADMIN_EMAILS = {"admin@wulkan.local"}
-INSECURE_PRODUCTION_CLIENT_IDS = {"client-ferreteria-valencia"}
-INSECURE_PRODUCTION_CLIENT_EMAILS = {"ferreteria@wulkan.local"}
+INSECURE_PRODUCTION_ADMIN_EMAILS = {"admin@fventas.local"}
+INSECURE_PRODUCTION_CLIENT_IDS = {"client-demo-b2b"}
+INSECURE_PRODUCTION_CLIENT_EMAILS = {"cliente@fventas.local"}
 INSECURE_PRODUCTION_ORDER_PREFIXES = ("ord-mobile-checkout-",)
-INSECURE_PRODUCTION_CATEGORY_IDS = {"machinery-garden", "spare-parts", "industrial"}
-INSECURE_PRODUCTION_PRODUCT_IDS = {"prod-motosierra-45cc", "prod-cadena-18", "prod-motobomba-3x3"}
+INSECURE_PRODUCTION_CATEGORY_IDS = {"categoria-demo-1", "categoria-demo-2", "categoria-demo-3"}
+INSECURE_PRODUCTION_PRODUCT_IDS = {"producto-demo-1", "producto-demo-2", "producto-demo-3"}
 INSECURE_PRODUCTION_ANNOUNCEMENT_IDS = {"ann-home-launch", "ann-checkout-payment"}
-INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS = {"svc-caracas-central"}
+INSECURE_PRODUCTION_SERVICE_TECHNICIAN_IDS = {"svc-demo-central"}
 INSECURE_PRODUCTION_STOCK_MOVEMENT_IDS = {"mov-001", "mov-002", "mov-003"}
-INSECURE_PRODUCTION_TEXT_MARKERS = ("demo", "@wulkan.local")
+INSECURE_PRODUCTION_TEXT_MARKERS = (
+    "demo",
+    "@fventas.local",
+)
 
 
 def has_insecure_production_marker(*values: Any) -> bool:
@@ -38,7 +41,7 @@ def is_insecure_production_client(client: dict[str, Any]) -> bool:
     return (
         client_id in INSECURE_PRODUCTION_CLIENT_IDS
         or email in INSECURE_PRODUCTION_CLIENT_EMAILS
-        or email.endswith("@wulkan.local")
+        or email.endswith("@fventas.local")
         or has_insecure_production_marker(business_name, email)
     )
 
@@ -72,7 +75,31 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+DEFAULT_COMPANY_ID = "company-fventas-chile"
+SAAS_PLAN_ID = "fventas-pro-monthly"
+SAAS_PLAN_NAME = "FVENTAS Pro Mensual"
+SAAS_PLAN_PRICE_CLP = 69990
+TENANT_COLLECTIONS = (
+    "categories",
+    "products",
+    "announcements",
+    "orders",
+    "quotes",
+    "crm_records",
+    "admin_users",
+    "clients",
+    "credit_movements",
+    "notifications",
+    "service_technicians",
+    "audit_events",
+    "media_assets",
+    "stock_movements",
+)
+
+
 DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
+    "companies": [],
+    "subscriptions": [],
     "categories": [],
     "products": [],
     "announcements": [],
@@ -187,7 +214,7 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
             from sql_store import load_sql_store, sync_store_to_sql
 
             store = load_sql_store()
-            if not store.get("admin_users") and not store.get("products"):
+            if not is_production() and not store.get("admin_users") and not store.get("products"):
                 sync_store_to_sql(production_safe_seed(load_json_store()))
                 store = load_sql_store()
             if is_production():
@@ -203,15 +230,22 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
 
 def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     settings = store.setdefault("business_settings", {})
-    settings.setdefault("companyName", "Wulkan Venezuela")
-    settings.setdefault("companyLegalName", "Wulkan Venezuela")
+    settings.setdefault("companyName", "FVENTAS")
+    settings.setdefault("companyLegalName", "FVENTAS")
     settings.setdefault("taxId", "")
-    settings.setdefault("supportEmail", "admin@wulkanvenezuela.com")
+    settings.setdefault("supportEmail", "soporte@fventas.cl")
     settings.setdefault("supportPhone", "")
     settings.setdefault("logoUrl", "")
-    settings.setdefault("primaryCurrency", "USD")
-    settings.setdefault("referenceCurrency", "VES")
-    settings.setdefault("exchangeRateUsdVes", 38.5)
+    settings.setdefault("marketCountry", "CL")
+    settings.setdefault("salesCurrency", settings.get("primaryCurrency") or "USD")
+    settings.setdefault("localCurrency", settings.get("referenceCurrency") or "CLP")
+    settings["salesCurrency"] = str(settings.get("salesCurrency") or "USD").upper()
+    settings["localCurrency"] = str(settings.get("localCurrency") or "CLP").upper()
+    settings.setdefault("primaryCurrency", settings["salesCurrency"])
+    settings.setdefault("referenceCurrency", settings["localCurrency"])
+    settings.setdefault("exchangeRateBaseToLocal", settings.get("exchangeRateUsdClp") or settings.get("exchangeRateUsdVes") or 950.0)
+    settings.setdefault("exchangeRateUsdVes", settings.get("exchangeRateBaseToLocal", 950.0))
+    settings.setdefault("exchangeRateUsdClp", settings.get("exchangeRateBaseToLocal", 950.0))
     settings.setdefault("defaultPaymentTermsDays", [0, 10, 15, 20, 30, 40])
     settings.setdefault("creditApprovalThresholdUsd", 0.0)
     settings.setdefault("overdueBlockDays", 15)
@@ -219,14 +253,81 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     settings.setdefault("defaultCommissionPercent", 0.0)
     settings.setdefault("stockMinDefault", 1)
     settings.setdefault("maxUploadMb", 10)
-    settings.setdefault("quoteFooterText", "Precios sujetos a disponibilidad y validacion comercial Wulkan.")
+    settings.setdefault("quoteFooterText", "Precios sujetos a disponibilidad y validacion comercial FVENTAS.")
     settings.setdefault("orderTermsText", "Pedidos sujetos a validacion de stock, credito y despacho.")
     settings.setdefault("notificationEmails", [])
     settings.setdefault("createdAt", utc_now())
     settings.setdefault("updatedAt", utc_now())
+    store.setdefault("companies", [])
+    store.setdefault("subscriptions", [])
+    if not store["companies"]:
+        store["companies"].append(
+            {
+                "id": DEFAULT_COMPANY_ID,
+                "name": settings["companyName"],
+                "legalName": settings.get("companyLegalName", ""),
+                "taxId": settings.get("taxId", ""),
+                "country": settings.get("marketCountry", "CL"),
+                "status": "active",
+                "ownerEmail": settings.get("supportEmail", "soporte@fventas.cl"),
+                "supportEmail": settings.get("supportEmail", ""),
+                "supportPhone": settings.get("supportPhone", ""),
+                "createdAt": utc_now(),
+                "updatedAt": utc_now(),
+            }
+        )
+    for company in store["companies"]:
+        company.setdefault("id", DEFAULT_COMPANY_ID)
+        company.setdefault("name", company.get("companyName") or "Empresa FVENTAS")
+        company.setdefault("legalName", company.get("name", "Empresa FVENTAS"))
+        company.setdefault("taxId", "")
+        company.setdefault("country", "CL")
+        company.setdefault("status", "active")
+        company.setdefault("ownerEmail", "")
+        company.setdefault("supportEmail", company.get("ownerEmail", ""))
+        company.setdefault("supportPhone", "")
+        company.setdefault("createdAt", utc_now())
+        company.setdefault("updatedAt", utc_now())
+    default_company_id = store["companies"][0].get("id") or DEFAULT_COMPANY_ID
+    if not any(subscription.get("companyId") == default_company_id for subscription in store["subscriptions"]):
+        store["subscriptions"].append(
+            {
+                "id": f"sub-{default_company_id}",
+                "companyId": default_company_id,
+                "planId": SAAS_PLAN_ID,
+                "planName": SAAS_PLAN_NAME,
+                "priceClp": SAAS_PLAN_PRICE_CLP,
+                "billingCycle": "monthly",
+                "status": "active",
+                "currentPeriodStart": utc_now(),
+                "currentPeriodEnd": "",
+                "paymentMethod": "external",
+                "lastPaymentAt": "",
+                "nextBillingAt": "",
+                "notes": "Cuenta base FVENTAS habilitada.",
+                "createdAt": utc_now(),
+                "updatedAt": utc_now(),
+            }
+        )
+    for subscription in store["subscriptions"]:
+        subscription.setdefault("id", next_id("sub", subscription.get("companyId", default_company_id)))
+        subscription.setdefault("companyId", default_company_id)
+        subscription.setdefault("planId", SAAS_PLAN_ID)
+        subscription.setdefault("planName", SAAS_PLAN_NAME)
+        subscription.setdefault("priceClp", SAAS_PLAN_PRICE_CLP)
+        subscription.setdefault("billingCycle", "monthly")
+        subscription.setdefault("status", "pending_payment")
+        subscription.setdefault("currentPeriodStart", "")
+        subscription.setdefault("currentPeriodEnd", "")
+        subscription.setdefault("paymentMethod", "external")
+        subscription.setdefault("lastPaymentAt", "")
+        subscription.setdefault("nextBillingAt", "")
+        subscription.setdefault("notes", "")
+        subscription.setdefault("createdAt", utc_now())
+        subscription.setdefault("updatedAt", utc_now())
     store.setdefault("media_assets", [])
     for asset in store.get("media_assets", []):
-        asset.setdefault("title", "Activo Wulkan")
+        asset.setdefault("title", "Activo FVENTAS")
         asset.setdefault("assetType", asset.get("type", "image"))
         asset.setdefault("type", asset.get("assetType", "image"))
         asset.setdefault("productId", "")
@@ -249,7 +350,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     store.setdefault("credit_movements", [])
     store.setdefault("notifications", [])
     for notification in store.get("notifications", []):
-        notification.setdefault("title", "Notificacion Wulkan")
+        notification.setdefault("title", "Notificacion FVENTAS")
         notification.setdefault("body", "")
         notification.setdefault("type", notification.get("notificationType", "info"))
         notification.setdefault("notificationType", notification.get("type", "info"))
@@ -272,6 +373,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     store.setdefault("service_technicians", [])
     store.setdefault("audit_events", [])
     for admin_user in store.get("admin_users", []):
+        admin_user.setdefault("companyId", default_company_id)
         admin_user.setdefault("name", admin_user.get("email", "Usuario admin"))
         admin_user.setdefault("role", "operator")
         admin_user.setdefault("status", "active")
@@ -289,13 +391,14 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         admin_user.setdefault("createdAt", utc_now())
         admin_user.setdefault("updatedAt", utc_now())
     for client in store.get("clients", []):
-        client.setdefault("businessName", "Cliente ferretero")
+        client.setdefault("companyId", default_company_id)
+        client.setdefault("businessName", "Cliente B2B")
         client.setdefault("taxId", "")
         client.setdefault("contactName", "")
         client.setdefault("phone", "")
         client.setdefault("email", "")
         client.setdefault("mustChangePassword", False)
-        client.setdefault("clientType", "ferretero")
+        client.setdefault("clientType", "b2b")
         client.setdefault("status", "active")
         client.setdefault("address", "")
         client.setdefault("state", "")
@@ -324,14 +427,14 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         order.setdefault("id", order.get("orderId", ""))
         order.setdefault("orderId", order.get("id", ""))
         order.setdefault("customerId", "")
-        order.setdefault("customer", {"name": "Cliente Wulkan"})
+        order.setdefault("customer", {"name": "Cliente FVENTAS"})
         order.setdefault("items", [])
         order.setdefault("grossUsd", order.get("totalUsd", 0.0))
         order.setdefault("discountUsd", 0.0)
         order.setdefault("netUsd", order.get("totalUsd", 0.0))
         order.setdefault("totalUsd", 0.0)
         order.setdefault("totalVes", 0.0)
-        order.setdefault("exchangeRateUsdVes", 38.5)
+        order.setdefault("exchangeRateUsdVes", 950.0)
         order.setdefault("saleType", "credit_line" if order.get("creditStatus") == "approved" else "cash")
         order.setdefault("paymentTermDays", 0)
         order.setdefault("dueDate", "")
@@ -396,7 +499,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         quote.setdefault("id", quote.get("quoteNumber", ""))
         quote.setdefault("quoteNumber", quote.get("id", ""))
         quote.setdefault("clientId", "")
-        quote.setdefault("client", {"name": "Cliente Wulkan"})
+        quote.setdefault("client", {"name": "Cliente FVENTAS"})
         quote.setdefault("sellerId", "")
         quote.setdefault("sellerName", "")
         quote.setdefault("items", [])
@@ -404,7 +507,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         quote.setdefault("discountUsd", 0.0)
         quote.setdefault("totalUsd", 0.0)
         quote.setdefault("totalVes", 0.0)
-        quote.setdefault("exchangeRateUsdVes", 38.5)
+        quote.setdefault("exchangeRateUsdVes", 950.0)
         quote.setdefault("saleType", "cash")
         quote.setdefault("paymentTermDays", 0)
         quote.setdefault("validUntil", "")
@@ -458,7 +561,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         movement.setdefault("orderId", "")
         movement.setdefault("amountUsd", 0.0)
         movement.setdefault("amountVes", 0.0)
-        movement.setdefault("exchangeRateUsdVes", 38.5)
+        movement.setdefault("exchangeRateUsdVes", 950.0)
         movement.setdefault("method", "cash")
         movement.setdefault("reference", "")
         movement.setdefault("note", "")
@@ -495,7 +598,7 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         event.setdefault("createdAt", utc_now())
     for product in store.get("products", []):
         product.setdefault("internalCode", "")
-        product.setdefault("brand", "Wulkan")
+        product.setdefault("brand", "FVENTAS")
         product.setdefault("model", "")
         product.setdefault("subCategory", "")
         product.setdefault("unitOfSale", "unidad")
@@ -549,6 +652,11 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         category.setdefault("updatedAt", utc_now())
         if category.get("status") != "active":
             category["visibleInApp"] = False
+
+    for collection_name in TENANT_COLLECTIONS:
+        for item in store.get(collection_name, []):
+            if isinstance(item, dict):
+                item.setdefault("companyId", default_company_id)
 
 
 def save_json_store(store: dict[str, list[dict[str, Any]]]) -> None:

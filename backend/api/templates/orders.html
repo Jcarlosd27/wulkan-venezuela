@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% set heading = "Ordenes B2B" %}
-{% set description = "Gestiona compras de ferreteros, aprobacion comercial, credito, inventario, despacho y abonos externos." %}
+{% set description = "Gestiona compras de clientes B2B, aprobacion comercial, credito, inventario, despacho y abonos externos." %}
 
 {% macro order_graph(title, chart, empty_text) -%}
 <article class="panel order-chart">
   <div class="panel-header">
     <h2>{{ title }}</h2>
-    <span>Graphify</span>
+    <span>FVENTAS Insights</span>
   </div>
   {% if chart.values %}
   <div
-    class="graphify-bars"
+    class="insight-bars"
     data-labels='{{ chart["labels"] | tojson }}'
     data-values='{{ chart["values"] | tojson }}'
   ></div>
@@ -230,6 +230,9 @@
           <td>
             <span class="badge {{ order.dispatchStatus | badge_class }}">{{ order.dispatchStatusLabel }}</span>
             <small class="d-block text-secondary">{{ order.invoiceStatus }}</small>
+            {% if order.paymentHoldReason %}
+            <small class="d-block text-warning fw-semibold">{{ order.paymentHoldReason }}</small>
+            {% endif %}
           </td>
           <td>
             <span class="badge {{ order.status | badge_class }}">{{ order.statusLabel }}</span>
@@ -399,12 +402,12 @@
       <div class="modal-body">
         <div class="row g-3">
           <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Monto USD</label>
+            <label class="form-label fw-semibold">Monto {{ sales_currency }}</label>
             <input class="form-control" name="amountUsd" inputmode="decimal" value="{{ order.balanceUsd }}" required>
           </div>
           <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Monto VES</label>
-            <input class="form-control" name="amountVes" inputmode="decimal" placeholder="Calculado si se deja vacio">
+            <label class="form-label fw-semibold">Monto {{ local_currency }}</label>
+            <input class="form-control" name="amountClp" inputmode="decimal" placeholder="Calculado si se deja vacio">
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">Metodo</label>
@@ -415,8 +418,8 @@
             </select>
           </div>
           <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Tasa USD/VES</label>
-            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ order.exchangeRateUsdVes or 38.5 }}">
+            <label class="form-label fw-semibold">Tasa {{ sales_currency }}/{{ local_currency }}</label>
+            <input class="form-control" name="exchangeRateUsdClp" inputmode="decimal" value="{{ order.exchangeRateUsdClp or order.exchangeRateUsdVes or exchange_rate }}">
           </div>
           <div class="col-12">
             <label class="form-label fw-semibold">Referencia</label>

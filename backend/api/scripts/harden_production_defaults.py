@@ -14,8 +14,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from config import Config
-from db import SessionLocal, init_database
+from core.config import Config
+from core.db import SessionLocal, init_database
 from models import (
     AdminUser,
     Announcement,
@@ -43,7 +43,7 @@ from store import (
 
 DEFAULT_ADMIN_EMAILS = INSECURE_PRODUCTION_ADMIN_EMAILS
 DEFAULT_CLIENT_EMAILS = INSECURE_PRODUCTION_CLIENT_EMAILS
-DEFAULT_ORDER_MARKERS = ("%demo%", "%@wulkan.local%")
+DEFAULT_ORDER_MARKERS = ("%demo%", "%@fventas.local%")
 
 
 def utc_now() -> datetime:
@@ -95,7 +95,7 @@ def main() -> None:
     if str(Config.ENV).strip().lower() != "production":
         print("Skipping production hardening outside production.")
         return
-    if os.environ.get("WULKAN_HARDEN_DEFAULT_ACCOUNTS", "1").strip().lower() in {"0", "false", "no", "off"}:
+    if os.environ.get("FVENTAS_HARDEN_DEFAULT_ACCOUNTS", "1").strip().lower() in {"0", "false", "no", "off"}:
         print("Skipping production hardening by configuration.")
         return
 
@@ -123,7 +123,7 @@ def main() -> None:
                 or_(
                     Client.id.in_(INSECURE_PRODUCTION_CLIENT_IDS),
                     Client.email.in_(DEFAULT_CLIENT_EMAILS),
-                    Client.email.ilike("%@wulkan.local"),
+                    Client.email.ilike("%@fventas.local"),
                     Client.business_name.ilike("%demo%"),
                 )
             )
@@ -173,9 +173,9 @@ def main() -> None:
                 audit_filters.append(AuditEvent.entity_id.in_(entity_ids))
             audit_filters.extend(
                 [
-                    AuditEvent.detail.ilike("%Ferreteria Demo Valencia%"),
+                    AuditEvent.detail.ilike("%Cliente Demo Santiago%"),
                     AuditEvent.detail.ilike("%demo%"),
-                    AuditEvent.detail.ilike("%@wulkan.local%"),
+                    AuditEvent.detail.ilike("%@fventas.local%"),
                 ]
             )
             disabled.extend(delete_matching(session, AuditEvent, audit_filters, "audit-demo"))

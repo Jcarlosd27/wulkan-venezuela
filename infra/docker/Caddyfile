@@ -1,8 +1,8 @@
-{$WULKAN_DOMAIN} {
+{$FVENTAS_DOMAIN} {
   encode gzip zstd
 
   request_body {
-    max_size {$WULKAN_MAX_UPLOAD_MB:16}MB
+    max_size {$FVENTAS_MAX_UPLOAD_MB:16}MB
   }
 
   header {

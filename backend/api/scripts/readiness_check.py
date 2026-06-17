@@ -11,7 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from config import get_config
+from core.config import get_config
 from store import (
     INSECURE_PRODUCTION_ADMIN_EMAILS,
     INSECURE_PRODUCTION_ANNOUNCEMENT_IDS,
@@ -61,12 +61,12 @@ def audit_config(findings: list[Finding], strict: bool) -> None:
     expected = "error" if strict or is_production else "warn"
 
     if is_production:
-        if Config.SECRET_KEY == "wulkan-dev":
-            add(findings, "error", "secret", "WULKAN_SECRET_KEY usa el valor de desarrollo.")
+        if Config.SECRET_KEY == "fventas-dev":
+            add(findings, "error", "secret", "FVENTAS_SECRET_KEY usa el valor de desarrollo.")
         if str(Config.DATA_BACKEND).lower() != "sql":
-            add(findings, "error", "data-backend", "Produccion debe usar WULKAN_DATA_BACKEND=sql.")
+            add(findings, "error", "data-backend", "Produccion debe usar FVENTAS_DATA_BACKEND=sql.")
         if Config.SQL_FALLBACK_TO_JSON:
-            add(findings, "error", "sql-fallback", "Produccion debe tener WULKAN_SQL_FALLBACK_TO_JSON=0.")
+            add(findings, "error", "sql-fallback", "Produccion debe tener FVENTAS_SQL_FALLBACK_TO_JSON=0.")
         if not Config.REQUIRE_MOBILE_TOKEN:
             add(findings, "error", "mobile-token", "Produccion debe exigir token movil.")
         if str(Config.STORAGE_BACKEND).lower() != "s3":
@@ -75,9 +75,9 @@ def audit_config(findings: list[Finding], strict: bool) -> None:
         add(findings, "info", "environment", f"Entorno actual: {Config.ENV}.")
 
     if strict and not Config.S3_BUCKET:
-        add(findings, expected, "s3-bucket", "WULKAN_S3_BUCKET no esta configurado.")
+        add(findings, expected, "s3-bucket", "FVENTAS_S3_BUCKET no esta configurado.")
     if strict and not Config.STORAGE_PUBLIC_BASE_URL:
-        add(findings, expected, "storage-public-url", "WULKAN_STORAGE_PUBLIC_BASE_URL no esta configurado.")
+        add(findings, expected, "storage-public-url", "FVENTAS_STORAGE_PUBLIC_BASE_URL no esta configurado.")
     if strict and "sqlite" in Config.DATABASE_URL:
         add(findings, expected, "database-url", "La base configurada parece SQLite, no PostgreSQL.")
 
@@ -181,7 +181,7 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
     if not any(user.get("role") == "sales" for user in active_admins):
         add(findings, "warn", "seller", "No hay vendedores activos para cartera/comisiones.")
     if not active_clients:
-        add(findings, "warn", "clients", "No hay clientes ferreteros activos.")
+        add(findings, "warn", "clients", "No hay clientes B2B activos.")
     if not active_products:
         add(findings, "error", "products", "No hay productos activos para la app movil.")
     if not active_categories:
@@ -209,7 +209,7 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
 
 
 def print_report(findings: list[Finding]) -> None:
-    print("Graphify readiness Wulkan")
+    print("FVENTAS Insights readiness")
     print("-------------------------")
     if not findings:
         print("OK Sin hallazgos. Plataforma lista para operacion.")
@@ -225,7 +225,7 @@ def print_report(findings: list[Finding]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Audita si Wulkan esta listo para produccion comercial.")
+    parser = argparse.ArgumentParser(description="Audita si FVENTAS esta listo para produccion comercial.")
     parser.add_argument("--strict", action="store_true", help="Trata cuentas demo y assets faltantes como riesgos productivos.")
     args = parser.parse_args()
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FVENTAS">
+  <defs>
+    <linearGradient id="bg" x1="72" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d6efd"/>
+      <stop offset="1" stop-color="#052c65"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="url(#bg)"/>
+  <path fill="#fff" d="M126 148h252v70H204v54h143v66H204v116h-78V148Z"/>
+  <path fill="#dbeafe" d="m262 268 43 104 43-104h78L339 454h-69l-87-186h79Z"/>
+  <circle cx="402" cy="122" r="26" fill="#93c5fd"/>
+</svg>

@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block top_action %}
+<button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#companyCreateModal">
+  <i class="bi bi-plus-lg"></i> Nueva empresa
+</button>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert-danger border-0">{{ error }}</div>
+{% endif %}
+{% if temporary_password %}
+<div class="alert alert-success border-0">
+  <strong>Empresa creada para {{ created_email }}.</strong>
+  Clave temporal: <code>{{ temporary_password }}</code>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+  <div class="col-12 col-md-3">
+    <div class="metric-card">
+      <span class="metric-icon"><i class="bi bi-buildings"></i></span>
+      <small>Total empresas</small>
+      <strong>{{ metrics.companies }}</strong>
+    </div>
+  </div>
+  <div class="col-12 col-md-3">
+    <div class="metric-card">
+      <span class="metric-icon"><i class="bi bi-check2-circle"></i></span>
+      <small>Activas</small>
+      <strong>{{ metrics.active }}</strong>
+    </div>
+  </div>
+  <div class="col-12 col-md-3">
+    <div class="metric-card">
+      <span class="metric-icon"><i class="bi bi-hourglass-split"></i></span>
+      <small>Pendientes</small>
+      <strong>{{ metrics.pending }}</strong>
+    </div>
+  </div>
+  <div class="col-12 col-md-3">
+    <div class="metric-card">
+      <span class="metric-icon"><i class="bi bi-cash-coin"></i></span>
+      <small>MRR estimado</small>
+      {% if metrics.mrr_summary %}
+        {% for item in metrics.mrr_summary %}
+        <strong class="d-block">{{ item.display }}</strong>
+        {% endfor %}
+      {% else %}
+        <strong>{{ money_currency(0, default_plan.currency) }}</strong>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<section class="content-card">
+  <div class="section-title">
+    <div>
+      <h2>Empresas suscritas</h2>
+      <p>Control de activacion mensual, administradores y aislamiento por empresa.</p>
+    </div>
+    <span>{{ rows|length }} registros</span>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table align-middle admin-table">
+      <thead>
+        <tr>
+          <th>Empresa</th>
+          <th>Administrador</th>
+          <th>Plan</th>
+          <th>Estado</th>
+          <th>Proximo pago</th>
+          <th>Usuarios</th>
+          <th class="text-end">Accion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set company = row.company %}
+        {% set subscription = row.subscription %}
+        {% set row_market = row.marketProfile %}
+        <tr>
+          <td>
+            <div class="d-flex align-items-center gap-3">
+              <span class="table-avatar">{{ company.name[:1] }}</span>
+              <div>
+                <strong>{{ company.name }}</strong>
+                <small class="d-block text-secondary">{{ company.legalName or company.name }}{% if company.taxId %} - {{ company.taxId }}{% endif %}</small>
+                <small class="d-block text-secondary">{{ row_market.label }} - {{ row_market.localCurrency }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong>{{ company.ownerName or "Sin contacto" }}</strong>
+            <small class="d-block text-secondary">{{ company.ownerEmail or "Sin correo" }}</small>
+          </td>
+          <td>
+            <strong>{{ subscription.planName or plan_name }}</strong>
+            <small class="d-block text-secondary">{{ row.subscriptionDisplay or money_currency(subscription.price or default_plan.price, subscription.currency or default_plan.currency) }}/mes</small>
+          </td>
+          <td>
+            {% set status = subscription.status or company.status %}
+            <span class="badge rounded-pill text-bg-{{ 'success' if status in ['active', 'trial'] else 'warning' if status == 'pending_payment' else 'danger' if status in ['suspended', 'cancelled', 'past_due'] else 'secondary' }}">
+              {{ subscription_status_label(status) }}
+            </span>
+          </td>
+          <td>{{ subscription.nextPaymentAt or "Sin fecha" }}</td>
+          <td>
+            <strong>{{ row.activeAdmins }}</strong>
+            <small class="d-block text-secondary">de {{ row.adminCount }} admin</small>
+          </td>
+          <td>
+            <form class="d-flex justify-content-end gap-2" method="post" action="{{ url_for('company_subscription_update', company_id=company.id) }}">
+              {{ csrf_field() }}
+              <select class="form-select form-select-sm w-auto" name="subscriptionStatus" aria-label="Estado de suscripcion">
+                {% for value, label in subscription_status_options %}
+                <option value="{{ value }}" {% if (subscription.status or company.status) == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <input class="form-control form-control-sm w-auto" name="nextPaymentAt" type="date" value="{{ subscription.nextPaymentAt or '' }}" aria-label="Proximo pago">
+              <button class="btn btn-outline-primary btn-sm" type="submit">
+                <i class="bi bi-save"></i> Guardar
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <i class="bi bi-buildings"></i>
+              <strong>Sin empresas registradas</strong>
+              <span>Crea la primera empresa cliente para activar FVENTAS SaaS.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="modal fade" id="companyCreateModal" tabindex="-1" aria-labelledby="companyCreateModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0">
+      <form method="post" action="{{ url_for('platform_companies') }}">
+        {{ csrf_field() }}
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title fs-4" id="companyCreateModalLabel">Nueva empresa SaaS</h2>
+            <p class="text-secondary mb-0">Crea la empresa, suscripcion y super admin inicial.</p>
+          </div>
+          <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label fw-semibold" for="companyMarketCountry">Pais de operacion</label>
+              <select class="form-select" id="companyMarketCountry" name="marketCountry" required>
+                {% for code, label in market_country_options %}
+                <option value="{{ code }}" {% if code == "CL" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <div class="alert alert-primary-subtle border-0 mt-3 mb-0">
+                <strong id="companyPlanSummary">{{ default_plan.display }}/mes</strong>
+                <div class="small text-secondary" id="companyMarketDetail">El pais define moneda local, documento fiscal, telefono y zona horaria.</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-7">
+              <label class="form-label fw-semibold">Nombre comercial</label>
+              <input class="form-control" name="companyName" required placeholder="Empresa Comercial SpA">
+            </div>
+            <div class="col-12 col-md-5">
+              <label class="form-label fw-semibold" id="companyTaxLabel">Documento fiscal empresa</label>
+              <input class="form-control" id="companyTaxInput" name="taxId" placeholder="76.123.456-7">
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">Razon social</label>
+              <input class="form-control" name="legalName" placeholder="Empresa Comercial SpA">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">Administrador principal</label>
+              <input class="form-control" name="ownerName" required placeholder="Nombre y apellido">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">Correo administrador</label>
+              <input class="form-control" type="email" name="ownerEmail" required placeholder="admin@empresa.com">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label fw-semibold">Telefono</label>
+              <input class="form-control" id="companyPhoneInput" name="supportPhone" placeholder="+56 9 1234 5678">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label fw-semibold">Estado suscripcion</label>
+              <select class="form-select" name="subscriptionStatus">
+                {% for value, label in subscription_status_options %}
+                <option value="{{ value }}" {% if value == "active" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label fw-semibold">Proximo pago</label>
+              <input class="form-control" name="nextPaymentAt" type="date">
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">Clave temporal</label>
+              <div class="input-group">
+                <input class="form-control" name="password" type="password" minlength="10" autocomplete="new-password" placeholder="Opcional, se puede generar automaticamente">
+                <button class="btn btn-outline-secondary" type="button" data-password-toggle aria-label="Mostrar contrasena" title="Mostrar contrasena">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+              <div class="form-text">Si la dejas vacia, FVENTAS generara una clave temporal segura.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" type="submit">Crear empresa</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  (() => {
+    const profiles = {{ market_profiles|tojson }};
+    const select = document.getElementById("companyMarketCountry");
+    const summary = document.getElementById("companyPlanSummary");
+    const detail = document.getElementById("companyMarketDetail");
+    const taxLabel = document.getElementById("companyTaxLabel");
+    const taxInput = document.getElementById("companyTaxInput");
+    const phoneInput = document.getElementById("companyPhoneInput");
+    const formatMoney = (amount, currency, locale) => new Intl.NumberFormat(locale || "es-CL", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: currency === "CLP" || currency === "COP" || currency === "ARS" ? 0 : 2
+    }).format(Number(amount || 0));
+    const applyProfile = () => {
+      const profile = profiles[select.value] || profiles.CL;
+      if (summary) summary.textContent = `${formatMoney(profile.planPrice, profile.planCurrency, profile.locale)}/mes`;
+      if (detail) detail.textContent = `Ventas en ${profile.salesCurrency}; referencia local ${profile.localCurrency}.`;
+      if (taxLabel) taxLabel.textContent = `${profile.taxLabel} empresa`;
+      if (taxInput) taxInput.placeholder = profile.taxPlaceholder || "";
+      if (phoneInput) phoneInput.placeholder = profile.phonePlaceholder || "";
+    };
+    if (select) select.addEventListener("change", applyProfile);
+    if (select) applyProfile();
+  })();
+</script>
+{% endblock %}

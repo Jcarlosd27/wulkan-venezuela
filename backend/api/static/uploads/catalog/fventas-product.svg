@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720" role="img" aria-label="Producto FVENTAS">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eef6ff"/>
+      <stop offset="0.52" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e7f0ff"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d6efd"/>
+      <stop offset="1" stop-color="#0a58ca"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0f172a" flood-opacity=".16"/>
+    </filter>
+  </defs>
+  <rect width="960" height="720" rx="52" fill="url(#bg)"/>
+  <circle cx="760" cy="136" r="86" fill="#0d6efd" opacity=".1"/>
+  <circle cx="164" cy="592" r="118" fill="#0d6efd" opacity=".09"/>
+  <g filter="url(#shadow)">
+    <rect x="214" y="188" width="532" height="326" rx="38" fill="#fff"/>
+    <rect x="256" y="247" width="448" height="48" rx="24" fill="#e8eef8"/>
+    <rect x="300" y="326" width="360" height="118" rx="22" fill="#f8fafc" stroke="#dbe3ef" stroke-width="4"/>
+    <path d="M346 404h268" stroke="#0f172a" stroke-width="18" stroke-linecap="round"/>
+    <path d="M386 372h188" stroke="#94a3b8" stroke-width="12" stroke-linecap="round"/>
+    <path d="M338 246h86l22 81h-84z" fill="url(#accent)"/>
+    <path d="M536 246h86l-24 81h-84z" fill="#111827"/>
+    <circle cx="338" cy="492" r="34" fill="#111827"/>
+    <circle cx="622" cy="492" r="34" fill="#111827"/>
+  </g>
+  <g>
+    <rect x="336" y="564" width="288" height="54" rx="27" fill="#0d6efd"/>
+    <text x="480" y="599" text-anchor="middle" fill="#fff" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="0">FVENTAS</text>
+  </g>
+</svg>

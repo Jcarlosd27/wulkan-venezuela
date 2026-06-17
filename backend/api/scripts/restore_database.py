@@ -11,16 +11,16 @@ def postgres_url(value: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Restore a Wulkan PostgreSQL custom-format backup.")
+    parser = argparse.ArgumentParser(description="Restore a FVENTAS PostgreSQL custom-format backup.")
     parser.add_argument("backup_file")
-    parser.add_argument("--database-url", default=os.environ.get("WULKAN_DATABASE_URL", ""))
+    parser.add_argument("--database-url", default=os.environ.get("FVENTAS_DATABASE_URL", ""))
     parser.add_argument("--yes", action="store_true", help="Confirm destructive restore.")
     args = parser.parse_args()
 
     if not args.yes:
         raise SystemExit("Este restore reemplaza datos. Reejecuta con --yes para confirmar.")
     if not args.database_url:
-        raise SystemExit("WULKAN_DATABASE_URL es obligatorio.")
+        raise SystemExit("FVENTAS_DATABASE_URL es obligatorio.")
     if not args.database_url.startswith("postgresql"):
         raise SystemExit("Restore productivo solo soporta PostgreSQL.")
 

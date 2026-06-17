@@ -22,7 +22,7 @@
 
   <div class="row g-3">
     <div class="col-12 col-lg-4">
-      <label class="form-label fw-semibold">Cliente ferretero</label>
+      <label class="form-label fw-semibold">Cliente B2B</label>
       <select class="form-select" name="clientId" required>
         <option value="">Seleccionar cliente</option>
         {% for client in clients %}
@@ -62,7 +62,7 @@
     </div>
     <div class="col-6 col-lg-1">
       <label class="form-label fw-semibold">Tasa</label>
-      <input class="form-control" name="exchangeRateUsdVes" value="{{ quote.exchangeRateUsdVes if quote else 38.5 }}">
+      <input class="form-control" name="exchangeRateUsdClp" value="{{ (quote.exchangeRateUsdClp or quote.exchangeRateUsdVes) if quote else 950 }}">
     </div>
   </div>
 

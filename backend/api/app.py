@@ -5,42 +5,56 @@ import hmac
 import csv
 import copy
 import io
+import os
 import re
 import secrets
+import sys
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from markupsafe import Markup
+from markupsafe import Markup, escape
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError, ProgrammingError, SQLAlchemyError
 from werkzeug.exceptions import BadRequest, HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from config import get_config
-from graphify import rotation_chart, stock_health
-from storage import generate_s3_signed_url, key_from_public_url, save_uploaded_file, stream_size
+from core.config import get_config
+from core.insights import rotation_chart, stock_health
+from core.storage import generate_s3_signed_url, key_from_public_url, save_uploaded_file, stream_size
 from store import (
+    DEFAULT_COMPANY_ID,
     INSECURE_PRODUCTION_ADMIN_EMAILS,
     INSECURE_PRODUCTION_CLIENT_EMAILS,
+    SAAS_PLAN_ID,
+    SAAS_PLAN_NAME,
+    SAAS_PLAN_PRICE_CLP,
     load_store,
     next_id,
     save_store,
     utc_now,
     use_sql_backend,
 )
-from uix import badge_class, money_usd, usd_to_ves
-from venezuela_locations import (
-    VENEZUELA_STATE_CITIES,
-    normalize_venezuelan_location,
-    normalize_venezuelan_phone,
-    normalize_venezuelan_rif,
+from core.uix import badge_class, convert_currency, money_currency, money_usd, usd_to_clp
+from core.chile_locations import (
+    CHILE_REGION_CITIES,
+    normalize_chilean_location,
+    normalize_chilean_phone,
+    normalize_chilean_rut,
 )
 
 
-app = Flask(__name__)
+APP_RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+
+app = Flask(
+    __name__,
+    template_folder=str(APP_RESOURCE_ROOT / "templates"),
+    static_folder=str(APP_RESOURCE_ROOT / "static"),
+)
 app.config.from_object(get_config())
 app.jinja_env.filters["badge_class"] = badge_class
 app.jinja_env.filters["money_usd"] = money_usd
@@ -50,22 +64,45 @@ def validate_runtime_config() -> None:
     if app.config.get("ENV") != "production":
         return
     database_url = str(app.config.get("DATABASE_URL", ""))
-    if app.config.get("SECRET_KEY") == "wulkan-dev":
-        raise RuntimeError("WULKAN_SECRET_KEY real es obligatorio en produccion.")
+    if app.config.get("SECRET_KEY") in {"fventas-dev"}:
+        raise RuntimeError("FVENTAS_SECRET_KEY real es obligatorio en produccion.")
     if app.config.get("DATA_BACKEND") != "sql":
-        raise RuntimeError("WULKAN_DATA_BACKEND=sql es obligatorio en produccion.")
+        raise RuntimeError("FVENTAS_DATA_BACKEND=sql es obligatorio en produccion.")
     if database_url.startswith("sqlite"):
-        raise RuntimeError("WULKAN_DATABASE_URL debe apuntar a PostgreSQL en produccion.")
+        raise RuntimeError("FVENTAS_DATABASE_URL debe apuntar a PostgreSQL en produccion.")
     if app.config.get("SQL_FALLBACK_TO_JSON"):
-        raise RuntimeError("WULKAN_SQL_FALLBACK_TO_JSON debe estar desactivado en produccion.")
+        raise RuntimeError("FVENTAS_SQL_FALLBACK_TO_JSON debe estar desactivado en produccion.")
     storage_backend = str(app.config.get("STORAGE_BACKEND", "")).strip().lower()
     if storage_backend != "s3":
-        raise RuntimeError("WULKAN_STORAGE_BACKEND=s3 es obligatorio en produccion.")
+        raise RuntimeError("FVENTAS_STORAGE_BACKEND=s3 es obligatorio en produccion.")
     if not app.config.get("S3_BUCKET"):
-        raise RuntimeError("WULKAN_S3_BUCKET es obligatorio en produccion.")
+        raise RuntimeError("FVENTAS_S3_BUCKET es obligatorio en produccion.")
 
 
 validate_runtime_config()
+
+
+@app.get("/static/uploads/<path:filename>")
+def serve_uploaded_asset(filename: str):
+    configured_upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
+    requested_file = (configured_upload_root / filename).resolve()
+    try:
+        requested_file.relative_to(configured_upload_root)
+    except ValueError:
+        abort(404)
+    if requested_file.is_file():
+        return send_from_directory(configured_upload_root, filename)
+
+    packaged_static_root = Path(app.static_folder or "").resolve()
+    packaged_upload_root = packaged_static_root / "uploads"
+    packaged_file = (packaged_upload_root / filename).resolve()
+    try:
+        packaged_file.relative_to(packaged_upload_root.resolve())
+    except ValueError:
+        abort(404)
+    if packaged_file.is_file():
+        return send_from_directory(packaged_upload_root, filename)
+    abort(404)
 
 
 @app.after_request
@@ -103,9 +140,63 @@ def handle_api_http_exception(exc: HTTPException):
     return jsonify({"meta": mobile_api_meta(), "error": exc.description, "code": code}), exc.code
 
 
+def database_error_message(exc: SQLAlchemyError) -> tuple[str, str, int]:
+    if isinstance(exc, IntegrityError):
+        return (
+            "integrity_error",
+            "El registro ya existe o esta relacionado con otra operacion activa.",
+            409,
+        )
+    if isinstance(exc, DataError):
+        return (
+            "invalid_database_value",
+            "Hay un dato con formato invalido para guardar la operacion.",
+            400,
+        )
+    if isinstance(exc, OperationalError):
+        return (
+            "database_unavailable",
+            "La base de datos no esta disponible temporalmente.",
+            503,
+        )
+    if isinstance(exc, ProgrammingError):
+        return (
+            "database_schema_error",
+            "La operacion requiere revisar la estructura de datos antes de continuar.",
+            500,
+        )
+    return (
+        "database_error",
+        "No se pudo completar la operacion en la base de datos.",
+        500,
+    )
+
+
+@app.errorhandler(SQLAlchemyError)
+def handle_database_exception(exc: SQLAlchemyError):
+    code, message, status = database_error_message(exc)
+    app.logger.exception("Database error %s on %s", code, request.path)
+    if request.path.startswith("/api/"):
+        return jsonify({"meta": mobile_api_meta(), "error": message, "code": code}), status
+
+    if request.method == "POST":
+        push_admin_toast(message, "danger", "Accion no aplicada")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    return render_template("forbidden.html", heading="Accion no aplicada", description=message), status
+
+
 @app.errorhandler(Exception)
 def handle_api_unexpected_exception(exc: Exception):
     if not request.path.startswith("/api/"):
+        app.logger.exception("Unexpected web error on %s", request.path)
+        if request.method == "POST":
+            push_admin_toast(
+                "No se pudo completar la operacion. Revisa los datos o intenta nuevamente.",
+                "danger",
+                "Accion no aplicada",
+            )
+            return redirect(request.referrer or url_for("dashboard"))
         raise exc
     app.logger.exception("Unexpected API error on %s", request.path)
     return jsonify({"meta": mobile_api_meta(), "error": "Error interno del servidor.", "code": "internal_server_error"}), 500
@@ -121,6 +212,7 @@ ORDER_STATUS_OPTIONS = [
     ("paid", "Pagada"),
     ("cancelled", "Cancelada"),
 ]
+ORDER_PAYMENT_TOLERANCE_USD = 0.01
 ORDER_CREDIT_RESERVING_STATUSES = {"approved_with_credit", "preparing", "delivered", "partial_paid"}
 ORDER_STOCK_RESERVING_STATUSES = {"approved_with_credit", "preparing", "partial_paid", "paid"}
 CLIENT_SALE_BLOCKING_STATUSES = {"inactive", "blocked_debt", "blocked_credit", "blocked_manual", "suspended"}
@@ -139,7 +231,7 @@ SALE_TYPE_OPTIONS = [
     ("phone_request", "Solicitud telefonica"),
 ]
 SALES_CHANNEL_LABELS = {
-    "mobile": "App ferretero",
+    "mobile": "App Cliente B2B",
     "seller_mobile": "App vendedor",
     "seller_assisted": "Pedido asistido",
     "admin": "Admin",
@@ -148,8 +240,8 @@ SALES_CHANNEL_LABELS = {
 CLIENT_ORIGIN_LABELS = {
     "admin": "Panel admin",
     "import": "Carga masiva",
-    "mobile": "App ferretero",
-    "client_mobile": "App ferretero",
+    "mobile": "App Cliente B2B",
+    "client_mobile": "App Cliente B2B",
     "seller_mobile": "App vendedor",
     "seller_assisted": "Pedido asistido",
     "api": "API externa",
@@ -161,6 +253,7 @@ DISPATCH_STATUS_LABELS = {
     "ready": "Listo para despacho",
     "in_route": "En ruta",
     "dispatched": "Despachado",
+    "payment_hold": "Retenido por pago",
     "delivered": "Entregado",
     "failed": "Entrega fallida",
     "rescheduled": "Reprogramado",
@@ -169,6 +262,129 @@ DISPATCH_STATUS_LABELS = {
     "cancelled": "Cancelado",
 }
 PAYMENT_TERM_OPTIONS = [0, 10, 15, 20, 30, 40]
+MARKET_PROFILES = {
+    "CL": {
+        "code": "CL",
+        "label": "Chile",
+        "companyNoun": "empresa",
+        "taxLabel": "RUT",
+        "taxPlaceholder": "76.123.456-7",
+        "phonePrefix": "+56",
+        "phonePlaceholder": "+56 9 1234 5678",
+        "salesCurrency": "USD",
+        "localCurrency": "CLP",
+        "exchangeRateBaseToLocal": 950,
+        "planCurrency": "CLP",
+        "planPrice": 69990,
+        "locale": "es-CL",
+        "timezone": "America/Santiago",
+    },
+    "PE": {
+        "code": "PE",
+        "label": "Peru",
+        "companyNoun": "empresa",
+        "taxLabel": "RUC",
+        "taxPlaceholder": "20123456789",
+        "phonePrefix": "+51",
+        "phonePlaceholder": "+51 987 654 321",
+        "salesCurrency": "USD",
+        "localCurrency": "PEN",
+        "exchangeRateBaseToLocal": 3.75,
+        "planCurrency": "PEN",
+        "planPrice": 299,
+        "locale": "es-PE",
+        "timezone": "America/Lima",
+    },
+    "CO": {
+        "code": "CO",
+        "label": "Colombia",
+        "companyNoun": "empresa",
+        "taxLabel": "NIT",
+        "taxPlaceholder": "900123456-7",
+        "phonePrefix": "+57",
+        "phonePlaceholder": "+57 300 123 4567",
+        "salesCurrency": "USD",
+        "localCurrency": "COP",
+        "exchangeRateBaseToLocal": 4100,
+        "planCurrency": "COP",
+        "planPrice": 299000,
+        "locale": "es-CO",
+        "timezone": "America/Bogota",
+    },
+    "MX": {
+        "code": "MX",
+        "label": "Mexico",
+        "companyNoun": "empresa",
+        "taxLabel": "RFC",
+        "taxPlaceholder": "XAXX010101000",
+        "phonePrefix": "+52",
+        "phonePlaceholder": "+52 55 1234 5678",
+        "salesCurrency": "USD",
+        "localCurrency": "MXN",
+        "exchangeRateBaseToLocal": 18,
+        "planCurrency": "MXN",
+        "planPrice": 1299,
+        "locale": "es-MX",
+        "timezone": "America/Mexico_City",
+    },
+    "AR": {
+        "code": "AR",
+        "label": "Argentina",
+        "companyNoun": "empresa",
+        "taxLabel": "CUIT",
+        "taxPlaceholder": "30-71234567-8",
+        "phonePrefix": "+54",
+        "phonePlaceholder": "+54 9 11 2345 6789",
+        "salesCurrency": "USD",
+        "localCurrency": "ARS",
+        "exchangeRateBaseToLocal": 1150,
+        "planCurrency": "ARS",
+        "planPrice": 79900,
+        "locale": "es-AR",
+        "timezone": "America/Argentina/Buenos_Aires",
+    },
+    "US": {
+        "code": "US",
+        "label": "Estados Unidos",
+        "companyNoun": "company",
+        "taxLabel": "EIN",
+        "taxPlaceholder": "12-3456789",
+        "phonePrefix": "+1",
+        "phonePlaceholder": "+1 305 555 0123",
+        "salesCurrency": "USD",
+        "localCurrency": "USD",
+        "exchangeRateBaseToLocal": 1,
+        "planCurrency": "USD",
+        "planPrice": 79,
+        "locale": "en-US",
+        "timezone": "America/New_York",
+    },
+    "OTHER": {
+        "code": "OTHER",
+        "label": "Otro mercado",
+        "companyNoun": "empresa",
+        "taxLabel": "Documento fiscal",
+        "taxPlaceholder": "ID fiscal de la empresa",
+        "phonePrefix": "",
+        "phonePlaceholder": "+ codigo pais telefono",
+        "salesCurrency": "USD",
+        "localCurrency": "USD",
+        "exchangeRateBaseToLocal": 1,
+        "planCurrency": "USD",
+        "planPrice": 79,
+        "locale": "es",
+        "timezone": "UTC",
+    },
+}
+MARKET_COUNTRY_OPTIONS = [(code, profile["label"]) for code, profile in MARKET_PROFILES.items()]
+CURRENCY_OPTIONS = [
+    ("USD", "USD - Dolar estadounidense"),
+    ("CLP", "CLP - Peso chileno"),
+    ("PEN", "PEN - Sol peruano"),
+    ("COP", "COP - Peso colombiano"),
+    ("MXN", "MXN - Peso mexicano"),
+    ("ARS", "ARS - Peso argentino"),
+]
 CLIENT_STATUS_OPTIONS = [
     ("prospect", "Prospecto"),
     ("active", "Activo"),
@@ -225,7 +441,7 @@ CATEGORY_STATUS_OPTIONS = [
     ("inactive", "Inactiva"),
     ("hidden", "Oculta en app"),
 ]
-WULKAN_STARTER_CATEGORY_TREE = [
+FVENTAS_STARTER_CATEGORY_TREE = [
     {
         "name": "Jardin y Bosque",
         "slug": "jardin-bosque",
@@ -248,7 +464,7 @@ WULKAN_STARTER_CATEGORY_TREE = [
     {
         "name": "Industrial",
         "slug": "industrial",
-        "description": "Equipos Wulkan para faena, industria, obra y trabajo pesado.",
+        "description": "Equipos FVENTAS para faena, industria, obra y trabajo pesado.",
         "icon": "bi-building-gear",
         "children": [],
     },
@@ -260,452 +476,452 @@ WULKAN_STARTER_CATEGORY_TREE = [
         "children": [],
     },
 ]
-WULKAN_STARTER_PRODUCTS = [
+FVENTAS_STARTER_PRODUCTS = [
     {
-        "sku": "WK-EA-60-3B",
-        "title": "Ahoyador 60cc Wulkan + 3 brocas",
+        "sku": "FV-EA-60-3B",
+        "title": "Ahoyador 60cc FVENTAS + 3 brocas",
         "categorySlug": "ahoyadores",
         "productType": "machine",
-        "model": "WK-EA-60-3B",
+        "model": "FV-EA-60-3B",
         "price": 310,
         "b2bPrice": 285,
         "discount": 7,
         "stock": 4,
         "rotation": 6,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2022/06/WK-EA-60-3B-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-ea-60-3b/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Equipo para perforacion de suelo en jardin, bosque y faena agricola.",
         "variants": ["Incluye 3 brocas", "Uso agricola", "Motor 60cc"],
-        "specifications": {"Motor": "60cc", "Categoria": "Ahoyadores", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "60cc", "Categoria": "Ahoyadores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-EA-750",
-        "title": "Ahoyador Wulkan quick stop 71cc",
+        "sku": "FV-EA-750",
+        "title": "Ahoyador FVENTAS quick stop 71cc",
         "categorySlug": "ahoyadores",
         "productType": "machine",
-        "model": "WK-EA-750",
+        "model": "FV-EA-750",
         "price": 465,
         "b2bPrice": 430,
         "discount": 0,
         "stock": 3,
         "rotation": 4,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/02/WK-EA-750-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-ea-750/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Ahoyador de mayor potencia para perforaciones exigentes y trabajo continuo.",
         "variants": ["Quick stop", "Motor 71cc", "Trabajo agricola"],
-        "specifications": {"Motor": "71cc", "Categoria": "Ahoyadores", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "71cc", "Categoria": "Ahoyadores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-WCH-950",
-        "title": "Chipeadora 7 HP Wulkan",
+        "sku": "FV-WCH-950",
+        "title": "Chipeadora 7 HP FVENTAS",
         "categorySlug": "chipeadoras",
         "productType": "machine",
-        "model": "WK-WCH-950",
+        "model": "FV-WCH-950",
         "price": 890,
         "b2bPrice": 830,
         "discount": 5,
         "stock": 2,
         "rotation": 3,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/05/WK-WCH-950-2-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-wch-950/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Chipeadora compacta para ramas, poda y material vegetal.",
         "variants": ["7 HP", "Motor bencinero", "Uso jardin y bosque"],
-        "specifications": {"Potencia": "7 HP", "Categoria": "Chipeadoras", "Origen": "Avalon Group"},
+        "specifications": {"Potencia": "7 HP", "Categoria": "Chipeadoras", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-WCH-2100",
-        "title": "Chipeadora 15 HP Wulkan",
+        "sku": "FV-WCH-2100",
+        "title": "Chipeadora 15 HP FVENTAS",
         "categorySlug": "chipeadoras",
         "productType": "machine",
-        "model": "WK-WCH-2100",
+        "model": "FV-WCH-2100",
         "price": 1750,
         "b2bPrice": 1650,
         "discount": 0,
         "stock": 1,
         "rotation": 2,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/05/WK-WCH-2100-1-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-wch-2100/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Chipeadora de alta potencia para reduccion de ramas y trabajo intensivo.",
         "variants": ["15 HP", "Trabajo pesado", "Uso agricola"],
-        "specifications": {"Potencia": "15 HP", "Categoria": "Chipeadoras", "Origen": "Avalon Group"},
+        "specifications": {"Potencia": "15 HP", "Categoria": "Chipeadoras", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-PM-166",
-        "title": "Cortacesped de empuje 3 en 1 Wulkan Ognia",
+        "sku": "FV-PM-166",
+        "title": "Cortacesped de empuje 3 en 1 FVENTAS",
         "categorySlug": "cortacesped",
         "productType": "machine",
-        "model": "WK-PM-166",
+        "model": "FV-PM-166",
         "price": 280,
         "b2bPrice": 255,
         "discount": 8,
         "stock": 6,
         "rotation": 8,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/07/WK-SP-166-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-pm-166/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Cortacesped de empuje para mantenimiento residencial y comercial.",
         "variants": ["3 en 1", "Empuje", "Uso jardin"],
-        "specifications": {"Formato": "Empuje", "Categoria": "Cortacesped", "Origen": "Avalon Group"},
+        "specifications": {"Formato": "Empuje", "Categoria": "Cortacesped", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-PM-170",
-        "title": "Cortacesped Wulkan 170cc de empuje 3 en 1",
+        "sku": "FV-PM-170",
+        "title": "Cortacesped FVENTAS 170cc de empuje 3 en 1",
         "categorySlug": "cortacesped",
         "productType": "machine",
-        "model": "WK-PM-170",
+        "model": "FV-PM-170",
         "price": 335,
         "b2bPrice": 310,
         "discount": 0,
         "stock": 5,
         "rotation": 7,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/02/WK-PM-170-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/cortacesped-wulkan-ognia-de-empuje-3-en-1/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Cortacesped 170cc para superficies verdes y faenas de mantenimiento.",
         "variants": ["170cc", "3 en 1", "Empuje"],
-        "specifications": {"Motor": "170cc", "Categoria": "Cortacesped", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "170cc", "Categoria": "Cortacesped", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-HT-26",
-        "title": "Cortaseto Wulkan Ognia 26cc",
+        "sku": "FV-HT-26",
+        "title": "Cortaseto FVENTAS 26cc",
         "categorySlug": "cortasetos",
         "productType": "machine",
-        "model": "WK-HT-26",
+        "model": "FV-HT-26",
         "price": 185,
         "b2bPrice": 165,
         "discount": 6,
         "stock": 4,
         "rotation": 4,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/10/05-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/cortaseto-wulkan-ognia-26cc/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Equipo para corte fino de setos, cercos vivos y terminaciones de jardin.",
         "variants": ["26cc", "Corte fino", "Uso jardin"],
-        "specifications": {"Motor": "26cc", "Categoria": "Cortasetos", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "26cc", "Categoria": "Cortasetos", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-MF-51",
-        "title": "Multifuncion Wulkan 52cc 5 en 1",
+        "sku": "FV-MF-51",
+        "title": "Multifuncion FVENTAS 52cc 5 en 1",
         "categorySlug": "cortasetos",
         "productType": "machine",
-        "model": "WK-MF-51",
+        "model": "FV-MF-51",
         "price": 245,
         "b2bPrice": 220,
         "discount": 0,
         "stock": 3,
         "rotation": 5,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/02/WK-MF-51-6-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/multifuncion-wulkan-52cc-5-en-1/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Equipo multifuncional para poda, corte y mantenimiento de areas verdes.",
         "variants": ["5 en 1", "52cc", "Incluye accesorio cortaseto"],
-        "specifications": {"Motor": "52cc", "Categoria": "Cortasetos", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "52cc", "Categoria": "Cortasetos", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-DRT-950",
+        "sku": "FV-DRT-950",
         "title": "Motocultivador 7 HP motor Loncin",
         "categorySlug": "motocultivadores",
         "productType": "machine",
-        "model": "WK-DRT-950",
+        "model": "FV-DRT-950",
         "price": 720,
         "b2bPrice": 670,
         "discount": 0,
         "stock": 3,
         "rotation": 4,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/05/WK-DRT-950-2-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-drt-950/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Motocultivador bencinero para preparacion de suelo y labores de cultivo.",
         "variants": ["7 HP", "Motor Loncin", "Uso agricola"],
-        "specifications": {"Potencia": "7 HP", "Categoria": "Motocultivadores", "Origen": "Avalon Group"},
+        "specifications": {"Potencia": "7 HP", "Categoria": "Motocultivadores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-TD-10",
-        "title": "Motocultivador diesel 10 HP Wulkan",
+        "sku": "FV-TD-10",
+        "title": "Motocultivador diesel 10 HP FVENTAS",
         "categorySlug": "motocultivadores",
         "productType": "machine",
-        "model": "WK-TD-10",
+        "model": "FV-TD-10",
         "price": 1420,
         "b2bPrice": 1320,
         "discount": 0,
         "stock": 2,
         "rotation": 2,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2022/04/WK-TD-10-6-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-td-10/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Motocultivador diesel para trabajo agricola de mayor exigencia.",
         "variants": ["Diesel", "10 HP", "Trabajo agricola"],
-        "specifications": {"Potencia": "10 HP", "Categoria": "Motocultivadores", "Origen": "Avalon Group"},
+        "specifications": {"Potencia": "10 HP", "Categoria": "Motocultivadores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-BC-33",
-        "title": "Desmalezadora Wulkan Slim 33cc",
+        "sku": "FV-BC-33",
+        "title": "Desmalezadora FVENTAS Slim 33cc",
         "categorySlug": "desmalezadoras",
         "productType": "machine",
-        "model": "WK-BC-33",
+        "model": "FV-BC-33",
         "price": 155,
         "b2bPrice": 138,
         "discount": 9,
         "stock": 8,
         "rotation": 10,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/09/WK-BC-33-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-bc-33/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Desmalezadora liviana para limpieza y mantenimiento de terreno.",
         "variants": ["33cc", "2 tiempos", "Uso jardin"],
-        "specifications": {"Motor": "33cc", "Categoria": "Desmalezadoras", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "33cc", "Categoria": "Desmalezadoras", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-BC-43L",
-        "title": "Desmalezadora Wulkan Slim 43cc",
+        "sku": "FV-BC-43L",
+        "title": "Desmalezadora FVENTAS Slim 43cc",
         "categorySlug": "desmalezadoras",
         "productType": "machine",
-        "model": "WK-BC-43L",
+        "model": "FV-BC-43L",
         "price": 185,
         "b2bPrice": 165,
         "discount": 0,
         "stock": 6,
         "rotation": 8,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/09/WK-BC-43L-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/desmalezadora-wulkan-slim-43-cc/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Desmalezadora 43cc para control de maleza y faena de limpieza.",
         "variants": ["43cc", "2 tiempos", "Trabajo agricola"],
-        "specifications": {"Motor": "43cc", "Categoria": "Desmalezadoras", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "43cc", "Categoria": "Desmalezadoras", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-MD-43",
-        "title": "Fumigador de mochila Wulkan 41.5cc",
+        "sku": "FV-MD-43",
+        "title": "Fumigador de mochila FVENTAS 41.5cc",
         "categorySlug": "fumigacion",
         "productType": "machine",
-        "model": "WK-MD-43",
+        "model": "FV-MD-43",
         "price": 265,
         "b2bPrice": 245,
         "discount": 0,
         "stock": 5,
         "rotation": 6,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/06/FUMIGADORMOCHILA-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-md-43/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Fumigador de mochila para aplicacion agricola y control sanitario.",
         "variants": ["41.5cc", "Mochila", "Aplicacion agricola"],
-        "specifications": {"Motor": "41.5cc", "Categoria": "Fumigacion", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "41.5cc", "Categoria": "Fumigacion", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-BPS-4T",
+        "sku": "FV-BPS-4T",
         "title": "Pulverizador agricola 4 tiempos 37.7cc",
         "categorySlug": "fumigacion",
         "productType": "machine",
-        "model": "WK-BPS-4T",
+        "model": "FV-BPS-4T",
         "price": 310,
         "b2bPrice": 285,
         "discount": 5,
         "stock": 4,
         "rotation": 5,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/08/WK-BPS-4T-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/pulverizador-de-mochila-wulkan-37-7cc/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Pulverizador de mochila 4 tiempos para trabajo agricola.",
         "variants": ["37.7cc", "4 tiempos", "Mochila"],
-        "specifications": {"Motor": "37.7cc", "Categoria": "Fumigacion", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "37.7cc", "Categoria": "Fumigacion", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-CS-25",
-        "title": "Motosierra de poda Wulkan Ognia 25.4cc",
+        "sku": "FV-CS-25",
+        "title": "Motosierra de poda FVENTAS 25.4cc",
         "categorySlug": "motosierras",
         "productType": "machine",
-        "model": "WK-CS-25",
+        "model": "FV-CS-25",
         "price": 145,
         "b2bPrice": 128,
         "discount": 10,
         "stock": 9,
         "rotation": 13,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/09/WK-CS-25-1-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-cs-25/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Motosierra de poda para cortes livianos y mantencion forestal.",
         "variants": ["25.4cc", "Poda", "Uso forestal"],
-        "specifications": {"Motor": "25.4cc", "Categoria": "Motosierras", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "25.4cc", "Categoria": "Motosierras", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-CS-58",
-        "title": "Motosierra Wulkan Ognia 54cc agricola",
+        "sku": "FV-CS-58",
+        "title": "Motosierra FVENTAS 54cc agricola",
         "categorySlug": "motosierras",
         "productType": "machine",
-        "model": "WK-CS-58",
+        "model": "FV-CS-58",
         "price": 245,
         "b2bPrice": 220,
         "discount": 0,
         "stock": 7,
         "rotation": 11,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/09/WK-CS-58-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/motosierra-wulkan-ognia-agricola/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Motosierra agricola para corte forestal, poda y faena de madera.",
         "variants": ["54cc", "Agricola", "Uso forestal"],
-        "specifications": {"Motor": "54cc", "Categoria": "Motosierras", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "54cc", "Categoria": "Motosierras", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-PL-8T",
+        "sku": "FV-PL-8T",
         "title": "Partidor de lena rapido 8 toneladas",
         "categorySlug": "partelenas",
         "productType": "machine",
-        "model": "WK-PL-8T",
+        "model": "FV-PL-8T",
         "price": 590,
         "b2bPrice": 550,
         "discount": 0,
         "stock": 2,
         "rotation": 3,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/09/WK-PL-8T-2-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-pl-8t/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Partidor electrico para lena y faena forestal liviana.",
         "variants": ["8 toneladas", "Electrico", "2 HP"],
-        "specifications": {"Fuerza": "8 TON", "Categoria": "Partelenas", "Origen": "Avalon Group"},
+        "specifications": {"Fuerza": "8 TON", "Categoria": "Partelenas", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-PL-22",
-        "title": "Partidor de lena dual Wulkan Ognia 22 toneladas",
+        "sku": "FV-PL-22",
+        "title": "Partidor de lena dual FVENTAS 22 toneladas",
         "categorySlug": "partelenas",
         "productType": "machine",
-        "model": "WK-PL-22",
+        "model": "FV-PL-22",
         "price": 1450,
         "b2bPrice": 1350,
         "discount": 4,
         "stock": 1,
         "rotation": 2,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2022/12/03-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/partidor-de-lena-dual-wulkan-ognia-2/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Partidor de lena dual para trabajo forestal de alta exigencia.",
         "variants": ["22 toneladas", "Dual", "Trabajo pesado"],
-        "specifications": {"Fuerza": "22 TON", "Categoria": "Partelenas", "Origen": "Avalon Group"},
+        "specifications": {"Fuerza": "22 TON", "Categoria": "Partelenas", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-BL-43",
-        "title": "Soplador de hojas Wulkan 43cc",
+        "sku": "FV-BL-43",
+        "title": "Soplador de hojas FVENTAS 43cc",
         "categorySlug": "sopladores",
         "productType": "machine",
-        "model": "WK-BL-43",
+        "model": "FV-BL-43",
         "price": 165,
         "b2bPrice": 148,
         "discount": 0,
         "stock": 6,
         "rotation": 8,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2019/08/WK-BL-43.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-bl-43/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Soplador para limpieza de hojas, polvo y residuos livianos.",
         "variants": ["43cc", "Hojas", "Limpieza"],
-        "specifications": {"Motor": "43cc", "Categoria": "Sopladores", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "43cc", "Categoria": "Sopladores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-BL-26V",
-        "title": "Soplador aspirador Wulkan 26cc",
+        "sku": "FV-BL-26V",
+        "title": "Soplador aspirador FVENTAS 26cc",
         "categorySlug": "sopladores",
         "productType": "machine",
-        "model": "WK-BL-26V",
+        "model": "FV-BL-26V",
         "price": 155,
         "b2bPrice": 138,
         "discount": 6,
         "stock": 5,
         "rotation": 6,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/07/WK-BL-26V-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wk-bl-26v/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Soplador aspirador para mantenimiento de areas verdes.",
         "variants": ["26cc", "Soplador aspirador", "Uso jardin"],
-        "specifications": {"Motor": "26cc", "Categoria": "Sopladores", "Origen": "Avalon Group"},
+        "specifications": {"Motor": "26cc", "Categoria": "Sopladores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-TG-30",
-        "title": "Triturador de granos Wulkan",
+        "sku": "FV-TG-30",
+        "title": "Triturador de granos FVENTAS",
         "categorySlug": "trituradores",
         "productType": "machine",
-        "model": "WK-TG-30",
+        "model": "FV-TG-30",
         "price": 280,
         "b2bPrice": 255,
         "discount": 0,
         "stock": 4,
         "rotation": 5,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2022/01/WK-TG-30-2.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/triturador-de-granos-wulkan/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Triturador de granos para uso agricola y procesamiento liviano.",
         "variants": ["Granos", "Uso agricola", "Electrico"],
-        "specifications": {"Aplicacion": "Granos", "Categoria": "Trituradores", "Origen": "Avalon Group"},
+        "specifications": {"Aplicacion": "Granos", "Categoria": "Trituradores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-TG-65",
-        "title": "Triturador de granos Wulkan bencinero",
+        "sku": "FV-TG-65",
+        "title": "Triturador de granos FVENTAS bencinero",
         "categorySlug": "trituradores",
         "productType": "machine",
-        "model": "WK-TG-65",
+        "model": "FV-TG-65",
         "price": 620,
         "b2bPrice": 580,
         "discount": 0,
         "stock": 2,
         "rotation": 3,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2023/06/unnamed-2-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/triturador-de-granos-wulkan-bencinero/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Triturador bencinero para faenas agricolas con autonomia de trabajo.",
         "variants": ["Bencinero", "Granos", "Trabajo agricola"],
-        "specifications": {"Aplicacion": "Granos", "Categoria": "Trituradores", "Origen": "Avalon Group"},
+        "specifications": {"Aplicacion": "Granos", "Categoria": "Trituradores", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WK-WP-2X2",
-        "title": "Motobomba 2x2 Wulkan Strong",
+        "sku": "FV-WP-2X2",
+        "title": "Motobomba 2x2 FVENTAS Strong",
         "categorySlug": "industrial",
         "productType": "machine",
-        "model": "WK-WP-2X2",
+        "model": "FV-WP-2X2",
         "price": 255,
         "b2bPrice": 235,
         "discount": 0,
         "stock": 6,
         "rotation": 7,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2021/06/MOTOBOMBA2X2-2-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/motobomba-2x2-wulkan-strong-wk-wp-2x2/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Motobomba para traslado de agua en faena, riego y trabajo industrial.",
         "variants": ["2x2", "Bencinera", "Uso industrial"],
-        "specifications": {"Formato": "2x2", "Categoria": "Industrial", "Origen": "Avalon Group"},
+        "specifications": {"Formato": "2x2", "Categoria": "Industrial", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WG-6000",
-        "title": "Generador bencinero Wulkan 5.0/5.5 KW",
+        "sku": "FV-GEN-6000",
+        "title": "Generador bencinero FVENTAS 5.0/5.5 KW",
         "categorySlug": "industrial",
         "productType": "machine",
-        "model": "WG-6000",
+        "model": "FV-GEN-6000",
         "price": 760,
         "b2bPrice": 710,
         "discount": 5,
         "stock": 2,
         "rotation": 4,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2024/05/WG-6000-1-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/wg-6000/",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
         "description": "Generador bencinero para respaldo electrico y faenas operativas.",
         "variants": ["5.0/5.5 KW", "Bencinero", "Uso industrial"],
-        "specifications": {"Potencia": "5.0/5.5 KW", "Categoria": "Industrial", "Origen": "Avalon Group"},
+        "specifications": {"Potencia": "5.0/5.5 KW", "Categoria": "Industrial", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WEA111",
-        "title": "Broca ahoyador Wulkan 100mm punta diamante",
+        "sku": "FV-EA-111",
+        "title": "Broca ahoyador FVENTAS 100mm punta diamante",
         "categorySlug": "repuestos",
         "productType": "spare_part",
-        "model": "WEA111",
+        "model": "FV-EA-111",
         "price": 28,
         "b2bPrice": 24,
         "discount": 0,
         "stock": 12,
         "rotation": 14,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/12/BROCA-100mm-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/broca-ahoyador-wulkan-100mm-punta-diamante/",
-        "description": "Broca compatible para ahoyadores Wulkan.",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
+        "description": "Broca compatible para ahoyadores FVENTAS.",
         "variants": ["100mm", "Punta diamante", "Compatible ahoyador"],
-        "specifications": {"Medida": "100mm", "Categoria": "Repuestos", "Origen": "Avalon Group"},
+        "specifications": {"Medida": "100mm", "Categoria": "Repuestos", "Origen": "Catalogo inicial FVENTAS"},
     },
     {
-        "sku": "WEA107",
-        "title": "Broca ahoyador Wulkan 150mm punta diamante",
+        "sku": "FV-EA-107",
+        "title": "Broca ahoyador FVENTAS 150mm punta diamante",
         "categorySlug": "repuestos",
         "productType": "spare_part",
-        "model": "WEA107",
+        "model": "FV-EA-107",
         "price": 35,
         "b2bPrice": 30,
         "discount": 0,
         "stock": 10,
         "rotation": 11,
-        "imageUrl": "https://www.avalongroup.cl/wp-content/uploads/2020/12/BROCA-150mm-scaled.jpg",
-        "sourceUrl": "https://www.avalongroup.cl/producto/broca-ahoyador-wulkan-150mm-punta-diamante/",
-        "description": "Broca compatible para ahoyadores Wulkan en medida 150mm.",
+        "imageUrl": "/static/uploads/catalog/fventas-product.svg",
+        "sourceUrl": "",
+        "description": "Broca compatible para ahoyadores FVENTAS en medida 150mm.",
         "variants": ["150mm", "Punta diamante", "Compatible ahoyador"],
-        "specifications": {"Medida": "150mm", "Categoria": "Repuestos", "Origen": "Avalon Group"},
+        "specifications": {"Medida": "150mm", "Categoria": "Repuestos", "Origen": "Catalogo inicial FVENTAS"},
     },
 ]
 CLIENT_TYPE_OPTIONS = [
-    ("ferretero", "Ferretero"),
+    ("b2b", "Cliente B2B"),
     ("distribuidor", "Distribuidor"),
     ("cliente_especial", "Cliente especial"),
 ]
@@ -846,7 +1062,7 @@ DOCUMENT_SCOPE_OPTIONS = [
     ("admin", "Administrativo"),
 ]
 DOCUMENT_TYPE_OPTIONS = [
-    ("rif", "RIF / documento fiscal"),
+    ("rif", "Documento fiscal"),
     ("contract", "Contrato"),
     ("credit", "Documento de credito"),
     ("account_statement", "Estado de cuenta"),
@@ -898,6 +1114,7 @@ AUDIT_SECURITY_ACTIONS = {
     "session_revoke",
 }
 ROLE_LABELS = {
+    "platform_admin": "Administrador plataforma",
     "super_admin": "Super admin",
     "general_manager": "Gerente general",
     "commercial_manager": "Gerente comercial",
@@ -912,17 +1129,17 @@ ROLE_LABELS = {
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
 IMPORT_DRAFT_TTL_SECONDS = 60 * 60
-WEB_ADMIN_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"}
-WEB_ADMIN_ROLE_ORDER = ["super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"]
-WRITE_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator"}
-SALES_ROLES = {"super_admin", "commercial_manager", "operator"}
-INVENTORY_ROLES = {"super_admin", "commercial_manager", "operator", "inventory"}
-CREDIT_APPROVAL_ROLES = {"super_admin", "general_manager", "commercial_manager"}
-ORDER_MANAGEMENT_ROLES = {"super_admin", "general_manager", "commercial_manager", "operator"}
-COMMISSION_MANAGEMENT_ROLES = {"super_admin", "general_manager", "commercial_manager"}
+WEB_ADMIN_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"}
+WEB_ADMIN_ROLE_ORDER = ["platform_admin", "super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"]
+WRITE_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager", "operator"}
+SALES_ROLES = {"platform_admin", "super_admin", "commercial_manager", "operator"}
+INVENTORY_ROLES = {"platform_admin", "super_admin", "commercial_manager", "operator", "inventory"}
+CREDIT_APPROVAL_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager"}
+ORDER_MANAGEMENT_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager", "operator"}
+COMMISSION_MANAGEMENT_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager"}
 MOBILE_SALES_ROLES = {"super_admin", "commercial_manager", "sales"}
-ADMIN_ONLY_ROLES = {"super_admin"}
-DELETE_ROLES = {"super_admin"}
+ADMIN_ONLY_ROLES = {"platform_admin", "super_admin"}
+DELETE_ROLES = {"platform_admin", "super_admin"}
 PERMISSION_ACTIONS = [
     ("view", "Ver", "bi-eye"),
     ("create", "Crear", "bi-plus-circle"),
@@ -936,9 +1153,10 @@ PERMISSION_ACTIONS = [
     ("audit", "Ver auditoria", "bi-shield-check"),
 ]
 PERMISSION_MODULES = [
-    ("dashboard", "Dashboard", "bi-grid-1x2", "KPIs ejecutivos y graficos Graphify."),
+    ("dashboard", "Dashboard", "bi-grid-1x2", "KPIs ejecutivos e insights comerciales."),
+    ("platform_companies", "Empresas SaaS", "bi-buildings", "Empresas suscritas, planes y activacion comercial."),
     ("sellers", "Vendedores", "bi-person-badge", "Fuerza comercial, cartera y metas."),
-    ("clients", "Clientes", "bi-shop", "Ferreteros, datos comerciales y credito."),
+    ("clients", "Clientes", "bi-shop", "Clientes B2B, datos comerciales y credito."),
     ("crm", "CRM Comercial", "bi-kanban", "Leads, oportunidades, tareas, visitas y seguimiento."),
     ("credit", "Credito B2B", "bi-credit-card-2-front", "Lineas, cupos, vencimientos y riesgo."),
     ("orders", "Ordenes", "bi-receipt", "Pedidos, saldo, estado comercial y despacho."),
@@ -973,6 +1191,7 @@ ALL_ACTION_KEYS = {key for key, _label, _icon in PERMISSION_ACTIONS}
 ACTION_ORDER = [key for key, _label, _icon in PERMISSION_ACTIONS]
 ALL_MODULE_KEYS = [key for key, _label, _icon, _description in PERMISSION_MODULES]
 ROLE_MODULE_PERMISSIONS = {
+    "platform_admin": {module: set(ALL_ACTION_KEYS) for module in ALL_MODULE_KEYS},
     "super_admin": {module: set(ALL_ACTION_KEYS) for module in ALL_MODULE_KEYS},
     "general_manager": {
         module: set(ACTION_AUDIT) for module in ALL_MODULE_KEYS if module not in {"admin_users", "permissions", "settings"}
@@ -1097,6 +1316,7 @@ ROLE_MODULE_PERMISSIONS["general_manager"].update({
     "orders": set(ACTION_FULL_NO_DELETE),
     "commissions": set(ACTION_APPROVE),
 })
+ROLE_MODULE_PERMISSIONS["super_admin"]["platform_companies"] = set()
 MODULE_ACCESS = {
     module: {
         role
@@ -1106,6 +1326,19 @@ MODULE_ACCESS = {
     for module in ALL_MODULE_KEYS
 }
 ADMIN_MENU_GROUPS = [
+    {
+        "label": "Plataforma",
+        "icon": "bi-buildings",
+        "items": [
+            {
+                "module": "platform_companies",
+                "endpoint": "platform_companies",
+                "label": "Empresas SaaS",
+                "icon": "bi-buildings",
+                "active": ["platform_companies", "company_subscription_update"],
+            },
+        ],
+    },
     {
         "label": "Comercial",
         "icon": "bi-briefcase",
@@ -1126,8 +1359,8 @@ ADMIN_MENU_GROUPS = [
         "label": "Catalogo",
         "icon": "bi-box-seam",
         "items": [
-            {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "products_export", "products_starter_wulkan", "product_duplicate", "product_delete"]},
-            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "categories_export", "categories_starter_wulkan", "category_status", "category_delete"]},
+            {"module": "products", "endpoint": "products", "label": "Productos", "icon": "bi-box-seam", "active": ["products", "product_new", "product_edit", "products_import", "products_export", "products_starter_fventas", "product_duplicate", "product_delete"]},
+            {"module": "categories", "endpoint": "categories", "label": "Categorias", "icon": "bi-tags", "active": ["categories", "category_edit", "categories_import", "categories_export", "categories_starter_fventas", "category_status", "category_delete"]},
             {"module": "media_library", "endpoint": "media_library", "label": "Biblioteca tecnica", "icon": "bi-folder2-open", "active": ["media_library", "media_library_import", "media_asset_delete"]},
             {"module": "stock", "endpoint": "stock", "label": "Stock masivo", "icon": "bi-boxes", "active": ["stock", "stock_import", "stock_export"]},
         ],
@@ -1167,6 +1400,7 @@ for group in ADMIN_MENU_GROUPS:
             ENDPOINT_MODULE_MAP.setdefault(endpoint_name, item["module"])
 ENDPOINT_MODULE_MAP["dashboard"] = "dashboard"
 ENDPOINT_MODULE_MAP.update({
+    "company_subscription_update": "platform_companies",
     "credit_export": "credit",
     "credit_due_export": "credit",
     "credit_history_export": "credit",
@@ -1184,16 +1418,18 @@ MODULE_NAV_INDEX = {
 
 ENDPOINT_UI_LABELS = {
     "dashboard": "Dashboard",
+    "platform_companies": "Empresas SaaS",
+    "company_subscription_update": "Actualizar suscripcion",
     "admin_search": "Busqueda",
     "product_new": "Crear producto",
     "product_edit": "Editar producto",
     "products_import": "Importar productos",
     "products_export": "Exportar productos",
-    "products_starter_wulkan": "Productos base Wulkan",
+    "products_starter_fventas": "Productos base FVENTAS",
     "category_edit": "Editar categoria",
     "categories_import": "Importar categorias",
     "categories_export": "Exportar categorias",
-    "categories_starter_wulkan": "Categorias base Wulkan",
+    "categories_starter_fventas": "Categorias base FVENTAS",
     "seller_edit": "Editar vendedor",
     "sellers_import": "Importar vendedores",
     "client_edit": "Editar cliente",
@@ -1215,6 +1451,8 @@ ENDPOINT_UI_LABELS = {
 
 ENDPOINT_ACTION_OVERRIDES = {
     "dashboard": "view",
+    "platform_companies": {"GET": "view", "POST": "create"},
+    "company_subscription_update": "edit",
     "admin_search": "view",
     "download_import_template": "export",
     "import_issues_export": "export",
@@ -1274,7 +1512,7 @@ ENDPOINT_ACTION_OVERRIDES = {
     "products": "view",
     "products_export": "export",
     "products_import": "import",
-    "products_starter_wulkan": "create",
+    "products_starter_fventas": "create",
     "product_new": "create",
     "product_edit": "edit",
     "product_duplicate": "create",
@@ -1282,7 +1520,7 @@ ENDPOINT_ACTION_OVERRIDES = {
     "categories": {"GET": "view", "POST": "create"},
     "categories_export": "export",
     "categories_import": "import",
-    "categories_starter_wulkan": "create",
+    "categories_starter_fventas": "create",
     "category_edit": "edit",
     "category_status": "edit",
     "category_delete": "delete",
@@ -1331,10 +1569,10 @@ IMPORT_TEMPLATE_GROUPS = [
                 "description": "Usuarios de venta para app movil, zonas, metas y comision.",
                 "columns": [
                     {"name": "nombre_completo", "required": True, "example": "Carlos Perez", "help": "Nombre visible del vendedor."},
-                    {"name": "email", "required": True, "example": "carlos@wulkanvenezuela.com", "help": "Correo unico para login movil."},
-                    {"name": "telefono", "required": False, "example": "+584120000000", "help": "Telefono o WhatsApp."},
-                    {"name": "codigo_vendedor", "required": False, "example": "VEN-CAR-01", "help": "Codigo interno comercial."},
-                    {"name": "zona", "required": False, "example": "Caracas", "help": "Zona o cartera principal."},
+                    {"name": "email", "required": True, "example": "carlos@fventas.cl", "help": "Correo unico para login movil."},
+                    {"name": "telefono", "required": False, "example": "+56912345678", "help": "Telefono o WhatsApp."},
+                    {"name": "codigo_vendedor", "required": False, "example": "CL-CAR-01", "help": "Codigo interno comercial."},
+                    {"name": "zona", "required": False, "example": "Zona Norte", "help": "Zona o cartera principal."},
                     {"name": "territorio", "required": False, "example": "Centro - Ruta A", "help": "Ruta, territorio o cobertura."},
                     {"name": "supervisor", "required": False, "example": "Gerente Comercial", "help": "Responsable interno del vendedor."},
                     {"name": "comision", "required": False, "example": "5", "help": "Porcentaje de comision."},
@@ -1350,28 +1588,28 @@ IMPORT_TEMPLATE_GROUPS = [
                 "key": "clientes",
                 "module": "clients",
                 "endpoint": "clients",
-                "title": "Clientes ferreteros",
+                "title": "Clientes B2B",
                 "description": "Cartera B2B con datos fiscales, direccion, vendedor y credito.",
                 "columns": [
-                    {"name": "cliente", "required": True, "example": "Ferreteria Principal C.A.", "help": "Razon social o nombre comercial."},
-                    {"name": "razon_social", "required": False, "example": "Ferreteria Principal C.A.", "help": "Nombre legal para documentos fiscales."},
-                    {"name": "nombre_comercial", "required": False, "example": "Ferreteria Principal", "help": "Nombre visible en app y cartera."},
-                    {"name": "email", "required": True, "example": "compras@ferreteriaprincipal.com", "help": "Correo unico para acceso movil."},
-                    {"name": "rif", "required": True, "example": "J-12345678-9", "help": "RIF venezolano normalizado para facturacion y credito."},
+                    {"name": "cliente", "required": True, "example": "Cliente Principal SpA", "help": "Razon social o nombre comercial."},
+                    {"name": "razon_social", "required": False, "example": "Cliente Principal SpA", "help": "Nombre legal para documentos fiscales."},
+                    {"name": "nombre_comercial", "required": False, "example": "Cliente Principal", "help": "Nombre visible en app y cartera."},
+                    {"name": "email", "required": True, "example": "compras@clienteprincipal.com", "help": "Correo unico para acceso movil."},
+                    {"name": "documento_fiscal", "required": True, "example": "76.123.456-7", "help": "Documento fiscal del pais configurado. En Chile se valida como RUT."},
                     {"name": "contacto", "required": False, "example": "Maria Gonzalez", "help": "Responsable de compras."},
                     {"name": "contacto_administrativo", "required": False, "example": "Luis Perez", "help": "Responsable de pagos o administracion."},
                     {"name": "contacto_recepcion", "required": False, "example": "Ana Torres", "help": "Responsable de recibir mercancia."},
-                    {"name": "telefono", "required": True, "example": "0414-0000000", "help": "Telefono venezolano. Se normaliza a +58."},
-                    {"name": "whatsapp", "required": False, "example": "+584120000000", "help": "WhatsApp principal si es distinto al telefono."},
-                    {"name": "direccion", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal o despacho."},
-                    {"name": "direccion_fiscal", "required": False, "example": "Av. Bolivar, local 12", "help": "Direccion fiscal."},
+                    {"name": "telefono", "required": True, "example": "+56 9 1234 5678", "help": "Telefono comercial. Se normaliza segun el pais configurado."},
+                    {"name": "whatsapp", "required": False, "example": "+56912345678", "help": "WhatsApp principal si es distinto al telefono."},
+                    {"name": "direccion", "required": False, "example": "Av. Principal 123, local 12", "help": "Direccion fiscal o despacho."},
+                    {"name": "direccion_fiscal", "required": False, "example": "Av. Principal 123, local 12", "help": "Direccion fiscal."},
                     {"name": "direccion_despacho", "required": False, "example": "Galpon 4, Zona Industrial", "help": "Direccion de entrega."},
-                    {"name": "estado_ubicacion", "required": True, "example": "Carabobo", "help": "Estado venezolano. Debe coincidir con la ciudad."},
-                    {"name": "ciudad", "required": True, "example": "Valencia", "help": "Ciudad del cliente asociada al estado."},
-                    {"name": "pais", "required": False, "example": "VE", "help": "Pais del cliente."},
+                    {"name": "estado_ubicacion", "required": True, "example": "Metropolitana", "help": "Region, estado o provincia del cliente."},
+                    {"name": "ciudad", "required": True, "example": "Ciudad principal", "help": "Ciudad del cliente. En Chile se valida contra la region."},
+                    {"name": "pais", "required": False, "example": "CL", "help": "Pais del cliente."},
                     {"name": "zona", "required": False, "example": "Centro", "help": "Zona de despacho o cartera."},
-                    {"name": "vendedor_email", "required": False, "example": "carlos@wulkanvenezuela.com", "help": "Asigna cartera por email del vendedor."},
-                    {"name": "tipo_cliente", "required": False, "example": "ferretero", "help": "ferretero, distribuidor o cliente_especial."},
+                    {"name": "vendedor_email", "required": False, "example": "carlos@fventas.cl", "help": "Asigna cartera por email del vendedor."},
+                    {"name": "tipo_cliente", "required": False, "example": "b2b", "help": "b2b, distribuidor o cliente_especial."},
                     {"name": "categoria_comercial", "required": False, "example": "preferential", "help": "standard, preferential, strategic o wholesale."},
                     {"name": "lista_precios", "required": False, "example": "b2b", "help": "b2b, retail, wholesale o special."},
                     {"name": "descuento_autorizado", "required": False, "example": "5", "help": "Descuento comercial maximo autorizado."},
@@ -1403,18 +1641,18 @@ IMPORT_TEMPLATE_GROUPS = [
                 "title": "Productos",
                 "description": "Catalogo con SKU, precios, stock, galeria movil, PDFs y variantes.",
                 "columns": [
-                    {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Codigo unico del producto."},
+                    {"name": "sku", "required": True, "example": "FVT-MOT-45CC", "help": "Codigo unico del producto."},
                     {"name": "codigo_interno", "required": False, "example": "MOT-45-2026", "help": "Codigo interno administrativo o ERP."},
-                    {"name": "nombre", "required": True, "example": "Motosierra Wulkan 45cc", "help": "Nombre visible comercial."},
+                    {"name": "nombre", "required": True, "example": "Motosierra FVENTAS 45cc", "help": "Nombre visible comercial."},
                     {"name": "categoria", "required": True, "example": "Maquinaria y jardin", "help": "Familia del catalogo."},
                     {"name": "subcategoria", "required": False, "example": "Motosierras", "help": "Linea interna dentro de la categoria."},
-                    {"name": "marca", "required": False, "example": "Wulkan", "help": "Marca comercial."},
+                    {"name": "marca", "required": False, "example": "FVENTAS", "help": "Marca comercial."},
                     {"name": "modelo", "required": False, "example": "45CC", "help": "Modelo o referencia visible."},
                     {"name": "unidad_venta", "required": False, "example": "unidad", "help": "Unidad, kit, caja, metro, litro, etc."},
                     {"name": "descripcion_corta", "required": False, "example": "Equipo de corte para jardin y finca.", "help": "Resumen corto para listados."},
-                    {"name": "descripcion_larga", "required": False, "example": "Incluye espada, cadena y garantia Wulkan.", "help": "Detalle ampliado para ficha de producto."},
+                    {"name": "descripcion_larga", "required": False, "example": "Incluye espada, cadena y garantia FVENTAS.", "help": "Detalle ampliado para ficha de producto."},
                     {"name": "precio_publico_usd", "required": True, "example": "185", "help": "Precio PVP en dolares."},
-                    {"name": "precio_b2b_usd", "required": False, "example": "162", "help": "Precio ferretero."},
+                    {"name": "precio_b2b_usd", "required": False, "example": "162", "help": "Precio B2B."},
                     {"name": "costo_referencial_usd", "required": False, "example": "120", "help": "Costo interno referencial. No se publica en app."},
                     {"name": "margen_porcentaje", "required": False, "example": "25", "help": "Margen estimado administrativo."},
                     {"name": "stock", "required": False, "example": "12", "help": "Stock fisico inicial."},
@@ -1424,13 +1662,13 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "tipo_producto", "required": False, "example": "machine", "help": "machine, spare_part, accessory, service o consumable."},
                     {"name": "precio_anterior_usd", "required": False, "example": "210", "help": "Precio antes del descuento."},
                     {"name": "descuento_porcentaje", "required": False, "example": "12", "help": "Descuento visible."},
-                    {"name": "tasa_usd_ves", "required": False, "example": "38.5", "help": "Referencia VES."},
-                    {"name": "imagen_principal", "required": False, "example": "https://cdn.wulkan/producto.jpg", "help": "Imagen principal."},
-                    {"name": "imagenes", "required": False, "example": "https://cdn.wulkan/1.jpg|https://cdn.wulkan/2.jpg", "help": "Galeria separada por |, coma o salto de linea."},
-                    {"name": "pdf_tecnicos", "required": False, "example": "https://cdn.wulkan/ficha.pdf", "help": "Fichas tecnicas."},
+                    {"name": "tasa_usd_local", "required": False, "example": "950", "help": "Tasa referencial entre moneda de venta y moneda local."},
+                    {"name": "imagen_principal", "required": False, "example": "https://cdn.fventas.cl/producto.jpg", "help": "Imagen principal."},
+                    {"name": "imagenes", "required": False, "example": "https://cdn.fventas.cl/1.jpg|https://cdn.fventas.cl/2.jpg", "help": "Galeria separada por |, coma o salto de linea."},
+                    {"name": "pdf_tecnicos", "required": False, "example": "https://cdn.fventas.cl/ficha.pdf", "help": "Fichas tecnicas."},
                     {"name": "variantes", "required": False, "example": "18 pulgadas|20 pulgadas", "help": "Opciones visibles."},
                     {"name": "especificaciones", "required": False, "example": "Motor:45cc|Garantia:6 meses", "help": "Formato clave:valor."},
-                    {"name": "skus_relacionados", "required": False, "example": "WUL-REP-CAD18|WUL-ACE-2T", "help": "Productos relacionados por SKU."},
+                    {"name": "skus_relacionados", "required": False, "example": "FVT-REP-CAD18|FVT-ACE-2T", "help": "Productos relacionados por SKU."},
                     {"name": "requiere_cotizacion", "required": False, "example": "no", "help": "si/no."},
                     {"name": "requiere_validacion_tecnica", "required": False, "example": "si", "help": "si/no."},
                     {"name": "visible_app", "required": False, "example": "si", "help": "si/no para publicar en app movil."},
@@ -1449,7 +1687,7 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "nombre", "required": True, "example": "Repuestos", "help": "Nombre de categoria."},
                     {"name": "slug", "required": False, "example": "repuestos", "help": "Identificador publico. Si viene vacio se genera desde el nombre."},
                     {"name": "descripcion", "required": False, "example": "Piezas y consumibles compatibles por SKU.", "help": "Texto visible."},
-                    {"name": "imagen_url", "required": False, "example": "https://cdn.wulkan/categorias/repuestos.jpg", "help": "Imagen de categoria."},
+                    {"name": "imagen_url", "required": False, "example": "https://cdn.fventas.cl/categorias/repuestos.jpg", "help": "Imagen de categoria."},
                     {"name": "icono", "required": False, "example": "bi-tools", "help": "Icono Bootstrap opcional para panel/app."},
                     {"name": "orden", "required": False, "example": "20", "help": "Orden de aparicion en app movil."},
                     {"name": "categoria_padre", "required": False, "example": "Maquinaria", "help": "Nombre, slug o id de categoria padre."},
@@ -1464,12 +1702,12 @@ IMPORT_TEMPLATE_GROUPS = [
                 "title": "Stock",
                 "description": "Actualizacion masiva de inventario fisico, minimo, maximo, ubicacion y observacion por SKU.",
                 "columns": [
-                    {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Debe existir en productos."},
+                    {"name": "sku", "required": True, "example": "FVT-MOT-45CC", "help": "Debe existir en productos."},
                     {"name": "cantidad", "required": True, "example": "25", "help": "Stock fisico final."},
                     {"name": "stock_minimo", "required": False, "example": "3", "help": "Punto de alerta operativa."},
                     {"name": "stock_maximo", "required": False, "example": "40", "help": "Stock objetivo o maximo sugerido."},
                     {"name": "stock_reposicion", "required": False, "example": "15", "help": "Cantidad sugerida para reposicion."},
-                    {"name": "ubicacion", "required": False, "example": "Almacen Valencia A-02", "help": "Ubicacion fisica o bodega."},
+                    {"name": "ubicacion", "required": False, "example": "Bodega principal A-02", "help": "Ubicacion fisica o bodega."},
                     {"name": "tipo", "required": False, "example": "bulk_excel_set", "help": "entry, exit, adjustment, bulk_excel_set o return."},
                     {"name": "nota", "required": False, "example": "Inventario inicial junio", "help": "Comentario operativo."},
                 ],
@@ -1481,10 +1719,10 @@ IMPORT_TEMPLATE_GROUPS = [
                 "title": "Biblioteca tecnica",
                 "description": "Imagenes y PDFs asociados a productos por SKU.",
                 "columns": [
-                    {"name": "sku", "required": True, "example": "WUL-MOT-45CC", "help": "Producto asociado."},
+                    {"name": "sku", "required": True, "example": "FVT-MOT-45CC", "help": "Producto asociado."},
                     {"name": "titulo", "required": False, "example": "Ficha tecnica motosierra", "help": "Nombre interno."},
                     {"name": "tipo", "required": True, "example": "pdf", "help": "image o pdf."},
-                    {"name": "url", "required": True, "example": "https://cdn.wulkan/ficha.pdf", "help": "URL publica del recurso."},
+                    {"name": "url", "required": True, "example": "https://cdn.fventas.cl/ficha.pdf", "help": "URL publica del recurso."},
                 ],
             },
             {
@@ -1492,13 +1730,13 @@ IMPORT_TEMPLATE_GROUPS = [
                 "module": "documents",
                 "endpoint": "documents",
                 "title": "Documentos",
-                "description": "Contratos, RIF, garantias, evidencias y documentos por cliente, producto u orden.",
+                "description": "Contratos, documentos fiscales, garantias, evidencias y documentos por cliente, producto u orden.",
                 "columns": [
-                    {"name": "titulo", "required": True, "example": "RIF Ferreteria Principal", "help": "Nombre interno del documento."},
-                    {"name": "tipo_documento", "required": True, "example": "rif", "help": "rif, contract, credit, account_statement, technical_sheet, manual, warranty, certificate, quote, payment_proof, dispatch_guide, delivery_evidence, invoice o administrative."},
+                    {"name": "titulo", "required": True, "example": "Documento fiscal Cliente Principal", "help": "Nombre interno del documento."},
+                    {"name": "tipo_documento", "required": True, "example": "rut", "help": "rut, contract, credit, account_statement, technical_sheet, manual, warranty, certificate, quote, payment_proof, dispatch_guide, delivery_evidence, invoice o administrative."},
                     {"name": "ambito", "required": True, "example": "cliente", "help": "cliente, producto, orden o administrativo."},
-                    {"name": "referencia", "required": False, "example": "compras@ferreteriaprincipal.com", "help": "Email/RIF/nombre cliente, SKU producto u orden segun ambito."},
-                    {"name": "url", "required": True, "example": "https://cdn.wulkan/documentos/rif.pdf", "help": "URL publica o privada del archivo."},
+                    {"name": "referencia", "required": False, "example": "compras@clienteprincipal.com", "help": "Email/documento fiscal/nombre cliente, SKU producto u orden segun ambito."},
+                    {"name": "url", "required": True, "example": "https://cdn.fventas.cl/documentos/rut.pdf", "help": "URL publica o privada del archivo."},
                     {"name": "visibilidad", "required": False, "example": "internal", "help": "internal, seller, client o public."},
                     {"name": "vence", "required": False, "example": "2027-06-10", "help": "Fecha de vencimiento si aplica."},
                     {"name": "estado", "required": False, "example": "active", "help": "active, pending_review, expired o archived."},
@@ -1521,9 +1759,9 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "mensaje", "required": False, "example": "Descuentos especiales por temporada.", "help": "Texto de apoyo."},
                     {"name": "ubicacion", "required": False, "example": "home", "help": "home, catalog o checkout."},
                     {"name": "prioridad", "required": False, "example": "80", "help": "Mayor numero aparece primero."},
-                    {"name": "imagen_url", "required": False, "example": "https://cdn.wulkan/banners/oferta.jpg", "help": "Imagen del carrusel."},
+                    {"name": "imagen_url", "required": False, "example": "https://cdn.fventas.cl/banners/oferta.jpg", "help": "Imagen del carrusel."},
                     {"name": "boton", "required": False, "example": "Ver catalogo", "help": "Texto del CTA."},
-                    {"name": "url_accion", "required": False, "example": "wulkan://catalogo", "help": "Accion o enlace."},
+                    {"name": "url_accion", "required": False, "example": "fventas://catalogo", "help": "Accion o enlace."},
                     {"name": "inicio", "required": False, "example": "2026-06-10T00:00:00Z", "help": "Fecha inicio opcional."},
                     {"name": "cierre", "required": False, "example": "2026-06-30T23:59:59Z", "help": "Fecha cierre opcional."},
                     {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
@@ -1536,17 +1774,17 @@ IMPORT_TEMPLATE_GROUPS = [
                 "title": "Servicios tecnicos",
                 "description": "Directorio publico/app de soporte tecnico autorizado.",
                 "columns": [
-                    {"name": "nombre", "required": True, "example": "Servicio Tecnico Caracas", "help": "Nombre comercial."},
-                    {"name": "empresa", "required": False, "example": "Taller Central C.A.", "help": "Empresa asociada."},
+                    {"name": "nombre", "required": True, "example": "Servicio tecnico autorizado", "help": "Nombre comercial."},
+                    {"name": "empresa", "required": False, "example": "Taller Central SpA", "help": "Empresa asociada."},
                     {"name": "contacto", "required": False, "example": "Luis Martinez", "help": "Persona responsable."},
-                    {"name": "telefono", "required": False, "example": "+584120000000", "help": "Telefono principal."},
-                    {"name": "whatsapp", "required": False, "example": "+584120000000", "help": "WhatsApp."},
-                    {"name": "email", "required": False, "example": "servicio@wulkanvenezuela.com", "help": "Correo de contacto."},
-                    {"name": "estado_ubicacion", "required": False, "example": "Distrito Capital", "help": "Estado o region."},
-                    {"name": "ciudad", "required": False, "example": "Caracas", "help": "Ciudad."},
+                    {"name": "telefono", "required": False, "example": "+56912345678", "help": "Telefono principal."},
+                    {"name": "whatsapp", "required": False, "example": "+56912345678", "help": "WhatsApp."},
+                    {"name": "email", "required": False, "example": "servicio@fventas.cl", "help": "Correo de contacto."},
+                    {"name": "estado_ubicacion", "required": False, "example": "Metropolitana", "help": "Estado o region."},
+                    {"name": "ciudad", "required": False, "example": "Ciudad principal", "help": "Ciudad."},
                     {"name": "direccion", "required": False, "example": "Zona industrial, local 8", "help": "Direccion visible."},
                     {"name": "especialidades", "required": False, "example": "Motosierras|Motobombas", "help": "Separadas por |, coma o salto."},
-                    {"name": "cobertura", "required": False, "example": "Caracas y Miranda", "help": "Zona cubierta."},
+                    {"name": "cobertura", "required": False, "example": "Zona centro y comunas cercanas", "help": "Zona cubierta."},
                     {"name": "visible_app", "required": False, "example": "si", "help": "si/no."},
                     {"name": "estado", "required": False, "example": "active", "help": "active o inactive."},
                 ],
@@ -1570,7 +1808,8 @@ def csrf_token() -> str:
 
 
 def csrf_field() -> Markup:
-    return Markup(f'<input type="hidden" name="_csrf_token" value="{csrf_token()}">')
+    token = escape(csrf_token())
+    return Markup(f'<input type="hidden" name="_csrf_token" value="{token}">')  # nosec B704
 
 
 def current_admin_role() -> str:
@@ -1594,22 +1833,28 @@ def is_blocked_default_login(email: str, *, mobile: bool = False) -> bool:
 
 
 def sales_users(store: dict) -> list[dict]:
+    is_platform = current_admin_role() == "platform_admin"
+    company_id = current_company_id(store)
     return sorted(
         [
             user
             for user in store.get("admin_users", [])
             if user.get("role") == "sales" and user.get("status") == "active"
+            and (is_platform or record_company_id(user, store) == company_id)
         ],
         key=lambda user: user.get("name", ""),
     )
 
 
 def web_admin_users(store: dict) -> list[dict]:
+    is_platform = current_admin_role() == "platform_admin"
+    company_id = current_company_id(store)
     return sorted(
         [
             user
             for user in store.get("admin_users", [])
             if user.get("role") != "sales" and user.get("status") != "deleted"
+            and (is_platform or user.get("companyId", default_company_id(store)) == company_id)
         ],
         key=lambda user: user.get("name", ""),
     )
@@ -1662,7 +1907,7 @@ def reset_admin_user_failed_attempts(user: dict) -> None:
 
 
 def temporary_admin_password() -> str:
-    return f"Wulkan{secrets.randbelow(900000) + 100000}"
+    return f"FVENTAS{secrets.randbelow(900000) + 100000}"
 
 
 def request_ip_address() -> str:
@@ -1698,7 +1943,8 @@ def start_admin_session(admin_user: dict) -> None:
     now = int(time.time())
     session["admin_authenticated"] = True
     session["admin_user_id"] = admin_user["id"]
-    session["admin_name"] = admin_user.get("name", "Admin Wulkan")
+    session["company_id"] = admin_user.get("companyId", DEFAULT_COMPANY_ID)
+    session["admin_name"] = admin_user.get("name", "FVENTAS Admin")
     session["admin_role"] = admin_user.get("role", "operator")
     session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
     session["admin_session_version"] = user_session_version(admin_user)
@@ -2030,7 +2276,7 @@ def order_matches_dashboard_filters(
     return any(product.get("categoryId", "") == filters["category"] for product in products)
 
 
-def graphify_from_pairs(pairs: list[tuple[str, float]], limit: int = 6) -> dict:
+def insights_from_pairs(pairs: list[tuple[str, float]], limit: int = 6) -> dict:
     sorted_pairs = sorted(pairs, key=lambda item: item[1], reverse=True)[:limit]
     return {
         "labels": [label for label, _value in sorted_pairs],
@@ -2108,7 +2354,7 @@ def dashboard_charts(
     clients_purchase: dict[str, float] = {}
     overdue_by_client: dict[str, float] = {}
     commissions_by_seller: dict[str, float] = {}
-    client_names = {client.get("id", ""): client.get("businessName", "Cliente Wulkan") for client in clients}
+    client_names = {client.get("id", ""): client.get("businessName", "Cliente FVENTAS") for client in clients}
 
     for order in orders:
         created_at = parse_utc_datetime(order.get("createdAt", ""))
@@ -2120,7 +2366,7 @@ def dashboard_charts(
         seller_name = order.get("sellerName") or "Sin vendedor"
         sales_by_seller[seller_name] = sales_by_seller.get(seller_name, 0) + total
         commissions_by_seller[seller_name] = commissions_by_seller.get(seller_name, 0) + float(order.get("commissionUsd") or 0)
-        client_name = client_names.get(order.get("customerId", ""), order.get("customer", {}).get("name", "Cliente Wulkan"))
+        client_name = client_names.get(order.get("customerId", ""), order.get("customer", {}).get("name", "Cliente FVENTAS"))
         clients_purchase[client_name] = clients_purchase.get(client_name, 0) + total
         if order.get("dueStatus") == "overdue":
             overdue_by_client[client_name] = overdue_by_client.get(client_name, 0) + float(order.get("balanceUsd") or 0)
@@ -2133,14 +2379,14 @@ def dashboard_charts(
             sales_by_category[category_label] = sales_by_category.get(category_label, 0) + float(item.get("lineTotalUsd") or 0)
 
     return {
-        "sales_by_day": graphify_from_pairs(list(sales_by_day.items()), 8),
-        "sales_by_month": graphify_from_pairs(list(sales_by_month.items()), 6),
-        "sales_by_seller": graphify_from_pairs(list(sales_by_seller.items()), 6),
-        "sales_by_category": graphify_from_pairs(list(sales_by_category.items()), 6),
-        "products_sold": graphify_from_pairs(list(products_sold.items()), 6),
-        "clients_purchase": graphify_from_pairs(list(clients_purchase.items()), 6),
-        "overdue_by_client": graphify_from_pairs(list(overdue_by_client.items()), 6),
-        "commissions_by_seller": graphify_from_pairs(list(commissions_by_seller.items()), 6),
+        "sales_by_day": insights_from_pairs(list(sales_by_day.items()), 8),
+        "sales_by_month": insights_from_pairs(list(sales_by_month.items()), 6),
+        "sales_by_seller": insights_from_pairs(list(sales_by_seller.items()), 6),
+        "sales_by_category": insights_from_pairs(list(sales_by_category.items()), 6),
+        "products_sold": insights_from_pairs(list(products_sold.items()), 6),
+        "clients_purchase": insights_from_pairs(list(clients_purchase.items()), 6),
+        "overdue_by_client": insights_from_pairs(list(overdue_by_client.items()), 6),
+        "commissions_by_seller": insights_from_pairs(list(commissions_by_seller.items()), 6),
     }
 
 
@@ -2155,16 +2401,51 @@ def seller_name_for(store: dict, seller_id: str) -> str:
     return (seller or {}).get("name", "")
 
 
+def is_platform_scope() -> bool:
+    return current_admin_role() == "platform_admin"
+
+
+def record_company_id(record: dict | None, store: dict) -> str:
+    if not record:
+        return current_company_id(store)
+    return str(record.get("companyId") or default_company_id(store))
+
+
+def can_access_company_record(record: dict | None, store: dict) -> bool:
+    if not record:
+        return False
+    if is_platform_scope():
+        return True
+    return record_company_id(record, store) == current_company_id(store)
+
+
+def visible_records_for_current_company(store: dict, collection: str) -> list[dict]:
+    records = store.get(collection, [])
+    if is_platform_scope():
+        return records
+    company_id = current_company_id(store)
+    return [
+        record
+        for record in records
+        if record_company_id(record, store) == company_id
+    ]
+
+
+def find_company_record(store: dict, collection: str, record_id: str) -> dict | None:
+    record = find_by_id(store.get(collection, []), record_id)
+    return record if can_access_company_record(record, store) else None
+
+
 def visible_clients_for_current_user(store: dict) -> list[dict]:
-    clients = store.get("clients", [])
+    clients = visible_records_for_current_company(store, "clients")
     if current_admin_role() != "sales":
         return clients
     seller_id = session.get("admin_user_id", "")
     return [client for client in clients if client.get("assignedSellerId") == seller_id]
 
 
-def can_access_client_record(client: dict | None) -> bool:
-    if not client:
+def can_access_client_record(client: dict | None, store: dict) -> bool:
+    if not can_access_company_record(client, store):
         return False
     if current_admin_role() != "sales":
         return True
@@ -2172,13 +2453,13 @@ def can_access_client_record(client: dict | None) -> bool:
 
 
 def visible_orders_for_current_user(store: dict) -> list[dict]:
-    orders = store.get("orders", [])
+    orders = visible_records_for_current_company(store, "orders")
     if current_admin_role() != "sales":
         return orders
     seller_id = session.get("admin_user_id", "")
     assigned_client_ids = {
         client.get("id", "")
-        for client in store.get("clients", [])
+        for client in visible_clients_for_current_user(store)
         if client.get("assignedSellerId") == seller_id
     }
     return [
@@ -2189,25 +2470,25 @@ def visible_orders_for_current_user(store: dict) -> list[dict]:
 
 
 def can_access_order_record(order: dict | None, store: dict) -> bool:
-    if not order:
+    if not can_access_company_record(order, store):
         return False
     if current_admin_role() != "sales":
         return True
     seller_id = session.get("admin_user_id", "")
     if order.get("sellerId") == seller_id:
         return True
-    client = find_by_id(store.get("clients", []), order.get("customerId", ""))
+    client = find_company_record(store, "clients", order.get("customerId", ""))
     return bool(client and client.get("assignedSellerId") == seller_id)
 
 
 def visible_quotes_for_current_user(store: dict) -> list[dict]:
-    quotes = store.get("quotes", [])
+    quotes = visible_records_for_current_company(store, "quotes")
     if current_admin_role() != "sales":
         return quotes
     seller_id = session.get("admin_user_id", "")
     assigned_client_ids = {
         client.get("id", "")
-        for client in store.get("clients", [])
+        for client in visible_clients_for_current_user(store)
         if client.get("assignedSellerId") == seller_id
     }
     return [
@@ -2218,25 +2499,25 @@ def visible_quotes_for_current_user(store: dict) -> list[dict]:
 
 
 def can_access_quote_record(quote: dict | None, store: dict) -> bool:
-    if not quote:
+    if not can_access_company_record(quote, store):
         return False
     if current_admin_role() != "sales":
         return True
     seller_id = session.get("admin_user_id", "")
     if quote.get("sellerId") == seller_id:
         return True
-    client = find_by_id(store.get("clients", []), quote.get("clientId", ""))
+    client = find_company_record(store, "clients", quote.get("clientId", ""))
     return bool(client and client.get("assignedSellerId") == seller_id)
 
 
 def visible_crm_records_for_current_user(store: dict) -> list[dict]:
-    records = store.get("crm_records", [])
+    records = visible_records_for_current_company(store, "crm_records")
     if current_admin_role() != "sales":
         return records
     seller_id = session.get("admin_user_id", "")
     assigned_client_ids = {
         client.get("id", "")
-        for client in store.get("clients", [])
+        for client in visible_clients_for_current_user(store)
         if client.get("assignedSellerId") == seller_id
     }
     return [
@@ -2247,29 +2528,33 @@ def visible_crm_records_for_current_user(store: dict) -> list[dict]:
 
 
 def can_access_crm_record(record: dict | None, store: dict) -> bool:
-    if not record:
+    if not can_access_company_record(record, store):
         return False
     if current_admin_role() != "sales":
         return True
     seller_id = session.get("admin_user_id", "")
     if record.get("sellerId") == seller_id:
         return True
-    client = find_by_id(store.get("clients", []), record.get("clientId", ""))
+    client = find_company_record(store, "clients", record.get("clientId", ""))
     return bool(client and client.get("assignedSellerId") == seller_id)
 
 
 def product_has_commercial_history(store: dict, product: dict | None) -> bool:
     if not product:
         return False
+    company_id = record_company_id(product, store)
     product_id = product.get("id", "")
     sku = product.get("sku", "")
     for order in store.get("orders", []):
+        if record_company_id(order, store) != company_id:
+            continue
         for item in order.get("items", []):
             if item.get("productId") == product_id or item.get("sku") == sku:
                 return True
     return any(
         movement.get("productId") == product_id or movement.get("sku") == sku
         for movement in store.get("stock_movements", [])
+        if record_company_id(movement, store) == company_id
     )
 
 
@@ -2395,7 +2680,7 @@ def visible_import_template_groups() -> list[dict]:
 
 
 def import_template_filename(spec: dict, file_format: str) -> str:
-    return f"plantilla_wulkan_{spec['key']}.{file_format}"
+    return f"plantilla_fventas_{spec['key']}.{file_format}"
 
 
 def build_csv_template(spec: dict) -> Response:
@@ -2437,7 +2722,7 @@ def build_xlsx_template(spec: dict):
         cell.alignment = Alignment(horizontal="center")
         cell.comment = Comment(
             f"{'Obligatorio' if column['required'] else 'Opcional'} - {column['help']}",
-            "Wulkan",
+            "FVENTAS",
         )
         data_sheet.column_dimensions[cell.column_letter].width = min(max(len(column["name"]) + 4, 16), 36)
 
@@ -2587,13 +2872,14 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                 })
 
     if can_access_module("clients"):
+        client_profile = active_market_profile_for_store(store)
         for client in [enrich_client(item, orders, movements) for item in visible_clients_for_current_user(store) if item.get("status") != "deleted"]:
-            if matches(client.get("businessName"), client.get("legalName"), client.get("rif"), client.get("email"), client.get("phone"), client.get("assignedSellerName")):
+            if matches(client.get("businessName"), client.get("legalName"), client.get("taxId"), client.get("email"), client.get("phone"), client.get("assignedSellerName")):
                 append_search_result(groups, "clients", {
                     "group_label": "Clientes",
                     "group_icon": "bi-shop",
                     "title": client.get("businessName") or client.get("email"),
-                    "subtitle": f"{client.get('rif') or 'Sin RIF'} - {client.get('assignedSellerName') or 'Sin vendedor'}",
+                    "subtitle": f"{client.get('taxId') or 'Sin ' + client_profile.get('taxLabel', 'documento fiscal')} - {client.get('assignedSellerName') or 'Sin vendedor'}",
                     "meta": f"Credito {money_usd(client.get('creditAvailableUsd', 0))}",
                     "badge": client.get("statusLabel", client.get("status", "")),
                     "href": url_for("clients", q=client.get("businessName", "")),
@@ -2772,7 +3058,7 @@ def protect_admin_csrf():
 @app.before_request
 def require_admin_session():
     public_prefixes = ("/api/mobile/", "/api/v1/mobile/", "/static/")
-    public_endpoints = {"login", "privacy_policy", "healthz", "readyz"}
+    public_endpoints = {"landing", "login", "signup", "privacy_policy", "account_deletion_page", "healthz", "readyz"}
 
     if request.path.startswith(public_prefixes) or request.endpoint in public_endpoints:
         return None
@@ -2807,13 +3093,28 @@ def require_admin_session():
     if session_store_changed:
         save_store(store)
 
-    session["admin_name"] = admin_user.get("name", "Admin Wulkan")
+    session["admin_name"] = admin_user.get("name", "FVENTAS Admin")
     session["admin_role"] = admin_user.get("role", "operator")
+    session["company_id"] = admin_user.get("companyId", default_company_id(store))
     session["must_change_password"] = bool(admin_user.get("mustChangePassword"))
 
     if admin_user.get("role") == "sales":
         session.clear()
         return redirect(url_for("login", mobile_only="1"))
+
+    if not subscription_allows_access(store, admin_user):
+        record_audit_event(
+            store,
+            "login_blocked",
+            "subscription",
+            admin_user.get("companyId", default_company_id(store)),
+            "Acceso bloqueado por suscripcion pendiente o suspendida.",
+            actor={"id": admin_user["id"], "name": admin_user.get("name", ""), "role": admin_user.get("role", "")},
+            metadata={"path": request.path, "method": request.method},
+        )
+        save_store(store)
+        session.clear()
+        return redirect(url_for("login", next=request.path, subscription="inactive"))
 
     allowed_password_endpoints = {"account_password", "logout"}
     if session.get("must_change_password") and request.endpoint not in allowed_password_endpoints:
@@ -2838,11 +3139,40 @@ def require_admin_session():
     return None
 
 
+LEGACY_ADMIN_ROUTE_ALIASES = {
+    "/dashboard": "dashboard",
+    "/dashboard/perfil": "account_password",
+    "/dashboard/profile": "account_password",
+    "/perfil": "account_password",
+    "/profile": "account_password",
+}
+
+
+def normalize_admin_next_url(raw_next: str | None) -> str:
+    value = str(raw_next or "").strip()
+    if not value:
+        return url_for("dashboard")
+
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/") or parsed.path.startswith("//"):
+        return url_for("dashboard")
+
+    normalized_path = parsed.path.rstrip("/") or "/"
+    if normalized_path == "/":
+        return url_for("dashboard")
+    alias_endpoint = LEGACY_ADMIN_ROUTE_ALIASES.get(normalized_path)
+    if alias_endpoint:
+        return url_for(alias_endpoint)
+    return value
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = ""
     if request.args.get("mobile_only") == "1":
         error = "Los vendedores ingresan desde la app movil. El panel web es solo administrativo."
+    elif request.args.get("subscription") == "inactive":
+        error = "La suscripcion de la empresa esta pendiente o suspendida. Contacta a FVENTAS para reactivar el plan."
 
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
@@ -2899,6 +3229,21 @@ def login():
                 save_store(store)
                 error = "Los vendedores ingresan desde la app movil. El panel web es solo administrativo."
                 return render_template("login.html", error=error)
+            if not subscription_allows_access(store, admin_user):
+                register_login_failure("admin", email)
+                register_admin_user_failed_attempt(store, email)
+                record_audit_event(
+                    store,
+                    "login_blocked",
+                    "subscription",
+                    admin_user.get("companyId", default_company_id(store)),
+                    "Intento de acceso con suscripcion pendiente o suspendida.",
+                    actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": admin_user.get("role", "")},
+                    metadata={"email": email},
+                )
+                save_store(store)
+                error = "La suscripcion de la empresa esta pendiente o suspendida. Activa el plan mensual para ingresar."
+                return render_template("login.html", error=error), 403
             reset_login_attempts("admin", email)
             start_admin_session(admin_user)
             admin_user["lastLoginAt"] = utc_now()
@@ -2918,7 +3263,7 @@ def login():
             save_store(store)
             if session.get("must_change_password"):
                 return redirect(url_for("account_password"))
-            return redirect(request.args.get("next") or url_for("dashboard"))
+            return redirect(normalize_admin_next_url(request.args.get("next")))
 
         register_login_failure("admin", email)
         register_admin_user_failed_attempt(store, email)
@@ -2934,6 +3279,146 @@ def login():
         error = "Credenciales invalidas."
 
     return render_template("login.html", error=error)
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    store = load_store()
+    error = ""
+    success = ""
+
+    if request.method == "POST":
+        market_country = normalize_market_country(request.form.get("marketCountry", "CL"))
+        profile = market_profile(market_country)
+        pricing = plan_pricing_for_country(market_country)
+        company_name = sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False)
+        legal_name = sanitize_text(request.form.get("legalName", ""), max_length=180, allow_newlines=False)
+        tax_id = sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False)
+        owner_name = sanitize_text(request.form.get("ownerName", ""), max_length=160, allow_newlines=False)
+        owner_email = request.form.get("ownerEmail", "").strip().lower()
+        support_phone = sanitize_text(request.form.get("supportPhone", ""), max_length=80, allow_newlines=False)
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirmPassword", "")
+
+        if not company_name:
+            error = "El nombre de la empresa es obligatorio."
+        elif not owner_name:
+            error = "El nombre del administrador es obligatorio."
+        elif not owner_email:
+            error = "El correo del administrador es obligatorio."
+        elif admin_user_by_email(store, owner_email):
+            error = "Ya existe un usuario registrado con ese correo."
+        elif password != confirm_password:
+            error = "Las contrasenas no coinciden."
+        else:
+            password_issues = password_errors(password)
+            if password_issues:
+                error = " ".join(password_issues)
+
+        if not error:
+            now = utc_now()
+            company_id = next_id("company", company_name)
+            company = {
+                "id": company_id,
+                "name": company_name,
+                "slug": category_slug(company_name),
+                "legalName": legal_name or company_name,
+                "taxId": tax_id,
+                "country": profile["code"],
+                "currency": profile["localCurrency"],
+                "baseCurrency": profile["salesCurrency"],
+                "marketProfile": profile,
+                "taxLabel": profile["taxLabel"],
+                "planCurrency": pricing["currency"],
+                "planPrice": pricing["price"],
+                "status": "pending_payment",
+                "planId": SAAS_PLAN_ID,
+                "planName": SAAS_PLAN_NAME,
+                "planPriceClp": pricing["priceClp"],
+                "ownerName": owner_name,
+                "ownerEmail": owner_email,
+                "supportPhone": support_phone,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            subscription = {
+                "id": next_id("sub", company_id),
+                "companyId": company_id,
+                "planId": SAAS_PLAN_ID,
+                "planName": SAAS_PLAN_NAME,
+                "status": "pending_payment",
+                "billingPeriod": "monthly",
+                "country": profile["code"],
+                "currency": pricing["currency"],
+                "price": pricing["price"],
+                "priceClp": pricing["priceClp"],
+                "currentPeriodStart": "",
+                "currentPeriodEnd": "",
+                "trialEndsAt": "",
+                "lastPaymentAt": "",
+                "nextPaymentAt": "",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            admin_user = {
+                "id": next_id("admin", owner_email),
+                "companyId": company_id,
+                "firstName": owner_name,
+                "lastName": "",
+                "name": owner_name,
+                "email": owner_email,
+                "role": "super_admin",
+                "status": "active",
+                "passwordHash": generate_password_hash(password),
+                "mustChangePassword": False,
+                "sellerCode": "",
+                "sellerZone": "",
+                "sellerTerritory": "",
+                "sellerSupervisor": "",
+                "phone": support_phone,
+                "mobileAccessEnabled": False,
+                "internalNotes": "Administrador creado desde registro SaaS.",
+                "commissionRatePercent": 0,
+                "salesGoalUsd": 0,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            store.setdefault("companies", []).append(company)
+            store.setdefault("subscriptions", []).append(subscription)
+            store.setdefault("admin_users", []).append(admin_user)
+            record_create_event(
+                store,
+                "company",
+                company_id,
+                f"Empresa SaaS registrada: {company_name}.",
+                company,
+                actor={"id": owner_email, "name": owner_name, "role": "signup"},
+            )
+            record_create_event(
+                store,
+                "admin_user",
+                admin_user["id"],
+                f"Administrador de empresa registrado: {owner_email}.",
+                admin_user,
+                actor={"id": owner_email, "name": owner_name, "role": "signup"},
+            )
+            save_store(store)
+            success = "Empresa registrada. El acceso quedara habilitado cuando FVENTAS confirme el pago mensual."
+
+    selected_market_country = normalize_market_country(request.form.get("marketCountry", "CL"))
+    selected_market_profile = market_profile(selected_market_country)
+    selected_plan = plan_pricing_for_country(selected_market_country)
+    return render_template(
+        "signup.html",
+        error=error,
+        success=success,
+        plan_name=SAAS_PLAN_NAME,
+        plan_price_display=selected_plan["display"],
+        selected_market_country=selected_market_country,
+        selected_market_profile=selected_market_profile,
+        market_country_options=MARKET_COUNTRY_OPTIONS,
+        market_profiles=MARKET_PROFILES,
+    )
 
 
 @app.get("/logout")
@@ -3007,6 +3492,26 @@ def account_password():
     )
 
 
+@app.get("/")
+def landing():
+    default_plan = plan_pricing_for_country("CL")
+    return render_template(
+        "landing.html",
+        plan_name=SAAS_PLAN_NAME,
+        plan_price_display=default_plan["display"],
+        market_country_options=MARKET_COUNTRY_OPTIONS,
+        market_profiles=MARKET_PROFILES,
+    )
+
+
+@app.get("/dashboard/perfil")
+@app.get("/dashboard/profile")
+@app.get("/perfil")
+@app.get("/profile")
+def account_profile_alias():
+    return redirect(url_for("account_password"))
+
+
 def business_settings(store: dict | None = None) -> dict:
     try:
         active_store = store if store is not None else load_store()
@@ -3015,8 +3520,197 @@ def business_settings(store: dict | None = None) -> dict:
         return {}
 
 
+def normalize_currency_code(value: str | None, default: str = "USD") -> str:
+    code = sanitize_text(value or "", max_length=8, allow_newlines=False).upper()
+    code = re.sub(r"[^A-Z]", "", code)
+    return code[:3] or default
+
+
+def normalize_market_country(value: str | None, default: str = "CL") -> str:
+    code = sanitize_text(value or default, max_length=10, allow_newlines=False).upper()
+    return code if code in MARKET_PROFILES else "OTHER"
+
+
+def market_profile(country_code: str | None = None) -> dict:
+    return copy.deepcopy(MARKET_PROFILES[normalize_market_country(country_code)])
+
+
+def market_profile_from_settings(settings: dict | None = None) -> dict:
+    data = settings or {}
+    return market_profile(data.get("marketCountry") or data.get("country") or "CL")
+
+
+def plan_pricing_for_country(country_code: str | None = None) -> dict:
+    profile = market_profile(country_code)
+    currency = normalize_currency_code(profile.get("planCurrency"), "CLP")
+    price = safe_float(profile.get("planPrice"), SAAS_PLAN_PRICE_CLP)
+    return {
+        "currency": currency,
+        "price": price,
+        "priceClp": price if currency == "CLP" else 0,
+        "display": money_currency(price, currency),
+        "profile": profile,
+    }
+
+
+def currency_context(store: dict | None = None) -> dict:
+    settings = business_settings(store)
+    profile = market_profile_from_settings(settings)
+    sales_currency = normalize_currency_code(
+        settings.get("salesCurrency") or settings.get("primaryCurrency"),
+        profile.get("salesCurrency", "USD"),
+    )
+    local_currency = normalize_currency_code(
+        settings.get("localCurrency") or settings.get("referenceCurrency"),
+        profile.get("localCurrency", "CLP"),
+    )
+    rate = safe_float(
+        settings.get("exchangeRateBaseToLocal")
+        or settings.get("exchangeRateUsdClp")
+        or settings.get("exchangeRateUsdVes"),
+        profile.get("exchangeRateBaseToLocal", 950),
+    )
+    return {
+        "market_country": profile["code"],
+        "market_profile": profile,
+        "sales_currency": sales_currency,
+        "local_currency": local_currency,
+        "exchange_rate": rate,
+    }
+
+
+def active_market_profile_for_store(store: dict | None = None, company_id: str | None = None) -> dict:
+    source_store = store or load_store()
+    settings = business_settings(source_store)
+    company = get_company(source_store, company_id) if company_id else None
+    if company:
+        company_country = (
+            company.get("marketCountry")
+            or company.get("country")
+            or (company.get("marketProfile") or {}).get("code")
+        )
+        if company_country:
+            return market_profile(company_country)
+    return market_profile_from_settings(settings)
+
+
+def normalize_tax_id_for_market(value: str | None, profile: dict | None = None) -> str:
+    active_profile = profile or market_profile("CL")
+    if active_profile.get("code") == "CL":
+        return normalize_chilean_rut(value)
+    text = sanitize_text(value or "", max_length=40, allow_newlines=False).upper()
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"[^A-Z0-9.\-]", "", text)
+    core = re.sub(r"[^A-Z0-9]", "", text)
+    return text if len(core) >= 4 else ""
+
+
+def normalize_phone_for_market(value: str | None, profile: dict | None = None) -> str:
+    active_profile = profile or market_profile("CL")
+    if active_profile.get("code") == "CL":
+        return normalize_chilean_phone(value)
+    raw = str(value or "").strip()
+    digits = re.sub(r"\D+", "", raw)
+    prefix_digits = re.sub(r"\D+", "", str(active_profile.get("phonePrefix") or ""))
+    if not digits:
+        return ""
+    if not raw.startswith("+") and prefix_digits and not digits.startswith(prefix_digits):
+        digits = prefix_digits + digits
+    if len(digits) < 7 or len(digits) > 15:
+        return ""
+    return f"+{digits}"
+
+
+def normalize_location_for_market(
+    state: str | None,
+    city: str | None,
+    profile: dict | None = None,
+) -> tuple[str, str, str]:
+    active_profile = profile or market_profile("CL")
+    if active_profile.get("code") == "CL":
+        return normalize_chilean_location(state, city)
+    normalized_state = sanitize_text(state or "", max_length=120, allow_newlines=False)
+    normalized_city = sanitize_text(city or "", max_length=120, allow_newlines=False)
+    if not normalized_state:
+        return "", "", "Ingresa region, estado o provincia."
+    if not normalized_city:
+        return normalized_state, "", "Ingresa ciudad."
+    return normalized_state, normalized_city, ""
+
+
 def current_rate() -> float:
-    return safe_float(business_settings().get("exchangeRateUsdVes"), 38.5)
+    return currency_context().get("exchange_rate", 950)
+
+
+SUBSCRIPTION_ACTIVE_STATUSES = {"active", "trial"}
+SUBSCRIPTION_STATUS_OPTIONS = [
+    ("pending_payment", "Pendiente de pago"),
+    ("active", "Activa"),
+    ("trial", "Prueba"),
+    ("past_due", "Pago vencido"),
+    ("suspended", "Suspendida"),
+    ("cancelled", "Cancelada"),
+]
+
+
+def subscription_status_label(status: str) -> str:
+    return dict(SUBSCRIPTION_STATUS_OPTIONS).get(status, status or "Sin estado")
+
+
+def default_company_id(store: dict | None = None) -> str:
+    if store and store.get("companies"):
+        return store["companies"][0].get("id") or DEFAULT_COMPANY_ID
+    return DEFAULT_COMPANY_ID
+
+
+def get_company(store: dict, company_id: str) -> dict | None:
+    return next((company for company in store.get("companies", []) if company.get("id") == company_id), None)
+
+
+def current_company_id(store: dict | None = None) -> str:
+    if session.get("company_id"):
+        return session["company_id"]
+    if store is None:
+        store = load_store()
+    admin_user = current_admin_user(store)
+    return (admin_user or {}).get("companyId") or default_company_id(store)
+
+
+def current_company(store: dict | None = None) -> dict:
+    if store is None:
+        store = load_store()
+    company = get_company(store, current_company_id(store))
+    if company:
+        return company
+    if store.get("companies"):
+        return store["companies"][0]
+    return {"id": DEFAULT_COMPANY_ID, "name": "FVENTAS", "status": "active"}
+
+
+def current_subscription(store: dict | None = None, company_id: str | None = None) -> dict | None:
+    if store is None:
+        store = load_store()
+    company_id = company_id or current_company_id(store)
+    return next(
+        (subscription for subscription in store.get("subscriptions", []) if subscription.get("companyId") == company_id),
+        None,
+    )
+
+
+def subscription_allows_access(store: dict, admin_user: dict) -> bool:
+    if admin_user.get("role") == "platform_admin":
+        return True
+    company_id = admin_user.get("companyId") or default_company_id(store)
+    return company_subscription_allows_access(store, company_id)
+
+
+def company_subscription_allows_access(store: dict, company_id: str | None) -> bool:
+    company_id = company_id or default_company_id(store)
+    company = get_company(store, company_id)
+    if company and company.get("status") not in SUBSCRIPTION_ACTIVE_STATUSES:
+        return False
+    subscription = current_subscription(store, company_id)
+    return bool(subscription and subscription.get("status") in SUBSCRIPTION_ACTIVE_STATUSES)
 
 
 def payment_term_options(store: dict | None = None) -> list[int]:
@@ -3034,7 +3728,7 @@ def healthz():
     return jsonify(
         {
             "status": "ok",
-            "service": "wulkan-admin",
+            "service": "fventas-admin",
             "appVersion": app.config.get("APP_VERSION", "0.9.0"),
             "buildSha": app.config.get("BUILD_SHA", ""),
         }
@@ -3045,6 +3739,64 @@ def healthz():
 @app.get("/privacidad")
 def privacy_policy():
     return render_template("privacy_policy.html")
+
+
+@app.route("/account-deletion", methods=["GET", "POST"])
+@app.route("/delete-account", methods=["GET", "POST"])
+def account_deletion_page():
+    submitted = False
+    request_id = ""
+    message = ""
+    email = ""
+
+    if request.method == "POST":
+        store = load_store()
+        email = str(request.form.get("email") or "").strip().lower()
+        reason = str(request.form.get("reason") or "").strip()
+        subject_type, subject = find_mobile_account_for_deletion(store, email)
+        if subject:
+            request_id, _ = request_mobile_account_deletion(
+                store,
+                subject_type,
+                subject,
+                channel="web",
+                reason=reason,
+                actor={"id": email, "name": email, "role": "public"},
+            )
+        else:
+            request_id = next_id("acctdel", email or utc_now())
+            record_audit_event(
+                store,
+                "account_deletion_requested_unknown",
+                "account_deletion_request",
+                request_id,
+                "Solicitud publica de eliminacion para un correo no encontrado.",
+                actor={"id": email or request_id, "name": email or "solicitud publica", "role": "public"},
+                metadata={"email": email, "channel": "web", "reason": reason[:500]},
+                criticality="medium",
+            )
+            notify_admin(
+                store,
+                "Solicitud de eliminacion de cuenta",
+                f"Solicitud recibida para {email or 'correo no informado'}. Revisar manualmente.",
+                notification_type="warning",
+                priority="high",
+                module="admin_users",
+                entity_type="account_deletion_request",
+                entity_id=request_id,
+                dedupe_key=f"account-deletion-web-{email}",
+            )
+        save_store(store)
+        submitted = True
+        message = "Solicitud recibida. FVENTAS revisara la cuenta y te contactara si necesita validar informacion comercial."
+
+    return render_template(
+        "account_deletion.html",
+        submitted=submitted,
+        request_id=request_id,
+        message=message,
+        email=email,
+    )
 
 
 @app.get("/readyz")
@@ -3071,18 +3823,18 @@ def readyz():
 
 
 def mobile_token_serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="wulkan-mobile-client")
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="fventas-mobile-client")
 
 
 def document_token_serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="wulkan-document-download")
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="fventas-document-download")
 
 
 def mobile_device_id() -> str:
     payload = request.get_json(silent=True) if request.method in {"POST", "PUT", "PATCH"} else {}
     payload = payload or {}
     return (
-        request.headers.get("X-Wulkan-Device-Id")
+        request.headers.get("X-FVENTAS-Device-Id")
         or request.headers.get("X-Device-Id")
         or str(payload.get("deviceId") or "")
         or request_device_hash()
@@ -3135,8 +3887,69 @@ def mobile_token_payload() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def mobile_subscription_response(company_id: str | None):
+    return jsonify(
+        {
+            "meta": mobile_api_meta(),
+            "error": "La suscripcion de la empresa no esta activa.",
+            "code": "subscription_inactive",
+            "companyId": company_id or "",
+        }
+    ), 402
+
+
+def mobile_token_subject_company_id(store: dict, payload: dict) -> str:
+    if payload.get("type") == "admin":
+        user = find_by_id(store.get("admin_users", []), payload.get("adminUserId") or payload.get("id", ""))
+        return record_company_id(user, store) if user else ""
+    client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
+    return record_company_id(client, store) if client else ""
+
+
+@app.before_request
+def protect_mobile_company_subscription():
+    if not request.path.startswith(("/api/mobile/", "/api/v1/mobile/")):
+        return None
+    exempt_paths = {
+        "/api/mobile/auth/login",
+        "/api/v1/mobile/auth/login",
+        "/api/mobile/auth/recover-password",
+        "/api/v1/mobile/auth/recover-password",
+        "/api/v1/mobile/meta",
+        "/api/mobile/meta",
+        "/api/v1/mobile/locations/chile",
+    }
+    if request.path in exempt_paths:
+        return None
+
+    payload = mobile_token_payload()
+    if not payload:
+        return None
+
+    store = load_store()
+    company_id = mobile_token_subject_company_id(store, payload)
+    if company_id and not company_subscription_allows_access(store, company_id):
+        record_audit_event(
+            store,
+            "mobile_subscription_blocked",
+            "subscription",
+            company_id,
+            "Acceso movil bloqueado por suscripcion pendiente o suspendida.",
+            actor={
+                "id": payload.get("id", ""),
+                "name": payload.get("id", "app movil"),
+                "role": payload.get("role", "mobile"),
+            },
+            metadata={"path": request.path, "method": request.method},
+        )
+        save_store(store)
+        return mobile_subscription_response(company_id)
+
+    return None
+
+
 def mobile_token_matches_device(payload: dict) -> bool:
-    header_device = request.headers.get("X-Wulkan-Device-Id") or request.headers.get("X-Device-Id")
+    header_device = request.headers.get("X-FVENTAS-Device-Id") or request.headers.get("X-Device-Id")
     return not header_device or not payload.get("deviceId") or hmac.compare_digest(str(payload.get("deviceId")), header_device[:120])
 
 
@@ -3146,6 +3959,191 @@ def mobile_token_version_valid(subject: dict, payload: dict, version_key: str) -
     if "sessionVersion" not in payload:
         return not bool(app.config.get("REJECT_LEGACY_MOBILE_TOKENS"))
     return safe_int(payload.get("sessionVersion"), -1) == safe_int(subject.get(version_key), 0)
+
+
+ACCOUNT_DELETION_BLOCKING_STATUSES = {"requested", "processing", "approved", "deleted"}
+
+
+def mobile_account_deletion_status(subject: dict | None) -> str:
+    return str((subject or {}).get("deletionStatus") or "").strip().lower()
+
+
+def mobile_account_access_blocked(subject: dict | None) -> bool:
+    if not subject:
+        return True
+    mobile_access = str(subject.get("mobileAccess") or "").strip().lower()
+    return (
+        mobile_account_deletion_status(subject) in ACCOUNT_DELETION_BLOCKING_STATUSES
+        or mobile_access in {"deletion_requested", "blocked", "disabled"}
+        or subject.get("mobileAccessBlocked") is True
+    )
+
+
+def mobile_account_deletion_response():
+    return jsonify(
+        {
+            "meta": mobile_api_meta(),
+            "error": "La cuenta tiene una solicitud de eliminacion en proceso.",
+            "code": "account_deletion_requested",
+        }
+    )
+
+
+def account_deletion_public_label(subject_id: str) -> str:
+    suffix = str(subject_id or secrets.token_hex(4))[-8:].upper()
+    return f"Cuenta eliminada {suffix}"
+
+
+def complete_client_account_deletion(store: dict, client: dict) -> tuple[dict, list[dict]]:
+    """Anonymize mobile B2B access while preserving commercial traceability."""
+    before = copy.deepcopy(client)
+    now = utc_now()
+    actor_id = session.get("admin_user_id", "")
+    actor_name = session.get("admin_name", "FVENTAS Admin")
+    actor_role = current_admin_role()
+    public_label = account_deletion_public_label(client.get("id", ""))
+    deleted_email = f"deleted+{client.get('id', secrets.token_hex(4))}@deleted.fventas.local"
+
+    client.update(
+        {
+            "businessName": public_label,
+            "legalName": public_label,
+            "commercialName": public_label,
+            "contactName": "",
+            "administrativeContact": "",
+            "receivingContact": "",
+            "email": deleted_email,
+            "phone": "",
+            "whatsapp": "",
+            "taxId": "",
+            "address": "",
+            "fiscalAddress": "",
+            "shippingAddress": "",
+            "status": "inactive",
+            "collectionStatus": "without_debt",
+            "mobileAccess": "deleted",
+            "mobileAccessEnabled": False,
+            "mobileAccessBlocked": True,
+            "mustChangePassword": True,
+            "passwordHash": generate_password_hash(secrets.token_urlsafe(32)),
+            "creditEnabled": False,
+            "creditRequestStatus": "none",
+            "creditLimitUsd": 0,
+            "creditRequestedUsd": 0,
+            "deletionStatus": "deleted",
+            "deletionCompletedAt": now,
+            "deletionCompletedById": actor_id,
+            "deletionCompletedByName": actor_name,
+            "updatedAt": now,
+            "updatedVia": "admin",
+            "updatedById": actor_id,
+            "updatedByName": actor_name,
+            "updatedByRole": actor_role,
+            "mobileSessionVersion": safe_int(client.get("mobileSessionVersion"), 0) + 1,
+        }
+    )
+
+    changed_orders: list[dict] = []
+    for order in visible_records_for_current_company(store, "orders"):
+        if order.get("customerId") != client.get("id"):
+            continue
+        order["customerName"] = public_label
+        order["customerEmail"] = ""
+        order["customerPhone"] = ""
+        order["updatedAt"] = now
+        order["updatedByName"] = actor_name
+        customer = order.get("customer")
+        if isinstance(customer, dict):
+            customer["name"] = public_label
+            for key in ("email", "phone", "taxId", "rif", "address", "contactName"):
+                customer[key] = ""
+        changed_orders.append(order)
+
+    return before, changed_orders
+
+
+def find_mobile_account_for_deletion(store: dict, email: str) -> tuple[str, dict | None]:
+    normalized = email.strip().lower()
+    if not normalized:
+        return "", None
+    client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == normalized), None)
+    if client:
+        return "client", client
+    user = next((item for item in store.get("admin_users", []) if item.get("email", "").lower() == normalized), None)
+    if user:
+        return "admin_user", user
+    return "", None
+
+
+def request_mobile_account_deletion(
+    store: dict,
+    subject_type: str,
+    subject: dict,
+    *,
+    channel: str = "mobile",
+    reason: str = "",
+    actor: dict | None = None,
+) -> tuple[str, bool]:
+    now = utc_now()
+    request_id = subject.get("deletionRequestId") or next_id("acctdel", f"{subject_type}-{subject.get('id', '')}-{now}")
+    reason = str(reason or "").strip()[:500]
+    actor = actor or {
+        "id": subject.get("id", ""),
+        "name": subject.get("businessName") or subject.get("name") or subject.get("email", ""),
+        "role": subject.get("role", "client"),
+    }
+
+    if mobile_account_deletion_status(subject) in ACCOUNT_DELETION_BLOCKING_STATUSES:
+        record_audit_event(
+            store,
+            "account_deletion_requested_repeat",
+            subject_type,
+            subject.get("id", ""),
+            "Solicitud de eliminacion repetida sobre una cuenta ya bloqueada para revision.",
+            actor=actor,
+            metadata={"requestId": request_id, "channel": channel, "reason": reason},
+            criticality="medium",
+        )
+        return request_id, False
+
+    before = copy.deepcopy(subject)
+    subject["deletionStatus"] = "requested"
+    subject["deletionRequestId"] = request_id
+    subject["deletionRequestedAt"] = now
+    subject["deletionRequestChannel"] = channel
+    subject["deletionRequestReason"] = reason
+    subject["mobileAccess"] = "deletion_requested"
+    subject["mobileAccessEnabled"] = False
+    subject["updatedAt"] = now
+    if subject_type == "client":
+        subject["mobileSessionVersion"] = safe_int(subject.get("mobileSessionVersion"), 0) + 1
+    else:
+        bump_user_session_version(subject)
+
+    record_change_event(
+        store,
+        "account_deletion_requested",
+        subject_type,
+        subject.get("id", ""),
+        f"Solicitud de eliminacion de cuenta recibida via {channel}. Acceso movil bloqueado hasta revision operativa.",
+        before,
+        subject,
+        actor=actor,
+        criticality="high",
+    )
+    notify_admin(
+        store,
+        "Solicitud de eliminacion de cuenta",
+        f"{actor.get('name') or subject.get('email', '')} solicito eliminar o desactivar su cuenta.",
+        notification_type="warning",
+        priority="high",
+        module="admin_users" if subject_type == "admin_user" else "clients",
+        entity_type=subject_type,
+        entity_id=subject.get("id", ""),
+        dedupe_key=f"account-deletion-{subject_type}-{subject.get('id', '')}",
+        metadata={"requestId": request_id, "channel": channel},
+    )
+    return request_id, True
 
 
 def mobile_token_client_id() -> str:
@@ -3171,6 +4169,7 @@ def require_mobile_sales_user(store: dict) -> tuple[dict | None, object | None]:
         or user.get("status") != "active"
         or user.get("role") not in MOBILE_SALES_ROLES
         or user.get("mobileAccessEnabled", True) is False
+        or mobile_account_access_blocked(user)
         or not mobile_token_version_valid(user, payload, "sessionVersion")
     ):
         return None, jsonify({"error": "Token de vendedor requerido."})
@@ -3194,7 +4193,12 @@ def require_mobile_client(store: dict) -> tuple[dict | None, object | None]:
     if payload.get("type", "client") != "client":
         return None, jsonify({"error": "Token de cliente requerido."})
     client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
-    if not client or client.get("status") != "active" or not mobile_token_version_valid(client, payload, "mobileSessionVersion"):
+    if (
+        not client
+        or client.get("status") != "active"
+        or mobile_account_access_blocked(client)
+        or not mobile_token_version_valid(client, payload, "mobileSessionVersion")
+    ):
         return None, jsonify({"error": "Token movil invalido."})
     return client, None
 
@@ -3214,13 +4218,19 @@ def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | No
             and user.get("status") == "active"
             and user.get("role") in MOBILE_SALES_ROLES
             and user.get("mobileAccessEnabled", True) is not False
+            and not mobile_account_access_blocked(user)
             and mobile_token_version_valid(user, payload, "sessionVersion")
         ):
             return user, None
         return None, jsonify({"error": "Token movil invalido."})
 
     client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
-    if client and client.get("status") == "active" and mobile_token_version_valid(client, payload, "mobileSessionVersion"):
+    if (
+        client
+        and client.get("status") == "active"
+        and not mobile_account_access_blocked(client)
+        and mobile_token_version_valid(client, payload, "mobileSessionVersion")
+    ):
         return client, None
     return None, jsonify({"error": "Token movil invalido."})
 
@@ -3250,13 +4260,13 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
             "shippingAddress": enriched.get("shippingAddress", ""),
             "city": enriched.get("city", ""),
             "state": enriched.get("state", ""),
-            "country": enriched.get("country", "VE"),
+            "country": enriched.get("country", "CL"),
             "deliveryZone": enriched.get("deliveryZone", ""),
             "contactName": enriched.get("contactName", ""),
             "administrativeContact": enriched.get("administrativeContact", ""),
             "receivingContact": enriched.get("receivingContact", ""),
             "accountRole": "client",
-            "roleLabel": "Ferretero B2B",
+            "roleLabel": "Cliente B2B",
             "creditEnabled": enriched["creditEnabled"],
             "creditLimitUsd": enriched["creditLimitUsd"],
             "creditUsedUsd": enriched["creditUsedUsd"],
@@ -3287,6 +4297,8 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
                 "name": enriched.get("assignedSellerName", ""),
             },
             "mustChangePassword": bool(enriched.get("mustChangePassword")),
+            "deletionStatus": enriched.get("deletionStatus", ""),
+            "deletionRequestedAt": enriched.get("deletionRequestedAt", ""),
         },
     }
 
@@ -3300,7 +4312,7 @@ def mobile_admin_payload(user: dict, access_token: str) -> dict:
         "tokenType": "Bearer",
         "customer": {
             "id": user["id"],
-            "businessName": user.get("name", "Vendedor Wulkan"),
+            "businessName": user.get("name", "Vendedor FVENTAS"),
             "email": user.get("email", ""),
             "clientType": role,
             "accountRole": role,
@@ -3325,6 +4337,8 @@ def mobile_admin_payload(user: dict, access_token: str) -> dict:
                 "name": assigned_seller_name,
             },
             "mustChangePassword": bool(user.get("mustChangePassword")),
+            "deletionStatus": user.get("deletionStatus", ""),
+            "deletionRequestedAt": user.get("deletionRequestedAt", ""),
         },
     }
 
@@ -3337,7 +4351,7 @@ def mobile_api_meta() -> dict:
         "environment": app.config.get("ENV", "development"),
         "legacyPrefix": "/api/mobile",
         "versionedPrefix": "/api/v1/mobile",
-        "service": "wulkan-mobile-api",
+        "service": "fventas-mobile-api",
     }
 
 
@@ -3758,7 +4772,7 @@ def mobile_product_payload(product: dict) -> dict:
         "description": product.get("description", ""),
         "shortDescription": product.get("shortDescription", ""),
         "longDescription": product.get("longDescription", ""),
-        "brand": product.get("brand", "Wulkan"),
+        "brand": product.get("brand", "FVENTAS"),
         "model": product.get("model", ""),
         "unitOfSale": product.get("unitOfSale", "unidad"),
         "productType": product.get("productType", "machine"),
@@ -3777,7 +4791,7 @@ def mobile_product_payload(product: dict) -> dict:
         "badge": "Cotizar" if product.get("requiresQuote") else "Comprar",
         "requiresQuote": bool(product.get("requiresQuote")),
         "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
-        "compatibilityNotes": ["Validar compatibilidad con soporte Wulkan"],
+        "compatibilityNotes": ["Validar compatibilidad con soporte FVENTAS"],
         "imageUrl": product.get("imageUrl") or (product.get("imageUrls") or [""])[0],
         "imageUrls": product.get("imageUrls", []),
         "pdfUrls": product.get("pdfUrls", []),
@@ -3810,25 +4824,45 @@ def mobile_profile_from_token(store: dict) -> tuple[dict | None, object | None]:
             or user.get("status") != "active"
             or user.get("role") not in MOBILE_SALES_ROLES
             or user.get("mobileAccessEnabled", True) is False
+            or mobile_account_access_blocked(user)
             or not mobile_token_version_valid(user, token_payload, "sessionVersion")
         ):
             return None, jsonify({"error": "Token movil invalido."})
         return mobile_admin_payload(user, "")["customer"], None
 
     client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
-    if not client or client.get("status") != "active" or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion"):
+    if (
+        not client
+        or client.get("status") != "active"
+        or mobile_account_access_blocked(client)
+        or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion")
+    ):
         return None, jsonify({"error": "Cliente no encontrado."})
     return mobile_customer_payload(client, store, "")["customer"], None
 
 
+def mobile_user_company_id(store: dict, user: dict) -> str:
+    return str(user.get("companyId") or default_company_id(store))
+
+
+def mobile_company_records(store: dict, collection: str, user: dict) -> list[dict]:
+    company_id = mobile_user_company_id(store, user)
+    return [
+        record
+        for record in store.get(collection, [])
+        if record_company_id(record, store) == company_id
+    ]
+
+
 def seller_scope_clients(store: dict, user: dict) -> list[dict]:
+    clients = mobile_company_records(store, "clients", user)
     if user.get("role") != "sales":
-        return store.get("clients", [])
-    return [client for client in store.get("clients", []) if client.get("assignedSellerId") == user.get("id")]
+        return clients
+    return [client for client in clients if client.get("assignedSellerId") == user.get("id")]
 
 
 def seller_scope_orders(store: dict, user: dict) -> list[dict]:
-    orders = store.get("orders", [])
+    orders = mobile_company_records(store, "orders", user)
     if user.get("role") != "sales":
         return orders
     seller_id = user.get("id", "")
@@ -3841,7 +4875,7 @@ def seller_scope_orders(store: dict, user: dict) -> list[dict]:
 
 
 def seller_scope_quotes(store: dict, user: dict) -> list[dict]:
-    quotes = store.get("quotes", [])
+    quotes = mobile_company_records(store, "quotes", user)
     if user.get("role") != "sales":
         return quotes
     seller_id = user.get("id", "")
@@ -3854,7 +4888,7 @@ def seller_scope_quotes(store: dict, user: dict) -> list[dict]:
 
 
 def seller_scope_crm_records(store: dict, user: dict) -> list[dict]:
-    records = store.get("crm_records", [])
+    records = mobile_company_records(store, "crm_records", user)
     if user.get("role") != "sales":
         return records
     seller_id = user.get("id", "")
@@ -3867,7 +4901,7 @@ def seller_scope_crm_records(store: dict, user: dict) -> list[dict]:
 
 
 def can_mobile_seller_access_client(store: dict, user: dict, client_id: str) -> bool:
-    client = find_by_id(store.get("clients", []), client_id)
+    client = find_by_id(mobile_company_records(store, "clients", user), client_id)
     if not client:
         return False
     if user.get("role") != "sales":
@@ -3889,7 +4923,8 @@ def mobile_quote_payload(quote: dict) -> dict:
         "saleType": enriched.get("saleType", "cash"),
         "paymentTermDays": safe_int(enriched.get("paymentTermDays"), 0),
         "totalUsd": safe_float(enriched.get("totalUsd"), 0),
-        "totalVes": safe_float(enriched.get("totalVes"), 0),
+        "totalClp": safe_float(enriched.get("totalClp") or enriched.get("totalVes"), 0),
+        "totalVes": safe_float(enriched.get("totalVes") or enriched.get("totalClp"), 0),
         "itemsCount": len(enriched.get("items") or []),
         "validUntil": enriched.get("validUntil", ""),
         "createdAt": enriched.get("createdAt", ""),
@@ -3939,9 +4974,9 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
         "address": enriched.get("address", ""),
         "fiscalAddress": enriched.get("fiscalAddress", ""),
         "shippingAddress": enriched.get("shippingAddress", ""),
-        "country": enriched.get("country", "VE"),
+        "country": enriched.get("country", "CL"),
         "deliveryZone": enriched.get("deliveryZone", ""),
-        "clientType": enriched.get("clientType", "ferretero"),
+        "clientType": enriched.get("clientType", "b2b"),
         "clientCategory": enriched.get("clientCategory", "standard"),
         "priceList": enriched.get("priceList", "b2b"),
         "authorizedDiscountPercent": enriched.get("authorizedDiscountPercent", 0),
@@ -4009,7 +5044,7 @@ def mobile_seller_order_payload(order: dict, store: dict) -> dict:
 
 
 def enrich_product(product: dict) -> dict:
-    rate = safe_float(product.get("exchangeRateUsdVes"), current_rate())
+    rate = safe_float(product.get("exchangeRateUsdClp"), current_rate())
     price = safe_float(product.get("publicPriceUsd"), 0)
     original_price = safe_float(product.get("originalPriceUsd"), price)
     discount = safe_float(product.get("discountPercent"), 0)
@@ -4026,15 +5061,16 @@ def enrich_product(product: dict) -> dict:
         or ""
     )
     cost = safe_float(enriched.get("costReferenceUsd"), 0)
-    enriched["publicPriceVes"] = round(price * rate, 2)
+    enriched["publicPriceClp"] = round(price * rate, 2)
+    enriched["publicPriceVes"] = enriched["publicPriceClp"]
     enriched["originalPriceUsd"] = original_price
     enriched["discountPercent"] = max(0.0, min(discount, 100.0))
     enriched["hasDiscount"] = enriched["discountPercent"] > 0 or original_price > price
-    enriched["exchangeRateUsdVes"] = rate
+    enriched["exchangeRateUsdClp"] = rate
     enriched["description"] = description
     enriched["shortDescription"] = enriched.get("shortDescription") or description[:140]
     enriched["longDescription"] = enriched.get("longDescription") or description
-    enriched["brand"] = enriched.get("brand") or "Wulkan"
+    enriched["brand"] = enriched.get("brand") or "FVENTAS"
     enriched["unitOfSale"] = enriched.get("unitOfSale") or "unidad"
     enriched["imageUrl"] = primary_image
     enriched["imageUrls"] = image_urls
@@ -4089,7 +5125,7 @@ def sanitize_url(value: str, *, allow_deeplink: bool = False, allow_local: bool 
         return ""
     if allow_local and url.startswith("/static/uploads/"):
         return url
-    if allow_deeplink and re.match(r"^wulkan://[a-zA-Z0-9/_?=&.%#:-]+$", url):
+    if allow_deeplink and re.match(r"^fventas://[a-zA-Z0-9/_?=&.%#:-]+$", url):
         return url
     if re.match(r"^https://[^\s<>'\"]+$", url, flags=re.IGNORECASE):
         return url
@@ -4320,7 +5356,7 @@ def duplicate_in_upload(seen: dict[str, int], value: str, row_number: int) -> st
 
 
 def purge_expired_import_drafts() -> None:
-    from db import SessionLocal, init_database
+    from core.db import SessionLocal, init_database
     from models import ImportDraft
 
     init_database()
@@ -4330,7 +5366,7 @@ def purge_expired_import_drafts() -> None:
 
 
 def create_import_draft(module: str, entity_type: str, rows: list[dict], result: dict) -> str:
-    from db import SessionLocal, init_database
+    from core.db import SessionLocal, init_database
     from models import ImportDraft
 
     init_database()
@@ -4357,7 +5393,7 @@ def create_import_draft(module: str, entity_type: str, rows: list[dict], result:
 
 
 def load_import_draft(module: str, draft_id: str):
-    from db import SessionLocal, init_database
+    from core.db import SessionLocal, init_database
     from models import ImportDraft
 
     init_database()
@@ -4376,7 +5412,7 @@ def load_import_draft(module: str, draft_id: str):
 
 
 def finish_import_draft(module: str, draft_id: str, status: str, result: dict | None = None) -> bool:
-    from db import SessionLocal, init_database
+    from core.db import SessionLocal, init_database
     from models import ImportDraft
 
     init_database()
@@ -4395,7 +5431,7 @@ def finish_import_draft(module: str, draft_id: str, status: str, result: dict | 
 
 
 def load_import_draft_record(module: str, draft_id: str) -> dict | None:
-    from db import SessionLocal, init_database
+    from core.db import SessionLocal, init_database
     from models import ImportDraft
 
     init_database()
@@ -4417,7 +5453,7 @@ def load_import_draft_record(module: str, draft_id: str) -> dict | None:
 
 
 def list_import_history(limit: int = 24) -> list[dict]:
-    from db import SessionLocal, init_database
+    from core.db import SessionLocal, init_database
     from models import ImportDraft
 
     init_database()
@@ -4450,17 +5486,27 @@ def list_import_history(limit: int = 24) -> list[dict]:
         return history
 
 
-def find_product_by_sku(store: dict, sku: str) -> dict | None:
+def find_product_by_sku(store: dict, sku: str, *, company_id: str | None = None) -> dict | None:
     normalized = sku.strip().upper()
-    return next((product for product in store.get("products", []) if product.get("sku", "").upper() == normalized), None)
+    products = store.get("products", [])
+    if company_id:
+        products = [product for product in products if record_company_id(product, store) == company_id]
+    elif not is_platform_scope():
+        products = visible_records_for_current_company(store, "products")
+    return next((product for product in products if product.get("sku", "").upper() == normalized), None)
 
 
-def find_category_by_name(store: dict, name: str) -> dict | None:
+def find_category_by_name(store: dict, name: str, *, company_id: str | None = None) -> dict | None:
     normalized = normalize_import_key(name)
+    categories = store.get("categories", [])
+    if company_id:
+        categories = [category for category in categories if record_company_id(category, store) == company_id]
+    elif not is_platform_scope():
+        categories = visible_records_for_current_company(store, "categories")
     return next(
         (
             category
-            for category in store.get("categories", [])
+            for category in categories
             if normalize_import_key(category.get("name", "")) == normalized
             or normalize_import_key(category.get("id", "")) == normalized
         ),
@@ -4472,14 +5518,19 @@ def category_slug(value: str) -> str:
     return normalize_import_key(value).replace("_", "-")
 
 
-def find_category_by_slug(store: dict, slug: str) -> dict | None:
+def find_category_by_slug(store: dict, slug: str, *, company_id: str | None = None) -> dict | None:
     normalized = category_slug(slug)
     if not normalized:
         return None
+    categories = store.get("categories", [])
+    if company_id:
+        categories = [category for category in categories if record_company_id(category, store) == company_id]
+    elif not is_platform_scope():
+        categories = visible_records_for_current_company(store, "categories")
     return next(
         (
             category
-            for category in store.get("categories", [])
+            for category in categories
             if category_slug(category.get("slug", "") or category.get("id", "")) == normalized
             or category_slug(category.get("name", "")) == normalized
         ),
@@ -4490,25 +5541,27 @@ def find_category_by_slug(store: dict, slug: str) -> dict | None:
 def find_category_reference(store: dict, value: str) -> dict | None:
     if not value:
         return None
-    return find_by_id(store.get("categories", []), value) or find_category_by_slug(store, value) or find_category_by_name(store, value)
+    return find_company_record(store, "categories", value) or find_category_by_slug(store, value) or find_category_by_name(store, value)
 
 
 def ensure_import_category(store: dict, category_id: str = "", category_name: str = "") -> dict:
-    category = find_by_id(store.get("categories", []), category_id) if category_id else None
+    company_id = current_company_id(store)
+    category = find_company_record(store, "categories", category_id) if category_id else None
     if category:
         return category
-    category = find_category_by_name(store, category_name) if category_name else None
+    category = find_category_by_name(store, category_name, company_id=company_id) if category_name else None
     if category:
         return category
     if category_name:
         category = {
             "id": next_id("cat", category_name),
+            "companyId": company_id,
             "name": category_name,
             "slug": category_slug(category_name),
             "description": "Categoria creada automaticamente por carga masiva.",
             "imageUrl": "",
             "icon": "bi-tags",
-            "sortOrder": len(store.get("categories", [])) + 1,
+            "sortOrder": len(visible_records_for_current_company(store, "categories")) + 1,
             "status": "active",
             "visibleInApp": True,
             "parentId": "",
@@ -4522,7 +5575,7 @@ def ensure_import_category(store: dict, category_id: str = "", category_name: st
 def find_seller_for_import(store: dict, row: dict) -> dict | None:
     seller_id = row_value(row, "assignedSellerId", "sellerId", "vendedor_id", "id_vendedor")
     if seller_id:
-        seller = find_by_id(store.get("admin_users", []), seller_id)
+        seller = find_company_record(store, "admin_users", seller_id)
         if seller:
             return seller
     seller_email = row_value(row, "sellerEmail", "vendedor_email", "email_vendedor")
@@ -4530,7 +5583,7 @@ def find_seller_for_import(store: dict, row: dict) -> dict | None:
         return next(
             (
                 user
-                for user in store.get("admin_users", [])
+                for user in visible_records_for_current_company(store, "admin_users")
                 if user.get("role") == "sales" and user.get("email", "").lower() == seller_email.lower()
             ),
             None,
@@ -4541,7 +5594,7 @@ def find_seller_for_import(store: dict, row: dict) -> dict | None:
         return next(
             (
                 user
-                for user in store.get("admin_users", [])
+                for user in visible_records_for_current_company(store, "admin_users")
                 if user.get("role") == "sales" and normalize_import_key(user.get("name", "")) == normalized
             ),
             None,
@@ -4559,6 +5612,7 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_categories: dict[str, int] = {}
     seen_slugs: dict[str, int] = {}
+    company_id = current_company_id(store)
     for row_number, row in enumerate(rows, start=2):
         name = row_value(row, "name", "nombre", "categoria", "category")
         if not name:
@@ -4575,11 +5629,14 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
             bulk_error(result, row_number, f"categoria {name}: slug {duplicate_slug_message}")
             continue
         category = (
-            find_by_id(store.get("categories", []), category_id)
+            find_company_record(store, "categories", category_id)
             if category_id
-            else find_category_by_slug(store, slug) or find_category_by_name(store, name)
+            else find_category_by_slug(store, slug, company_id=company_id) or find_category_by_name(store, name, company_id=company_id)
         )
-        if any(item.get("id") != (category or {}).get("id") and category_slug(item.get("slug", "")) == slug for item in store.get("categories", [])):
+        if any(
+            item.get("id") != (category or {}).get("id") and category_slug(item.get("slug", "")) == slug
+            for item in visible_records_for_current_company(store, "categories")
+        ):
             bulk_error(result, row_number, f"categoria {name}: slug ya existe.")
             continue
         status = row_value(row, "status", "estado", default=(category or {}).get("status", "active")) or "active"
@@ -4603,6 +5660,7 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
             visible_in_app = False
         raw_image_url = row_value(row, "imageUrl", "imagen", "imagen_url", "url_imagen", default=(category or {}).get("imageUrl", ""))
         payload = {
+            "companyId": record_company_id(category, store) if category else company_id,
             "name": name,
             "slug": slug,
             "description": row_value(row, "description", "descripcion", default=(category or {}).get("description", "")),
@@ -4617,7 +5675,7 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
         if category:
             before_name = category.get("name", "")
             category.update(payload)
-            for product in store.get("products", []):
+            for product in visible_records_for_current_company(store, "products"):
                 if product.get("categoryId") == category.get("id"):
                     product["categoryName"] = category["name"]
             result["updated"] += 1
@@ -4636,6 +5694,7 @@ def import_categories_rows(store: dict, rows: list[dict]) -> dict:
 def import_products_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_skus: dict[str, int] = {}
+    company_id = current_company_id(store)
     for row_number, row in enumerate(rows, start=2):
         sku = row_value(row, "sku", "codigo", "codigo_sku").upper()
         title = row_value(row, "title", "nombre", "producto", "nombre_comercial")
@@ -4658,7 +5717,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             float(current.get("originalPriceUsd") or public_price),
         )
         b2b_price = parse_import_float(
-            row_value(row, "b2bPriceUsd", "precio_b2b_usd", "precio_ferretero_usd"),
+            row_value(row, "b2bPriceUsd", "precio_b2b_usd"),
             float(current.get("b2bPriceUsd") or public_price),
         )
         discount = parse_import_float(
@@ -4740,10 +5799,11 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             continue
 
         payload = {
+            "companyId": record_company_id(existing, store) if existing else company_id,
             "sku": sku,
             "internalCode": row_value(row, "internalCode", "codigo_interno", default=current.get("internalCode", "")),
             "title": title,
-            "brand": row_value(row, "brand", "marca", default=current.get("brand", "Wulkan")) or "Wulkan",
+            "brand": row_value(row, "brand", "marca", default=current.get("brand", "FVENTAS")) or "FVENTAS",
             "model": row_value(row, "model", "modelo", default=current.get("model", "")),
             "unitOfSale": row_value(row, "unitOfSale", "unidad_venta", "unidad", default=current.get("unitOfSale", "unidad")) or "unidad",
             "shortDescription": row_value(row, "shortDescription", "descripcion_corta", default=current.get("shortDescription", "")),
@@ -4759,9 +5819,9 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             "b2bPriceUsd": b2b_price,
             "costReferenceUsd": cost_reference,
             "marginPercent": margin_percent,
-            "exchangeRateUsdVes": parse_import_float(
-                row_value(row, "exchangeRateUsdVes", "tasa_usd_ves", "tasa"),
-                float(current.get("exchangeRateUsdVes") or current_rate()),
+            "exchangeRateUsdClp": parse_import_float(
+                row_value(row, "exchangeRateUsdClp", "tasa_usd_local", "tasa_usd_clp", "tasa"),
+                float(current.get("exchangeRateUsdClp") or current_rate()),
             ),
             "stock": stock_quantity,
             "minimumStock": minimum_stock,
@@ -4996,31 +6056,34 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
 def import_clients_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     can_approve = role_allowed(CREDIT_APPROVAL_ROLES)
+    default_profile = active_market_profile_for_store(store)
     seen_emails: dict[str, int] = {}
     seen_tax_ids: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
         business_name = row_value(row, "businessName", "razon_social", "nombre_comercial", "cliente")
-        raw_tax_id = row_value(row, "taxId", "rif", "rut")
-        tax_id = normalize_venezuelan_rif(raw_tax_id)
+        row_country = normalize_market_country(row_value(row, "country", "pais", default=default_profile.get("code", "CL")))
+        row_profile = market_profile(row_country)
+        raw_tax_id = row_value(row, "taxId", "documento_fiscal", "rif", "rut")
+        tax_id = normalize_tax_id_for_market(raw_tax_id, row_profile)
         raw_phone = row_value(row, "phone", "telefono", "whatsapp")
         raw_whatsapp = row_value(row, "whatsapp", "telefono_whatsapp")
-        phone = normalize_venezuelan_phone(raw_phone)
-        whatsapp = normalize_venezuelan_phone(raw_whatsapp) if raw_whatsapp else phone
+        phone = normalize_phone_for_market(raw_phone, row_profile)
+        whatsapp = normalize_phone_for_market(raw_whatsapp, row_profile) if raw_whatsapp else phone
         raw_state = row_value(row, "state", "estado_ubicacion", "provincia")
         raw_city = row_value(row, "city", "ciudad")
-        normalized_state, normalized_city, location_error = normalize_venezuelan_location(raw_state, raw_city)
+        normalized_state, normalized_city, location_error = normalize_location_for_market(raw_state, raw_city, row_profile)
         if not email or not business_name:
             bulk_error(result, row_number, "cliente requiere nombre comercial y email.")
             continue
         if not tax_id:
-            bulk_error(result, row_number, f"{business_name}: RIF venezolano obligatorio. Ejemplo J-12345678-9.")
+            bulk_error(result, row_number, f"{business_name}: {row_profile.get('taxLabel', 'documento fiscal')} obligatorio. Ejemplo {row_profile.get('taxPlaceholder', 'Documento fiscal')}.")
             continue
         if not phone:
-            bulk_error(result, row_number, f"{business_name}: telefono venezolano obligatorio. Ejemplo 0412-1234567.")
+            bulk_error(result, row_number, f"{business_name}: telefono obligatorio. Ejemplo {row_profile.get('phonePlaceholder', '+56 9 1234 5678')}.")
             continue
         if raw_whatsapp and not whatsapp:
-            bulk_error(result, row_number, f"{business_name}: WhatsApp no tiene formato venezolano valido.")
+            bulk_error(result, row_number, f"{business_name}: WhatsApp no tiene un formato valido para {row_profile.get('label', 'el pais configurado')}.")
             continue
         if location_error:
             bulk_error(result, row_number, f"{business_name}: {location_error}")
@@ -5035,7 +6098,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             continue
         client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == email), None)
         if not client:
-            client = next((item for item in store.get("clients", []) if normalize_venezuelan_rif(item.get("taxId", "")).lower() == tax_id.lower()), None)
+            client = next((item for item in store.get("clients", []) if normalize_tax_id_for_market(item.get("taxId", ""), row_profile).lower() == tax_id.lower()), None)
         password = row_value(row, "password", "contrasena", "clave")
         if password and password_errors(password):
             bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
@@ -5072,7 +6135,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "phone": phone,
             "whatsapp": whatsapp,
             "email": email,
-            "clientType": row_value(row, "clientType", "tipo_cliente", default=(client or {}).get("clientType", "ferretero")) or "ferretero",
+            "clientType": row_value(row, "clientType", "tipo_cliente", default=(client or {}).get("clientType", "b2b")) or "b2b",
             "clientCategory": row_value(row, "clientCategory", "categoria_comercial", default=(client or {}).get("clientCategory", "standard")) or "standard",
             "priceList": row_value(row, "priceList", "lista_precios", default=(client or {}).get("priceList", "b2b")) or "b2b",
             "authorizedDiscountPercent": parse_import_float(row_value(row, "authorizedDiscountPercent", "descuento_autorizado"), float((client or {}).get("authorizedDiscountPercent") or 0)),
@@ -5080,7 +6143,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "address": row_value(row, "address", "direccion", default=(client or {}).get("address", "")),
             "fiscalAddress": row_value(row, "fiscalAddress", "direccion_fiscal", default=(client or {}).get("fiscalAddress", "")),
             "shippingAddress": row_value(row, "shippingAddress", "direccion_despacho", "direccion_entrega", default=(client or {}).get("shippingAddress", "")),
-            "country": row_value(row, "country", "pais", default=(client or {}).get("country", "VE")) or "VE",
+            "country": row_value(row, "country", "pais", default=(client or {}).get("country", row_profile.get("code", "CL"))) or row_profile.get("code", "CL"),
             "state": normalized_state,
             "city": normalized_city,
             "deliveryZone": row_value(row, "deliveryZone", "zona", default=(client or {}).get("deliveryZone", "")),
@@ -5103,7 +6166,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
             "updatedVia": "import",
             "updatedById": session.get("admin_user_id", ""),
-            "updatedByName": session.get("admin_name", "Admin Wulkan"),
+            "updatedByName": session.get("admin_name", "FVENTAS Admin"),
             "updatedByRole": current_admin_role(),
             "updatedAt": utc_now(),
         }
@@ -5153,6 +6216,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
 def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_titles: dict[str, int] = {}
+    company_id = current_company_id(store)
     for row_number, row in enumerate(rows, start=2):
         title = row_value(row, "title", "titulo", "banner")
         if not title:
@@ -5163,10 +6227,10 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
             bulk_error(result, row_number, f"banner {title}: {duplicate_message}")
             continue
         announcement_id = row_value(row, "id", "announcement_id", "banner_id")
-        announcement = find_by_id(store.get("announcements", []), announcement_id) if announcement_id else next(
+        announcement = find_company_record(store, "announcements", announcement_id) if announcement_id else next(
             (
                 item
-                for item in store.get("announcements", [])
+                for item in visible_records_for_current_company(store, "announcements")
                 if normalize_import_key(item.get("title", "")) == normalize_import_key(title)
             ),
             None,
@@ -5174,6 +6238,7 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
         raw_cta_url = row_value(row, "ctaUrl", "accion", "url_accion", default=(announcement or {}).get("ctaUrl", ""))
         raw_image_url = row_value(row, "imageUrl", "imagen", "imagen_url", default=(announcement or {}).get("imageUrl", ""))
         payload = {
+            "companyId": record_company_id(announcement, store) if announcement else company_id,
             "title": title,
             "body": row_value(row, "body", "mensaje", "descripcion", default=(announcement or {}).get("body", "")),
             "placement": row_value(row, "placement", "ubicacion", default=(announcement or {}).get("placement", "home")) or "home",
@@ -5206,8 +6271,9 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
 def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_assets: dict[str, int] = {}
+    company_id = current_company_id(store)
     for row_number, row in enumerate(rows, start=2):
-        title = row_value(row, "title", "titulo", "recurso", default="Activo Wulkan")
+        title = row_value(row, "title", "titulo", "recurso", default="Activo FVENTAS")
         raw_asset_url = row_value(row, "url", "assetUrl", "archivo_url", "imagen_url", "pdf_url")
         asset_url = sanitize_url(raw_asset_url)
         if not asset_url:
@@ -5220,27 +6286,34 @@ def import_media_assets_rows(store: dict, rows: list[dict]) -> dict:
             continue
         warn_invalid_urls(result, row_number, f"recurso {title}", [raw_asset_url])
         product_id = row_value(row, "productId", "producto_id", "id_producto")
-        product = find_by_id(store.get("products", []), product_id) if product_id else find_product_by_sku(
+        product = find_company_record(store, "products", product_id) if product_id else find_product_by_sku(
             store,
             row_value(row, "sku", "producto_sku", "sku_producto"),
+            company_id=company_id,
         )
         asset_type = normalize_import_key(row_value(row, "assetType", "tipo", default="image"))
         asset_type = "pdf" if asset_type in {"pdf", "ficha", "ficha_pdf"} else "image"
         duplicate = next(
             (
                 item
-                for item in store.get("media_assets", [])
+                for item in visible_records_for_current_company(store, "media_assets")
                 if item.get("url") == asset_url and item.get("productId", "") == (product or {}).get("id", product_id)
             ),
             None,
         )
         if duplicate:
-            duplicate.update({"title": title, "assetType": asset_type, "createdAt": duplicate.get("createdAt", utc_now())})
+            duplicate.update({
+                "title": title,
+                "assetType": asset_type,
+                "companyId": record_company_id(duplicate, store) or company_id,
+                "createdAt": duplicate.get("createdAt", utc_now()),
+            })
             result["updated"] += 1
             bulk_row(result, "updated", row_number, f"{title} - {asset_type}")
         else:
             asset = {
                 "id": next_id("asset", title),
+                "companyId": company_id,
                 "title": title,
                 "assetType": asset_type,
                 "productId": (product or {}).get("id", product_id),
@@ -5390,9 +6463,9 @@ def can_open_document(asset: dict | None, store: dict) -> bool:
     scope = normalize_document_scope(asset.get("subjectType") or ("product" if asset.get("productId") else "admin"))
     subject_id = asset.get("subjectId") or asset.get("productId", "")
     if scope == "client":
-        return can_access_client_record(find_by_id(store.get("clients", []), subject_id))
+        return can_access_client_record(find_company_record(store, "clients", subject_id), store)
     if scope == "order":
-        return can_access_order_record(find_order(store.get("orders", []), subject_id), store)
+        return can_access_order_record(find_company_record(store, "orders", subject_id), store)
     return scope in {"admin", "product"}
 
 
@@ -5406,7 +6479,7 @@ def resolve_document_subject(store: dict, scope: str, reference: str) -> tuple[s
         client = next(
             (
                 item
-                for item in store.get("clients", [])
+                for item in visible_records_for_current_company(store, "clients")
                 if item.get("id") == reference
                 or item.get("email", "").lower() == reference.lower()
                 or normalize_import_key(item.get("taxId", "")) == normalized
@@ -5418,10 +6491,20 @@ def resolve_document_subject(store: dict, scope: str, reference: str) -> tuple[s
             return client.get("id", ""), client.get("businessName", "Cliente")
 
     if scope == "product":
-        product = find_by_id(store.get("products", []), reference) or find_product_by_sku(store, reference)
+        product = find_company_record(store, "products", reference)
+        if not product and reference:
+            normalized_reference = normalize_import_key(reference)
+            product = next(
+                (
+                    item
+                    for item in visible_records_for_current_company(store, "products")
+                    if normalize_import_key(item.get("sku", "")) == normalized_reference
+                ),
+                None,
+            )
         if not product and reference:
             normalized = normalize_import_key(reference)
-            product = next((item for item in store.get("products", []) if normalize_import_key(item.get("title", "")) == normalized), None)
+            product = next((item for item in visible_records_for_current_company(store, "products") if normalize_import_key(item.get("title", "")) == normalized), None)
         if product:
             return product.get("id", ""), f"{product.get('sku', '')} - {product.get('title', 'Producto')}".strip(" -")
 
@@ -5430,7 +6513,7 @@ def resolve_document_subject(store: dict, scope: str, reference: str) -> tuple[s
         order = next(
             (
                 item
-                for item in store.get("orders", [])
+                for item in visible_records_for_current_company(store, "orders")
                 if item.get("id") == reference
                 or item.get("orderId") == reference
                 or item.get("orderNumber") == reference
@@ -5451,21 +6534,21 @@ def document_subject_options(store: dict) -> list[dict]:
             "label": "Clientes",
             "items": [
                 {"value": f"client:{client.get('id', '')}", "label": f"{client.get('businessName', 'Cliente')} - {client.get('email', '')}"}
-                for client in store.get("clients", [])
+                for client in visible_records_for_current_company(store, "clients")
             ],
         },
         {
             "label": "Productos",
             "items": [
                 {"value": f"product:{product.get('id', '')}", "label": f"{product.get('sku', '')} - {product.get('title', 'Producto')}"}
-                for product in store.get("products", [])
+                for product in visible_records_for_current_company(store, "products")
             ],
         },
         {
             "label": "Ordenes",
             "items": [
                 {"value": f"order:{order.get('id', '')}", "label": f"{order.get('orderId') or order.get('id', 'Orden')} - {order.get('customer', {}).get('name', '')}"}
-                for order in store.get("orders", [])
+                for order in visible_records_for_current_company(store, "orders")
             ],
         },
     ]
@@ -5479,13 +6562,15 @@ def parse_document_subject_ref(value: str) -> tuple[str, str]:
 
 
 def document_assets(store: dict) -> list[dict]:
-    products = {product.get("id"): product for product in store.get("products", [])}
-    clients = {client.get("id"): client for client in store.get("clients", [])}
-    orders = {order.get("id"): order for order in store.get("orders", [])}
+    products = {product.get("id"): product for product in visible_records_for_current_company(store, "products")}
+    clients = {client.get("id"): client for client in visible_records_for_current_company(store, "clients")}
+    orders = {order.get("id"): order for order in visible_records_for_current_company(store, "orders")}
     now = datetime.now(timezone.utc)
     assets = []
     for asset in reversed(store.get("media_assets", [])):
         if not document_is_asset(asset) or asset.get("status") == "deleted":
+            continue
+        if not can_access_company_record(asset, store):
             continue
         item = dict(asset)
         scope = normalize_document_scope(item.get("subjectType") or ("product" if item.get("productId") else "admin"))
@@ -5533,6 +6618,7 @@ def document_graph(assets: list[dict]) -> dict:
 def import_documents_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_documents: dict[str, int] = {}
+    company_id = current_company_id(store)
     for row_number, row in enumerate(rows, start=2):
         title = row_value(row, "title", "titulo", "documento")
         raw_document_url = row_value(row, "url", "documentUrl", "archivo_url", "documento_url")
@@ -5567,7 +6653,7 @@ def import_documents_rows(store: dict, rows: list[dict]) -> dict:
         existing = next(
             (
                 item
-                for item in store.get("media_assets", [])
+                for item in visible_records_for_current_company(store, "media_assets")
                 if document_is_asset(item)
                 and item.get("subjectType") == scope
                 and item.get("subjectId", "") == subject_id
@@ -5577,6 +6663,7 @@ def import_documents_rows(store: dict, rows: list[dict]) -> dict:
             None,
         )
         payload = {
+            "companyId": record_company_id(existing, store) if existing else company_id,
             "title": title,
             "assetType": "document",
             "type": "document",
@@ -5609,6 +6696,7 @@ def import_documents_rows(store: dict, rows: list[dict]) -> dict:
 def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     seen_services: dict[str, int] = {}
+    company_id = current_company_id(store)
     for row_number, row in enumerate(rows, start=2):
         name = row_value(row, "name", "nombre", "servicio")
         if not name:
@@ -5619,15 +6707,16 @@ def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
             bulk_error(result, row_number, f"servicio tecnico {name}: {duplicate_message}")
             continue
         technician_id = row_value(row, "id", "technician_id", "servicio_id")
-        technician = find_by_id(store.get("service_technicians", []), technician_id) if technician_id else next(
+        technician = find_company_record(store, "service_technicians", technician_id) if technician_id else next(
             (
                 item
-                for item in store.get("service_technicians", [])
+                for item in visible_records_for_current_company(store, "service_technicians")
                 if normalize_import_key(item.get("name", "")) == normalize_import_key(name)
             ),
             None,
         )
         payload = {
+            "companyId": record_company_id(technician, store) if technician else company_id,
             "name": name,
             "companyName": row_value(row, "companyName", "empresa", default=(technician or {}).get("companyName", "")),
             "contactName": row_value(row, "contactName", "contacto", default=(technician or {}).get("contactName", "")),
@@ -5761,29 +6850,37 @@ def order_actor() -> dict:
     }
 
 
-def normalize_order_items(store: dict, raw_items: list[dict]) -> tuple[list[dict], float, bool]:
+def normalize_order_items(store: dict, raw_items: list[dict], *, company_id: str = "") -> tuple[list[dict], float, bool]:
     items: list[dict] = []
     total_usd = 0.0
     requires_operator_review = False
+    if company_id:
+        product_pool = [
+            product
+            for product in store.get("products", [])
+            if record_company_id(product, store) == company_id
+        ]
+    else:
+        product_pool = visible_records_for_current_company(store, "products")
     for raw_item in raw_items:
         product_id = str(raw_item.get("productId") or "").strip()
         sku = str(raw_item.get("sku") or "").strip()
-        product = find_by_id(store.get("products", []), product_id) if product_id else None
+        product = find_by_id(product_pool, product_id) if product_id else None
         if not product and sku:
-            product = next((item for item in store.get("products", []) if item.get("sku") == sku), None)
+            product = next((item for item in product_pool if item.get("sku") == sku), None)
         quantity = int(raw_item.get("quantity") or 0)
         if quantity <= 0:
             continue
         if product:
             product_id = product.get("id", product_id)
             sku = product.get("sku", sku)
-            title = product.get("title", raw_item.get("title", sku))
+            title = product.get("title") or product.get("name") or raw_item.get("title") or sku
             unit_price = float(raw_item.get("unitPriceUsd") or product.get("b2bPriceUsd") or product.get("publicPriceUsd") or 0)
             image_url = raw_item.get("imageUrl") or product.get("imageUrl", "")
             requires_quote = bool(product.get("requiresQuote"))
             requires_validation = bool(product.get("requiresTechnicalValidation"))
         else:
-            title = str(raw_item.get("title") or sku or product_id or "Producto Wulkan")
+            title = str(raw_item.get("title") or sku or product_id or "Producto FVENTAS")
             unit_price = float(raw_item.get("unitPriceUsd") or 0)
             image_url = raw_item.get("imageUrl", "")
             requires_quote = bool(raw_item.get("requiresQuote"))
@@ -5821,12 +6918,22 @@ def build_commercial_order(
     client = find_by_id(store.get("clients", []), customer_id)
     if not client:
         return None, "Cliente no encontrado."
+    client_company_id = record_company_id(client, store)
+    actor_company_id = actor.get("companyId") or ""
+    if actor.get("role") in MOBILE_SALES_ROLES:
+        seller_user = find_by_id(store.get("admin_users", []), actor.get("id", ""))
+        actor_company_id = actor_company_id or record_company_id(seller_user, store) or current_company_id(store)
+        if actor_company_id and actor_company_id != client_company_id:
+            return None, "El cliente no pertenece a tu empresa."
+    if actor.get("role") == "client" and actor.get("id") != client.get("id"):
+        return None, "No puedes crear ordenes para otro cliente."
     if client.get("mustChangePassword") and actor.get("role") == "client":
         return None, "Debes cambiar la contrasena temporal antes de crear ordenes."
 
     items, calculated_total_usd, requires_operator_review = normalize_order_items(
         store,
         payload.get("items") or [],
+        company_id=client_company_id,
     )
     if not items:
         return None, "La orden no tiene productos validos."
@@ -5834,10 +6941,19 @@ def build_commercial_order(
     total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or calculated_total_usd)
     gross_usd = float(preview.get("grossUsd") or preview.get("subtotalUsd") or calculated_total_usd)
     discount_usd = max(0.0, float(preview.get("discountUsd") or max(gross_usd - total_usd, 0)))
-    exchange_rate = float(preview.get("exchangeRateUsdVes") or current_rate())
-    total_ves = float(preview.get("totalVes") or round(total_usd * exchange_rate, 2))
-    movements = store.get("credit_movements", [])
-    credit_before = credit_available(client, store.get("orders", []), movements)
+    exchange_rate = float(preview.get("exchangeRateUsdClp") or preview.get("exchangeRateUsdVes") or current_rate())
+    total_clp = float(preview.get("totalClp") or preview.get("totalVes") or round(total_usd * exchange_rate, 2))
+    company_orders = [
+        order_item
+        for order_item in store.get("orders", [])
+        if record_company_id(order_item, store) == client_company_id
+    ]
+    movements = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if record_company_id(movement, store) == client_company_id
+    ]
+    credit_before = credit_available(client, company_orders, movements)
 
     requested_sale_type = (
         payload.get("saleType")
@@ -5875,7 +6991,7 @@ def build_commercial_order(
         and actor.get("role") in MOBILE_SALES_ROLES
     ):
         seller_id = actor.get("id", "")
-        seller_name = actor.get("name", "Vendedor Wulkan")
+        seller_name = actor.get("name", "Vendedor FVENTAS")
     commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
     commission_usd = round(total_usd * commission_rate / 100, 2)
     commission_rule = business_settings(store).get("defaultCommissionRule") or "sale_generated"
@@ -5903,12 +7019,13 @@ def build_commercial_order(
         status = "credit_review"
     order = {
         "id": order_id,
+        "companyId": client_company_id,
         "orderId": order_id,
         "customerId": client["id"],
         "customer": {
             "id": client["id"],
-            "name": client.get("businessName", "Cliente Wulkan"),
-            "businessName": client.get("businessName", "Cliente Wulkan"),
+            "name": client.get("businessName", "Cliente FVENTAS"),
+            "businessName": client.get("businessName", "Cliente FVENTAS"),
             "taxId": client.get("taxId", ""),
             "phone": client.get("phone", ""),
             "sellerId": seller_id,
@@ -5919,7 +7036,9 @@ def build_commercial_order(
         "discountUsd": discount_usd,
         "netUsd": total_usd,
         "totalUsd": total_usd,
-        "totalVes": total_ves,
+        "totalClp": total_clp,
+        "totalVes": total_clp,
+        "exchangeRateUsdClp": exchange_rate,
         "exchangeRateUsdVes": exchange_rate,
         "saleType": sale_type,
         "paymentTermDays": payment_term_days,
@@ -5984,11 +7103,28 @@ def record_audit_event(
     detail: str = "",
     metadata: dict | None = None,
     actor: dict | None = None,
+    criticality: str | None = None,
 ) -> None:
     actor_payload = actor or {}
     actor_name = actor_payload.get("name") or session.get("admin_name", "Sistema")
+    metadata_payload = metadata or {}
+    metadata_after = metadata_payload.get("after") if isinstance(metadata_payload.get("after"), dict) else {}
+    metadata_before = metadata_payload.get("before") if isinstance(metadata_payload.get("before"), dict) else {}
+    company_id = (
+        actor_payload.get("companyId")
+        or metadata_payload.get("companyId")
+        or metadata_after.get("companyId")
+        or metadata_before.get("companyId")
+        or session.get("company_id", "")
+        or current_company_id(store)
+    )
+    audit_criticality = (criticality or str(metadata_payload.get("criticality") or "medium")).strip().lower()
+    if audit_criticality not in {"low", "medium", "high", "critical"}:
+        audit_criticality = "medium"
+    metadata_payload = {**metadata_payload, "criticality": audit_criticality}
     event = {
         "id": next_id("audit", f"{action}-{entity_type}-{entity_id or actor_name}"),
+        "companyId": company_id,
         "actorId": actor_payload.get("id") or session.get("admin_user_id", ""),
         "actorName": actor_name,
         "actorRole": actor_payload.get("role") or session.get("admin_role", ""),
@@ -6002,7 +7138,8 @@ def record_audit_event(
         "path": request.path,
         "method": request.method,
         "createdAt": utc_now(),
-        "metadata": audit_snapshot(metadata or {}),
+        "criticality": audit_criticality,
+        "metadata": audit_snapshot(metadata_payload),
     }
     store.setdefault("audit_events", []).append(event)
     store["audit_events"] = store["audit_events"][-1000:]
@@ -6062,6 +7199,7 @@ def record_change_event(
     before: dict | None,
     after: dict | None,
     actor: dict | None = None,
+    criticality: str | None = None,
 ) -> None:
     record_audit_event(
         store,
@@ -6075,6 +7213,7 @@ def record_change_event(
             "after": audit_snapshot(after or {}),
         },
         actor=actor,
+        criticality=criticality,
     )
 
 
@@ -6186,6 +7325,16 @@ def create_notification(
 ) -> dict:
     now = utc_now()
     metadata = dict(metadata or {})
+    company_id = infer_notification_company_id(
+        store,
+        recipient_type=recipient_type,
+        recipient_id=recipient_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        metadata=metadata,
+    )
+    if company_id:
+        metadata.setdefault("companyId", company_id)
     if dedupe_key:
         metadata["dedupeKey"] = dedupe_key
         for existing in store.setdefault("notifications", []):
@@ -6193,6 +7342,7 @@ def create_notification(
             if (
                 existing.get("status", "unread") == "unread"
                 and existing_payload.get("dedupeKey") == dedupe_key
+                and record_company_id(existing, store) == company_id
             ):
                 existing.update(
                     {
@@ -6214,7 +7364,7 @@ def create_notification(
 
     notification = {
         "id": next_id("ntf", f"{notification_type}-{recipient_type}-{recipient_id}-{recipient_role}-{entity_id}-{now}"),
-        "title": title.strip() or "Notificacion Wulkan",
+        "title": title.strip() or "Notificacion FVENTAS",
         "body": body.strip(),
         "notificationType": notification_type,
         "type": notification_type,
@@ -6224,6 +7374,7 @@ def create_notification(
         "recipientType": recipient_type,
         "recipientId": recipient_id,
         "recipientRole": recipient_role,
+        "companyId": company_id,
         "module": module,
         "entityType": entity_type,
         "entityId": entity_id,
@@ -6240,6 +7391,57 @@ def create_notification(
     notifications.append(notification)
     store["notifications"] = sorted(notifications, key=lambda item: item.get("createdAt", ""))[-1000:]
     return notification
+
+
+def infer_notification_company_id(
+    store: dict,
+    *,
+    recipient_type: str = "",
+    recipient_id: str = "",
+    entity_type: str = "",
+    entity_id: str = "",
+    metadata: dict | None = None,
+) -> str:
+    metadata = metadata or {}
+    for key in ("companyId", "company_id"):
+        if metadata.get(key):
+            return str(metadata[key])
+    for nested_key in ("after", "before", "record", "entity"):
+        nested = metadata.get(nested_key)
+        if isinstance(nested, dict):
+            nested_company = nested.get("companyId") or nested.get("company_id")
+            if nested_company:
+                return str(nested_company)
+    entity_collection_by_type = {
+        "order": "orders",
+        "client": "clients",
+        "seller": "admin_users",
+        "admin_user": "admin_users",
+        "product": "products",
+        "category": "categories",
+        "quote": "quotes",
+        "crm_record": "crm_records",
+        "document": "media_assets",
+        "media_asset": "media_assets",
+        "service_technician": "service_technicians",
+        "notification": "notifications",
+    }
+    collection = entity_collection_by_type.get(entity_type)
+    if collection and entity_id:
+        record = find_by_id(store.get(collection, []), entity_id)
+        if record:
+            return record_company_id(record, store)
+    if recipient_type in {"seller", "admin_user", "user"} and recipient_id:
+        user = find_by_id(store.get("admin_users", []), recipient_id)
+        if user:
+            return record_company_id(user, store)
+    if recipient_type == "client" and recipient_id:
+        client = find_by_id(store.get("clients", []), recipient_id)
+        if client:
+            return record_company_id(client, store)
+    if session.get("admin_authenticated"):
+        return current_company_id(store)
+    return default_company_id(store)
 
 
 def notify_admin(store: dict, title: str, body: str, **kwargs) -> dict:
@@ -6262,11 +7464,13 @@ def notify_client(store: dict, client_id: str, title: str, body: str, **kwargs) 
     return create_notification(store, title=title, body=body, recipient_type="client", recipient_id=client_id, channel="mobile", **kwargs)
 
 
-def notification_visible_to_current_admin(notification: dict) -> bool:
+def notification_visible_to_current_admin(store: dict, notification: dict) -> bool:
     if notification.get("status") == "archived" or notification_is_expired(notification):
         return False
+    if not can_access_company_record(notification, store):
+        return False
     role = current_admin_role()
-    if role == "super_admin":
+    if role in {"platform_admin", "super_admin"}:
         return True
     module = notification.get("module") or ""
     if module and module in ALL_MODULE_KEYS and not can_access_module(module):
@@ -6287,7 +7491,7 @@ def visible_admin_notifications(store: dict) -> list[dict]:
     notifications = [
         enrich_notification(notification)
         for notification in store.get("notifications", [])
-        if notification_visible_to_current_admin(notification)
+        if notification_visible_to_current_admin(store, notification)
     ]
     return sorted(notifications, key=lambda item: item.get("createdAt", ""), reverse=True)
 
@@ -6341,8 +7545,15 @@ def mobile_notification_payload(notification: dict) -> dict:
 
 def mobile_notifications_for_subject(store: dict, subject_type: str, subject_id: str, role: str = "") -> list[dict]:
     visible = []
+    subject_company_id = ""
+    if subject_type == "seller":
+        subject_company_id = record_company_id(find_by_id(store.get("admin_users", []), subject_id), store)
+    elif subject_type == "client":
+        subject_company_id = record_company_id(find_by_id(store.get("clients", []), subject_id), store)
     for notification in store.get("notifications", []):
         if notification.get("status") == "archived" or notification_is_expired(notification):
+            continue
+        if subject_company_id and record_company_id(notification, store) != subject_company_id:
             continue
         recipient_type = notification.get("recipientType", "")
         recipient_id = notification.get("recipientId", "")
@@ -6370,11 +7581,20 @@ def mobile_notification_subject(store: dict) -> tuple[str, str, str, object | No
 def generate_mobile_subject_notifications(store: dict, subject_type: str, subject_id: str, role: str = "") -> bool:
     before_count = len(store.setdefault("notifications", []))
     current_month = datetime.now(timezone.utc).strftime("%Y-%m")
-    orders = store.get("orders", [])
-    movements = store.get("credit_movements", [])
+    subject_user = find_by_id(store.get("admin_users", []), subject_id) if subject_type == "seller" else None
+    subject_client = find_by_id(store.get("clients", []), subject_id) if subject_type == "client" else None
+    subject_company_id = record_company_id(subject_user or subject_client, store)
+    orders = [
+        order for order in store.get("orders", [])
+        if record_company_id(order, store) == subject_company_id
+    ]
+    movements = [
+        movement for movement in store.get("credit_movements", [])
+        if record_company_id(movement, store) == subject_company_id
+    ]
 
     if subject_type == "seller":
-        user = find_by_id(store.get("admin_users", []), subject_id)
+        user = subject_user
         if not user:
             return False
         seller_snapshot = enrich_seller(store, user)
@@ -6389,8 +7609,12 @@ def generate_mobile_subject_notifications(store: dict, subject_type: str, subjec
                 module="sellers",
                 entity_type="seller",
                 entity_id=subject_id,
-                deep_link="wulkan://seller/home",
-                metadata={"month": current_month, "goalProgressPercent": seller_snapshot.get("goalProgressPercent", 0)},
+                deep_link="fventas://seller/home",
+                metadata={
+                    "companyId": subject_company_id,
+                    "month": current_month,
+                    "goalProgressPercent": seller_snapshot.get("goalProgressPercent", 0),
+                },
                 dedupe_key=f"seller-goal-{subject_id}-{current_month}",
             )
         for client in seller_scope_clients(store, user):
@@ -6409,8 +7633,8 @@ def generate_mobile_subject_notifications(store: dict, subject_type: str, subjec
                     module="clients",
                     entity_type="client",
                     entity_id=client_id,
-                    deep_link=f"wulkan://seller/clients/{client_id}",
-                    metadata={"clientId": client_id, "overdueBalanceUsd": overdue},
+                    deep_link=f"fventas://seller/clients/{client_id}",
+                    metadata={"companyId": subject_company_id, "clientId": client_id, "overdueBalanceUsd": overdue},
                     dedupe_key=f"seller-client-debt-{subject_id}-{client_id}-{current_month}",
                 )
             last_activity = enriched.get("lastOrderAt") or enriched.get("createdAt") or ""
@@ -6427,13 +7651,13 @@ def generate_mobile_subject_notifications(store: dict, subject_type: str, subjec
                         module="clients",
                         entity_type="client",
                         entity_id=client_id,
-                        deep_link=f"wulkan://seller/clients/{client_id}",
-                        metadata={"clientId": client_id, "inactiveDays": inactive_days},
+                        deep_link=f"fventas://seller/clients/{client_id}",
+                        metadata={"companyId": subject_company_id, "clientId": client_id, "inactiveDays": inactive_days},
                         dedupe_key=f"seller-client-inactive-{subject_id}-{client_id}-{current_month}",
                     )
 
     if subject_type == "client":
-        client = find_by_id(store.get("clients", []), subject_id)
+        client = subject_client
         if client:
             enriched = enrich_client(client, orders, movements)
             overdue = safe_float(enriched.get("overdueBalanceUsd"), 0)
@@ -6442,14 +7666,14 @@ def generate_mobile_subject_notifications(store: dict, subject_type: str, subjec
                     store,
                     subject_id,
                     "Saldo vencido",
-                    f"Tienes {money_usd(overdue)} vencidos. Contacta a tu vendedor Wulkan.",
+                    f"Tienes {money_usd(overdue)} vencidos. Contacta a tu vendedor FVENTAS.",
                     notification_type="overdue_balance",
                     priority="high",
                     module="credit",
                     entity_type="client",
                     entity_id=subject_id,
-                    deep_link="wulkan://credit",
-                    metadata={"clientId": subject_id, "overdueBalanceUsd": overdue},
+                    deep_link="fventas://credit",
+                    metadata={"companyId": subject_company_id, "clientId": subject_id, "overdueBalanceUsd": overdue},
                     dedupe_key=f"client-overdue-{subject_id}-{current_month}",
                 )
 
@@ -6459,7 +7683,7 @@ def generate_mobile_subject_notifications(store: dict, subject_type: str, subjec
 def notify_order_created(store: dict, order: dict) -> None:
     order_id = order.get("orderId") or order.get("id", "")
     customer = order.get("customer") or {}
-    customer_name = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
+    customer_name = customer.get("name") or customer.get("businessName") or "Cliente FVENTAS"
     total = money_usd(order.get("totalUsd") or order.get("netUsd") or 0)
     sale_label = sale_type_label(order.get("saleType", "cash"))
     status = order.get("status", "credit_review")
@@ -6475,7 +7699,7 @@ def notify_order_created(store: dict, order: dict) -> None:
         entity_type="order",
         entity_id=order_id,
         href=notification_url("orders", q=order_id),
-        deep_link=f"wulkan://orders/{order_id}",
+        deep_link=f"fventas://orders/{order_id}",
         metadata={"orderId": order_id, "saleType": order.get("saleType", ""), "status": status},
         dedupe_key=f"admin-order-created-{order_id}",
     )
@@ -6483,13 +7707,13 @@ def notify_order_created(store: dict, order: dict) -> None:
         store,
         order.get("customerId", ""),
         "Orden recibida",
-        f"Wulkan recibio tu orden {order_id} por {total}.",
+        f"FVENTAS recibio tu orden {order_id} por {total}.",
         notification_type="order_received",
         priority="normal",
         module="orders",
         entity_type="order",
         entity_id=order_id,
-        deep_link=f"wulkan://orders/{order_id}",
+        deep_link=f"fventas://orders/{order_id}",
         metadata={"orderId": order_id, "status": status},
         dedupe_key=f"client-order-received-{order_id}",
     )
@@ -6503,7 +7727,7 @@ def notify_order_created(store: dict, order: dict) -> None:
         module="orders",
         entity_type="order",
         entity_id=order_id,
-        deep_link=f"wulkan://seller/orders/{order_id}",
+        deep_link=f"fventas://seller/orders/{order_id}",
         metadata={"orderId": order_id, "customerId": order.get("customerId", "")},
         dedupe_key=f"seller-order-created-{order_id}",
     )
@@ -6543,7 +7767,7 @@ def notify_order_status_change(store: dict, order: dict, before_status: str) -> 
         module="orders",
         entity_type="order",
         entity_id=order_id,
-        deep_link=f"wulkan://orders/{order_id}",
+        deep_link=f"fventas://orders/{order_id}",
         metadata={"orderId": order_id, "beforeStatus": before_status, "status": after_status},
         dedupe_key=f"client-order-status-{order_id}-{after_status}",
     )
@@ -6557,7 +7781,7 @@ def notify_order_status_change(store: dict, order: dict, before_status: str) -> 
         module="orders",
         entity_type="order",
         entity_id=order_id,
-        deep_link=f"wulkan://seller/orders/{order_id}",
+        deep_link=f"fventas://seller/orders/{order_id}",
         metadata={"orderId": order_id, "beforeStatus": before_status, "status": after_status},
         dedupe_key=f"seller-order-status-{order_id}-{after_status}",
     )
@@ -6586,7 +7810,7 @@ def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
         module="credit",
         entity_type="client",
         entity_id=client_id,
-        deep_link="wulkan://credit",
+        deep_link="fventas://credit",
         metadata={"clientId": client_id, "decision": decision},
         dedupe_key=f"client-credit-{client_id}-{client.get('creditReviewedAt', '')}",
     )
@@ -6600,7 +7824,7 @@ def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
         module="credit",
         entity_type="client",
         entity_id=client_id,
-        deep_link=f"wulkan://seller/clients/{client_id}",
+        deep_link=f"fventas://seller/clients/{client_id}",
         metadata={"clientId": client_id, "decision": decision},
         dedupe_key=f"seller-credit-{client_id}-{client.get('creditReviewedAt', '')}",
     )
@@ -6662,13 +7886,13 @@ def notify_payment_registered(store: dict, order: dict, movement: dict) -> None:
         store,
         order.get("customerId", ""),
         "Abono recibido",
-        f"Wulkan registro {amount} en tu orden {order_id}.",
+        f"FVENTAS registro {amount} en tu orden {order_id}.",
         notification_type="payment_registered",
         priority="normal",
         module="orders",
         entity_type="order",
         entity_id=order_id,
-        deep_link=f"wulkan://orders/{order_id}",
+        deep_link=f"fventas://orders/{order_id}",
         metadata={"orderId": order_id, "movementId": movement.get("id", "")},
         dedupe_key=f"client-payment-{movement.get('id', '')}",
     )
@@ -6690,7 +7914,7 @@ def notify_commission_status(store: dict, order: dict, status: str) -> None:
         module="commissions",
         entity_type="order",
         entity_id=order_id,
-        deep_link=f"wulkan://seller/commissions/{order_id}",
+        deep_link=f"fventas://seller/commissions/{order_id}",
         metadata={"orderId": order_id, "commissionStatus": status},
         dedupe_key=f"seller-commission-{order_id}-{status}",
     )
@@ -6759,6 +7983,13 @@ def order_balance_usd(order: dict, movements: list[dict] | None = None) -> float
     return max(0.0, round(total - paid, 2))
 
 
+def order_release_block_reason(order: dict, movements: list[dict] | None = None) -> str:
+    balance = order_balance_usd(order, movements)
+    if balance > ORDER_PAYMENT_TOLERANCE_USD:
+        return f"Entrega bloqueada: saldo pendiente USD {balance:,.2f}. El cliente debe cancelar antes de recibir producto."
+    return ""
+
+
 def client_order_credit_used(
     orders: list[dict],
     client_id: str,
@@ -6825,7 +8056,7 @@ def enrich_client(
     enriched["updatedViaLabel"] = client_origin_label(updated_origin)
     enriched["createdById"] = enriched.get("createdById", "")
     enriched["createdByName"] = enriched.get("createdByName") or (
-        enriched.get("assignedSellerName") if origin == "seller_mobile" else "Admin Wulkan"
+        enriched.get("assignedSellerName") if origin == "seller_mobile" else "FVENTAS Admin"
     )
     enriched["createdByRole"] = enriched.get("createdByRole") or ("sales" if origin == "seller_mobile" else "admin")
     enriched["updatedById"] = enriched.get("updatedById") or enriched["createdById"]
@@ -6837,9 +8068,10 @@ def enrich_client(
     enriched["fiscalAddress"] = enriched.get("fiscalAddress") or enriched.get("address", "")
     enriched["shippingAddress"] = enriched.get("shippingAddress") or enriched.get("address", "")
     enriched["address"] = enriched.get("address") or enriched["shippingAddress"] or enriched["fiscalAddress"]
-    enriched["country"] = enriched.get("country") or "VE"
+    enriched["country"] = enriched.get("country") or "CL"
     enriched["administrativeContact"] = enriched.get("administrativeContact", "")
     enriched["receivingContact"] = enriched.get("receivingContact", "")
+    enriched["clientType"] = enriched.get("clientType") or "b2b"
     enriched["clientCategory"] = enriched.get("clientCategory") or "standard"
     enriched["priceList"] = enriched.get("priceList") or "b2b"
     enriched["authorizedDiscountPercent"] = float(enriched.get("authorizedDiscountPercent") or 0)
@@ -6850,6 +8082,7 @@ def enrich_client(
     enriched["creditLimitUsd"] = float(enriched.get("creditLimitUsd") or 0)
     enriched["creditUsedUsd"] = float(enriched.get("creditUsedUsd") or 0)
     enriched["creditRequestedUsd"] = float(enriched.get("creditRequestedUsd") or 0)
+    enriched["creditEnabled"] = bool(enriched.get("creditEnabled"))
     enriched["creditScore"] = int(float(enriched.get("creditScore") or 0))
     if enriched.get("creditRequestStatus") not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
         enriched["creditRequestStatus"] = "none"
@@ -7045,7 +8278,7 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["commissionObservation"] = enriched.get("commissionObservation", "")
     enriched["commissionHoldReason"] = enriched.get("commissionHoldReason", "")
     customer = enriched.get("customer") or {}
-    enriched["customerName"] = customer.get("name") or customer.get("businessName") or "Cliente Wulkan"
+    enriched["customerName"] = customer.get("name") or customer.get("businessName") or "Cliente FVENTAS"
     enriched["itemsCount"] = len(enriched.get("items") or [])
     enriched["statusHistory"] = sorted(enriched.get("statusHistory") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
     return enriched
@@ -7273,6 +8506,14 @@ def release_stock_for_order(store: dict, order: dict) -> None:
 def deliver_stock_for_order(store: dict, order: dict) -> bool:
     if order.get("inventoryStatus") == "delivered":
         return True
+    payment_block_reason = order_release_block_reason(order, store.get("credit_movements", []))
+    if payment_block_reason:
+        order["dispatchStatus"] = "payment_hold"
+        order["stockStatus"] = "payment_hold"
+        order["paymentHoldReason"] = payment_block_reason
+        order["currentOwner"] = "Cobranza"
+        order["updatedAt"] = utc_now()
+        return False
     if order.get("inventoryStatus") not in {"reserved", "review", "", None} and not order_has_sufficient_stock(store, order):
         order["inventoryStatus"] = "review"
         order["stockStatus"] = "insufficient_stock"
@@ -7320,7 +8561,7 @@ def save_upload(file_storage, folder: str = "library") -> str:
             s3_bucket=app.config.get("S3_BUCKET", ""),
             s3_region=app.config.get("S3_REGION", "us-east-1"),
             s3_endpoint_url=app.config.get("S3_ENDPOINT_URL", ""),
-            s3_prefix=app.config.get("S3_PREFIX", "wulkan"),
+            s3_prefix=app.config.get("S3_PREFIX", "fventas"),
             s3_acl=app.config.get("S3_ACL", ""),
             max_bytes=int(app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)),
         )
@@ -7329,6 +8570,7 @@ def save_upload(file_storage, folder: str = "library") -> str:
 
 
 def product_payload(store: dict, existing: dict | None = None) -> dict:
+    target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
     category_id = request.form.get("categoryId", "machinery-garden")
     categories = product_category_options(store) or [{"id": "uncategorized", "name": "Sin categoria"}]
     category = find_by_id(categories, category_id) or categories[0]
@@ -7355,11 +8597,16 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
 
     now = utc_now()
     visible_values = request.form.getlist("visibleInApp")
+    exchange_rate = safe_float(
+        request.form.get("exchangeRateUsdClp") or request.form.get("exchangeRateUsdVes"),
+        current_rate(),
+    )
     payload = {
+        "companyId": target_company_id,
         "sku": sku,
         "internalCode": sanitize_text(request.form.get("internalCode", ""), max_length=80, allow_newlines=False).upper(),
         "title": title,
-        "brand": sanitize_text(request.form.get("brand", "Wulkan"), max_length=120, allow_newlines=False) or "Wulkan",
+        "brand": sanitize_text(request.form.get("brand", "FVENTAS"), max_length=120, allow_newlines=False) or "FVENTAS",
         "model": sanitize_text(request.form.get("model", ""), max_length=120, allow_newlines=False),
         "unitOfSale": sanitize_text(request.form.get("unitOfSale", "unidad"), max_length=80, allow_newlines=False) or "unidad",
         "shortDescription": sanitize_text(request.form.get("shortDescription", ""), max_length=240, allow_newlines=False),
@@ -7378,7 +8625,8 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
         "b2bPriceUsd": safe_float(request.form.get("b2bPriceUsd"), 0),
         "costReferenceUsd": safe_float(request.form.get("costReferenceUsd"), 0),
         "marginPercent": safe_float(request.form.get("marginPercent"), 0),
-        "exchangeRateUsdVes": safe_float(request.form.get("exchangeRateUsdVes"), current_rate()),
+        "exchangeRateUsdClp": exchange_rate,
+        "exchangeRateUsdVes": exchange_rate,
         "stock": safe_int(request.form.get("stock"), 0),
         "minimumStock": safe_int(request.form.get("minimumStock"), 0),
         "maximumStock": safe_int(request.form.get("maximumStock"), 0),
@@ -7412,11 +8660,12 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
 
 
 def product_form_snapshot() -> dict:
+    exchange_rate = request.form.get("exchangeRateUsdClp") or request.form.get("exchangeRateUsdVes") or current_rate()
     return {
         "sku": sanitize_text(request.form.get("sku", ""), max_length=80, allow_newlines=False).upper(),
         "internalCode": sanitize_text(request.form.get("internalCode", ""), max_length=80, allow_newlines=False).upper(),
         "title": sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False),
-        "brand": sanitize_text(request.form.get("brand", "Wulkan"), max_length=120, allow_newlines=False),
+        "brand": sanitize_text(request.form.get("brand", "FVENTAS"), max_length=120, allow_newlines=False),
         "model": sanitize_text(request.form.get("model", ""), max_length=120, allow_newlines=False),
         "unitOfSale": sanitize_text(request.form.get("unitOfSale", "unidad"), max_length=80, allow_newlines=False),
         "shortDescription": sanitize_text(request.form.get("shortDescription", ""), max_length=240, allow_newlines=False),
@@ -7432,7 +8681,8 @@ def product_form_snapshot() -> dict:
         "b2bPriceUsd": request.form.get("b2bPriceUsd", ""),
         "costReferenceUsd": request.form.get("costReferenceUsd", ""),
         "marginPercent": request.form.get("marginPercent", ""),
-        "exchangeRateUsdVes": request.form.get("exchangeRateUsdVes", current_rate()),
+        "exchangeRateUsdClp": exchange_rate,
+        "exchangeRateUsdVes": exchange_rate,
         "stock": request.form.get("stock", 0),
         "minimumStock": request.form.get("minimumStock", 0),
         "maximumStock": request.form.get("maximumStock", 0),
@@ -7451,6 +8701,7 @@ def product_form_snapshot() -> dict:
 
 
 def product_form_error(store: dict, existing: dict | None = None) -> str:
+    target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
     sku = request.form.get("sku", "").strip().upper()
     status = request.form.get("status", "active")
     product_type = request.form.get("productType", "machine")
@@ -7476,6 +8727,7 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
     duplicated = any(
         product.get("sku", "").upper() == sku
         and (existing is None or product.get("id") != existing.get("id"))
+        and record_company_id(product, store) == target_company_id
         for product in store["products"]
     )
     if duplicated:
@@ -7508,19 +8760,24 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
 
 def enrich_category(category: dict, store: dict) -> dict:
     enriched = dict(category)
+    category_company_id = record_company_id(category, store)
     products = [
         product
         for product in store.get("products", [])
         if product.get("categoryId") == category.get("id")
         and product.get("status") != "deleted"
+        and record_company_id(product, store) == category_company_id
     ]
     children = [
         item
         for item in store.get("categories", [])
         if item.get("parentId") == category.get("id")
         and item.get("status") != "deleted"
+        and record_company_id(item, store) == category_company_id
     ]
     parent = find_by_id(store.get("categories", []), category.get("parentId", ""))
+    if parent and record_company_id(parent, store) != category_company_id:
+        parent = None
     enriched["slug"] = category_slug(enriched.get("slug") or enriched.get("name", ""))
     enriched["icon"] = enriched.get("icon") or "bi-tags"
     enriched["sortOrder"] = safe_int(enriched.get("sortOrder"), 0)
@@ -7539,6 +8796,7 @@ def enrich_category(category: dict, store: dict) -> dict:
 
 
 def category_payload(store: dict, existing: dict | None = None) -> dict:
+    target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
     name = sanitize_text(request.form.get("name", ""), max_length=140, allow_newlines=False)
     uploaded_image = save_upload(request.files.get("imageFile"), "categories")
     image_url = uploaded_image or sanitize_url(request.form.get("imageUrl", "")) or (existing or {}).get("imageUrl", "")
@@ -7549,8 +8807,10 @@ def category_payload(store: dict, existing: dict | None = None) -> dict:
     parent_id = request.form.get("parentId", "").strip()
     if existing and parent_id == existing.get("id"):
         parent_id = ""
+    parent = find_company_record(store, "categories", parent_id) if parent_id else None
     now = utc_now()
     payload = {
+        "companyId": target_company_id,
         "name": name,
         "slug": category_slug(request.form.get("slug", "").strip() or name),
         "description": sanitize_text(request.form.get("description", ""), max_length=500),
@@ -7559,7 +8819,7 @@ def category_payload(store: dict, existing: dict | None = None) -> dict:
         "sortOrder": max(0, safe_int(request.form.get("sortOrder"), 0)),
         "status": status,
         "visibleInApp": visible_in_app,
-        "parentId": parent_id if find_by_id(store.get("categories", []), parent_id) else "",
+        "parentId": parent_id if parent else "",
         "updatedAt": now,
     }
     if existing is None:
@@ -7587,20 +8847,34 @@ def category_form_snapshot() -> dict:
     }
 
 
-def category_descendant_ids(store: dict, category_id: str) -> set[str]:
+def category_descendant_ids(store: dict, category_id: str, company_id: str | None = None) -> set[str]:
+    if company_id is None:
+        category = find_by_id(store.get("categories", []), category_id)
+        company_id = record_company_id(category, store) if category else current_company_id(store)
     descendants: set[str] = set()
     pending = [category_id]
     while pending:
         parent_id = pending.pop()
         for category in store.get("categories", []):
-            if category.get("parentId") == parent_id and category.get("id") not in descendants:
+            if (
+                category.get("parentId") == parent_id
+                and category.get("id") not in descendants
+                and record_company_id(category, store) == company_id
+            ):
                 descendants.add(category.get("id", ""))
                 pending.append(category.get("id", ""))
     return descendants
 
 
-def product_count_for_categories(store: dict, category_ids: set[str]) -> int:
-    return sum(1 for product in store.get("products", []) if product.get("categoryId") in category_ids)
+def product_count_for_categories(store: dict, category_ids: set[str], company_id: str | None = None) -> int:
+    if company_id is None:
+        company_id = current_company_id(store)
+    return sum(
+        1
+        for product in store.get("products", [])
+        if product.get("categoryId") in category_ids
+        and record_company_id(product, store) == company_id
+    )
 
 
 def persist_category_action(
@@ -7665,7 +8939,7 @@ def persist_product_seed_action(
             except Exception:
                 app.logger.exception("No se pudo aplicar fallback puntual de productos base: %s", fallback_detail)
         push_admin_toast(
-            "No se pudieron crear los productos base Wulkan. Revisa los registros relacionados o intenta nuevamente.",
+            "No se pudieron crear los productos base FVENTAS. Revisa los registros relacionados o intenta nuevamente.",
             "danger",
             "Productos no aplicados",
         )
@@ -7713,7 +8987,50 @@ def persist_seller_action(
         return False
 
 
+def persist_client_action(
+    store: dict,
+    changed_clients: list[dict],
+    audit_events_start: int,
+    fallback_detail: str,
+    notifications_start: int | None = None,
+    deleted_client_ids: list[str] | None = None,
+    changed_orders: list[dict] | None = None,
+) -> bool:
+    try:
+        save_store(store)
+        return True
+    except Exception:
+        app.logger.exception("No se pudo sincronizar el store completo para clientes: %s", fallback_detail)
+        if use_sql_backend() and (changed_clients or deleted_client_ids or changed_orders):
+            try:
+                from sql_store import sync_admin_user_records, sync_client_records
+
+                sync_client_records(
+                    changed_clients,
+                    store.get("audit_events", [])[audit_events_start:],
+                    store.get("notifications", [])[notifications_start:] if notifications_start is not None else [],
+                    deleted_client_ids or [],
+                )
+                if changed_orders:
+                    sync_admin_user_records([], orders=changed_orders)
+                push_admin_toast(
+                    "El cambio se aplico en clientes, pero se detecto una inconsistencia pendiente en otra tabla.",
+                    "warning",
+                    "Cliente actualizado",
+                )
+                return True
+            except Exception:
+                app.logger.exception("No se pudo aplicar fallback puntual de clientes: %s", fallback_detail)
+        push_admin_toast(
+            "No se pudo guardar el cliente. Revisa los datos o intenta nuevamente.",
+            "danger",
+            "Accion no aplicada",
+        )
+        return False
+
+
 def category_form_error(store: dict, existing: dict | None = None) -> str:
+    target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
     name = request.form.get("name", "").strip()
     slug = category_slug(request.form.get("slug", "").strip() or name)
     status = request.form.get("status", "active")
@@ -7726,6 +9043,7 @@ def category_form_error(store: dict, existing: dict | None = None) -> str:
     duplicated = any(
         category_slug(category.get("slug", "") or category.get("name", "")) == slug
         and (existing is None or category.get("id") != existing.get("id"))
+        and record_company_id(category, store) == target_company_id
         for category in store.get("categories", [])
     )
     if duplicated:
@@ -7737,21 +9055,34 @@ def category_form_error(store: dict, existing: dict | None = None) -> str:
     if parent_id:
         if existing and parent_id == existing.get("id"):
             return "Una categoria no puede ser su propia categoria padre."
-        if existing and parent_id in category_descendant_ids(store, existing.get("id", "")):
+        if existing and parent_id in category_descendant_ids(store, existing.get("id", ""), target_company_id):
             return "La categoria padre seleccionada generaria una jerarquia circular."
-        if not find_by_id(store.get("categories", []), parent_id):
+        if not find_company_record(store, "categories", parent_id):
             return "Selecciona una categoria padre valida."
     return ""
 
 
-def create_wulkan_starter_categories(store: dict) -> dict:
+def create_fventas_starter_categories(store: dict) -> dict:
     created: list[dict] = []
     existing: list[dict] = []
     root_ids: dict[str, str] = {}
+    company_id = current_company_id(store)
 
     def create_or_get(entry: dict, parent_id: str = "", order: int = 0) -> dict:
         slug = category_slug(entry["slug"])
-        category = find_category_by_slug(store, slug) or find_category_by_name(store, entry["name"])
+        category = next(
+            (
+                item
+                for item in store.get("categories", [])
+                if item.get("status") != "deleted"
+                and record_company_id(item, store) == company_id
+                and (
+                    category_slug(item.get("slug", "") or item.get("name", "")) == slug
+                    or item.get("name", "").strip().lower() == entry["name"].strip().lower()
+                )
+            ),
+            None,
+        )
         if category and category.get("status") != "deleted":
             existing.append({"id": category.get("id", ""), "name": category.get("name", ""), "slug": slug})
             return category
@@ -7759,6 +9090,7 @@ def create_wulkan_starter_categories(store: dict) -> dict:
         now = utc_now()
         category = {
             "id": next_id("cat", slug),
+            "companyId": company_id,
             "name": entry["name"],
             "slug": slug,
             "description": entry.get("description", ""),
@@ -7775,7 +9107,7 @@ def create_wulkan_starter_categories(store: dict) -> dict:
         created.append({"id": category["id"], "name": category["name"], "slug": slug, "parentId": parent_id})
         return category
 
-    for index, root in enumerate(WULKAN_STARTER_CATEGORY_TREE, start=1):
+    for index, root in enumerate(FVENTAS_STARTER_CATEGORY_TREE, start=1):
         root_category = create_or_get(root, "", index * 10)
         root_ids[root["slug"]] = root_category.get("id", "")
         child_parent_id = root_ids[root["slug"]]
@@ -7794,22 +9126,31 @@ def create_wulkan_starter_categories(store: dict) -> dict:
     return {"created": created, "existing": existing}
 
 
-def create_wulkan_starter_products(store: dict) -> dict:
+def create_fventas_starter_products(store: dict) -> dict:
     created: list[dict] = []
     existing: list[dict] = []
     missing_categories: list[dict] = []
+    company_id = current_company_id(store)
 
-    category_result = create_wulkan_starter_categories(store)
+    category_result = create_fventas_starter_categories(store)
     categories_by_slug: dict[str, dict] = {}
-    for category in store.get("categories", []):
+    for category in visible_records_for_current_company(store, "categories"):
         if category.get("status") == "deleted":
             continue
         categories_by_slug[category_slug(category.get("slug", "") or category.get("name", ""))] = category
         categories_by_slug[category_slug(category.get("name", ""))] = category
 
-    for index, entry in enumerate(WULKAN_STARTER_PRODUCTS, start=1):
+    for index, entry in enumerate(FVENTAS_STARTER_PRODUCTS, start=1):
         sku = entry["sku"].strip().upper()
-        current = find_product_by_sku(store, sku)
+        current = next(
+            (
+                product
+                for product in visible_records_for_current_company(store, "products")
+                if product.get("status") != "deleted"
+                and normalize_import_key(product.get("sku", "")) == normalize_import_key(sku)
+            ),
+            None,
+        )
         if current:
             existing.append({"id": current.get("id", ""), "sku": sku, "title": current.get("title", "")})
             continue
@@ -7829,10 +9170,11 @@ def create_wulkan_starter_products(store: dict) -> dict:
         now = utc_now()
         product = {
             "id": next_id("prod", sku),
+            "companyId": company_id,
             "sku": sku,
             "internalCode": sku,
             "title": entry["title"],
-            "brand": "Wulkan",
+            "brand": "FVENTAS",
             "model": entry.get("model", sku),
             "unitOfSale": "unidad",
             "shortDescription": entry.get("description", ""),
@@ -7848,11 +9190,17 @@ def create_wulkan_starter_products(store: dict) -> dict:
             "b2bPriceUsd": round(safe_float(entry.get("b2bPrice"), public_price), 2),
             "costReferenceUsd": 0,
             "marginPercent": 0,
-            "exchangeRateUsdVes": current_rate(),
+            "exchangeRateUsdClp": current_rate(),
             "stock": stock,
+            "physicalStock": stock,
+            "availableStock": stock,
+            "reservedStock": 0,
+            "committedStock": 0,
             "minimumStock": max(1, min(3, stock)),
             "maximumStock": max(10, stock * 3),
             "reserved": 0,
+            "stockStatus": "available" if stock > 0 else "out",
+            "stockStatusLabel": stock_status_label("available" if stock > 0 else "out"),
             "status": "active",
             "imageUrl": image_url,
             "imageUrls": [image_url] if image_url else [],
@@ -7863,11 +9211,12 @@ def create_wulkan_starter_products(store: dict) -> dict:
             "requiresQuote": False,
             "requiresTechnicalValidation": entry.get("productType") == "machine" and public_price >= 1000,
             "visibleInApp": True,
+            "publishedInApp": True,
             "featured": index <= 8,
             "onSale": discount > 0,
             "rotationLast30Days": max(0, safe_int(entry.get("rotation"), 0)),
             "sourceUrl": entry.get("sourceUrl", ""),
-            "sourceName": "Avalon Group",
+            "sourceName": "Catalogo inicial FVENTAS",
             "createdAt": now,
             "updatedAt": now,
         }
@@ -7891,7 +9240,7 @@ def category_page_context(store: dict, error: str = "") -> dict:
     }
     categories = [
         enrich_category(category, store)
-        for category in store.get("categories", [])
+        for category in visible_records_for_current_company(store, "categories")
         if category.get("status") != "deleted"
     ]
     filtered = categories
@@ -7935,11 +9284,11 @@ def category_page_context(store: dict, error: str = "") -> dict:
         "metrics": metrics,
         "category_status_options": CATEGORY_STATUS_OPTIONS,
         "category_charts": {
-            "products": graphify_from_pairs(
+            "products": insights_from_pairs(
                 [(category.get("name", ""), float(category.get("productsCount") or 0)) for category in categories],
                 6,
             ),
-            "visibility": graphify_from_pairs(
+            "visibility": insights_from_pairs(
                 [
                     ("Visibles app", metrics["visible"]),
                     ("Ocultas", metrics["total"] - metrics["visible"]),
@@ -7960,7 +9309,7 @@ def product_category_options(store: dict) -> list[dict]:
     return sorted(
         [
             enrich_category(category, store)
-            for category in store.get("categories", [])
+            for category in visible_records_for_current_company(store, "categories")
             if category.get("status") != "deleted"
         ],
         key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", "")),
@@ -7981,8 +9330,15 @@ def credential_form_error(password: str, existing: dict | None = None) -> str:
 def admin_user_form_error(store: dict, existing: dict | None = None) -> str:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
+    requested_role = request.form.get("role", "operator")
     if not email:
         return "El email del usuario admin es obligatorio."
+    if requested_role not in WEB_ADMIN_ROLES or requested_role == "sales":
+        return "El rol seleccionado no es valido para panel administrativo."
+    if requested_role == "platform_admin" and current_admin_role() != "platform_admin":
+        return "Solo FVENTAS puede crear administradores de plataforma."
+    if existing and existing.get("role") == "platform_admin" and current_admin_role() != "platform_admin":
+        return "No puedes modificar administradores de plataforma."
     duplicated = any(
         str(user.get("email") or "").lower() == email
         and (existing is None or user.get("id") != existing.get("id"))
@@ -8017,12 +9373,25 @@ def seller_form_error(store: dict, existing: dict | None = None) -> str:
     )
     if duplicated:
         return f"Ya existe un usuario con el email {email}."
+    seller_code = sanitize_text(request.form.get("sellerCode", ""), max_length=80, allow_newlines=False).upper()
+    target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
+    duplicated_code = any(
+        user.get("role") == "sales"
+        and str(user.get("sellerCode") or "").upper() == seller_code
+        and record_company_id(user, store) == target_company_id
+        and (existing is None or user.get("id") != existing.get("id"))
+        for user in store.get("admin_users", [])
+    )
+    if seller_code and duplicated_code:
+        return "Ya existe un vendedor con ese codigo en esta empresa."
     return credential_form_error(password, existing)
 
 
 def client_form_error(store: dict, existing: dict | None = None) -> str:
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
+    target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
+    profile = active_market_profile_for_store(store, target_company_id)
     business_name = (
         request.form.get("businessName", "").strip()
         or request.form.get("commercialName", "").strip()
@@ -8030,36 +9399,42 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
     )
     raw_tax_id = request.form.get("taxId", "").strip()
     raw_phone = request.form.get("phone", "").strip()
-    normalized_tax_id = normalize_venezuelan_rif(raw_tax_id)
-    normalized_phone = normalize_venezuelan_phone(raw_phone)
-    normalized_state, _normalized_city, location_error = normalize_venezuelan_location(
+    normalized_tax_id = normalize_tax_id_for_market(raw_tax_id, profile)
+    normalized_phone = normalize_phone_for_market(raw_phone, profile)
+    normalized_state, _normalized_city, location_error = normalize_location_for_market(
         request.form.get("state", ""),
         request.form.get("city", ""),
+        profile,
     )
     if not business_name:
         return "La razon social o nombre comercial del cliente es obligatoria."
     if not email:
-        return "El email del cliente ferretero es obligatorio."
+        return "El email del cliente B2B es obligatorio."
     if not normalized_tax_id:
-        return "El RIF debe tener formato venezolano, por ejemplo J-12345678-9."
+        return f"El {profile.get('taxLabel', 'documento fiscal')} no es valido. Ejemplo: {profile.get('taxPlaceholder', 'ID fiscal')}."
     if not normalized_phone:
-        return "El telefono debe ser venezolano y puede ingresarse como 0412-1234567 o +58 412-1234567."
+        return f"El telefono no es valido. Ejemplo: {profile.get('phonePlaceholder', '+ codigo pais telefono')}."
     if location_error:
         return location_error
+    scoped_clients = [
+        client
+        for client in store.get("clients", [])
+        if record_company_id(client, store) == target_company_id
+    ]
     duplicated = any(
         str(client.get("email") or "").lower() == email
         and (existing is None or client.get("id") != existing.get("id"))
-        for client in store["clients"]
+        for client in scoped_clients
     )
     if duplicated:
         return f"Ya existe un cliente con el email {email}."
     duplicated_tax_id = any(
-        normalize_venezuelan_rif(client.get("taxId", "")).lower() == normalized_tax_id.lower()
+        normalize_tax_id_for_market(client.get("taxId", ""), profile).lower() == normalized_tax_id.lower()
         and (existing is None or client.get("id") != existing.get("id"))
-        for client in store["clients"]
+        for client in scoped_clients
     )
     if duplicated_tax_id:
-        return f"Ya existe un cliente con el RIF {normalized_tax_id}."
+        return f"Ya existe un cliente con el {profile.get('taxLabel', 'documento fiscal')} {normalized_tax_id}."
     return credential_form_error(password, existing)
 
 
@@ -8085,13 +9460,22 @@ def admin_user_payload(existing: dict | None = None) -> dict:
     if first_name or last_name:
         display_name = f"{first_name} {last_name}".strip()
     mobile_access_values = request.form.getlist("mobileAccessEnabled")
-    truthy_values = {"on", "1", "true", "yes", "si", "sí"}
+    truthy_values = {"on", "1", "true", "yes", "si", "sÃƒÂ­"}
+    requested_role = request.form.get("role", "operator")
+    if requested_role == "platform_admin" and current_admin_role() != "platform_admin":
+        requested_role = (existing or {}).get("role", "operator")
+    company_id = (
+        request.form.get("companyId")
+        if current_admin_role() == "platform_admin" and request.form.get("companyId")
+        else (existing or {}).get("companyId") or session.get("company_id") or DEFAULT_COMPANY_ID
+    )
     payload = {
+        "companyId": company_id,
         "firstName": first_name or (existing or {}).get("firstName", ""),
         "lastName": last_name or (existing or {}).get("lastName", ""),
         "name": display_name,
         "email": email,
-        "role": request.form.get("role", "operator"),
+        "role": requested_role,
         "status": request.form.get("status", "active"),
         "sellerCode": sanitize_text(request.form.get("sellerCode", ""), max_length=80, allow_newlines=False).upper(),
         "sellerZone": sanitize_text(request.form.get("sellerZone", ""), max_length=120, allow_newlines=False),
@@ -8175,20 +9559,33 @@ def client_payload(existing: dict | None = None) -> dict:
     password = request.form.get("password", "")
     now = utc_now()
     actor_id = session.get("admin_user_id", "")
-    actor_name = session.get("admin_name", "Admin Wulkan")
+    actor_name = session.get("admin_name", "FVENTAS Admin")
     actor_role = current_admin_role()
     active_store = load_store()
+    company_id = record_company_id(existing, active_store) if existing else current_company_id(active_store)
+    base_profile = active_market_profile_for_store(active_store, company_id=company_id)
+    requested_country = normalize_market_country(
+        request.form.get("country")
+        or (existing or {}).get("country")
+        or base_profile.get("code", "CL")
+    )
+    client_profile = market_profile(requested_country)
     seller_id = request.form.get("assignedSellerId", "").strip()
     current_seller_id, current_seller_name = current_seller_assignment(active_store)
     if current_seller_id:
         seller_id = current_seller_id
-    seller_name = seller_name_for(active_store, seller_id) if seller_id else current_seller_name
-    normalized_tax_id = normalize_venezuelan_rif(request.form.get("taxId", ""))
-    normalized_phone = normalize_venezuelan_phone(request.form.get("phone", ""))
-    normalized_whatsapp = normalize_venezuelan_phone(request.form.get("whatsapp", "")) or normalized_phone
-    normalized_state, normalized_city, _location_error = normalize_venezuelan_location(
+    seller = find_company_record(active_store, "admin_users", seller_id) if seller_id else None
+    if seller_id and (not seller or seller.get("role") != "sales"):
+        seller_id = ""
+        seller = None
+    seller_name = (seller or {}).get("name", "") or current_seller_name
+    normalized_tax_id = normalize_tax_id_for_market(request.form.get("taxId", ""), client_profile)
+    normalized_phone = normalize_phone_for_market(request.form.get("phone", ""), client_profile)
+    normalized_whatsapp = normalize_phone_for_market(request.form.get("whatsapp", ""), client_profile) or normalized_phone
+    normalized_state, normalized_city, _location_error = normalize_location_for_market(
         request.form.get("state", ""),
         request.form.get("city", ""),
+        client_profile,
     )
 
     approval_allowed = role_allowed(CREDIT_APPROVAL_ROLES)
@@ -8217,6 +9614,7 @@ def client_payload(existing: dict | None = None) -> dict:
             requested_credit_status = existing_credit_status
 
     payload = {
+        "companyId": company_id,
         "legalName": sanitize_text(request.form.get("legalName", ""), max_length=180, allow_newlines=False),
         "commercialName": sanitize_text(request.form.get("commercialName", ""), max_length=180, allow_newlines=False),
         "businessName": sanitize_text(request.form.get("businessName", ""), max_length=180, allow_newlines=False),
@@ -8227,7 +9625,7 @@ def client_payload(existing: dict | None = None) -> dict:
         "phone": normalized_phone,
         "whatsapp": normalized_whatsapp,
         "email": email,
-        "clientType": request.form.get("clientType", "ferretero"),
+        "clientType": request.form.get("clientType", "b2b"),
         "clientCategory": request.form.get("clientCategory", "standard"),
         "priceList": request.form.get("priceList", "b2b"),
         "authorizedDiscountPercent": float(request.form.get("authorizedDiscountPercent") or 0),
@@ -8235,7 +9633,7 @@ def client_payload(existing: dict | None = None) -> dict:
         "address": sanitize_text(request.form.get("address", ""), max_length=400),
         "fiscalAddress": sanitize_text(request.form.get("fiscalAddress", ""), max_length=400),
         "shippingAddress": sanitize_text(request.form.get("shippingAddress", ""), max_length=400),
-        "country": sanitize_text(request.form.get("country", "VE"), max_length=4, allow_newlines=False) or "VE",
+        "country": client_profile.get("code", "CL"),
         "state": normalized_state,
         "city": normalized_city,
         "deliveryZone": sanitize_text(request.form.get("deliveryZone", ""), max_length=120, allow_newlines=False),
@@ -8288,7 +9686,7 @@ def client_payload(existing: dict | None = None) -> dict:
         payload["id"] = existing["id"]
         payload["createdVia"] = existing.get("createdVia", "admin")
         payload["createdById"] = existing.get("createdById", "")
-        payload["createdByName"] = existing.get("createdByName") or existing.get("assignedSellerName") or "Admin Wulkan"
+        payload["createdByName"] = existing.get("createdByName") or existing.get("assignedSellerName") or "FVENTAS Admin"
         payload["createdByRole"] = existing.get("createdByRole") or ("sales" if payload["createdVia"] == "seller_mobile" else "admin")
         payload["createdAt"] = existing.get("createdAt", now)
         payload["passwordHash"] = (
@@ -8299,8 +9697,10 @@ def client_payload(existing: dict | None = None) -> dict:
 
 
 def clients_page_context(store: dict, error: str = "") -> dict:
+    scoped_orders = visible_records_for_current_company(store, "orders")
+    scoped_credit_movements = visible_records_for_current_company(store, "credit_movements")
     clients_list = [
-        enrich_client(client, store["orders"], store.get("credit_movements", []))
+        enrich_client(client, scoped_orders, scoped_credit_movements)
         for client in visible_clients_for_current_user(store)
     ]
     filters = {
@@ -8338,10 +9738,10 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         clients_list = [client for client in clients_list if client.get("creditStatus") == filters["credit"] or client.get("creditRequestStatus") == filters["credit"]]
     client_ids = {client.get("id", "") for client in clients_list}
     orders_by_client: dict[str, list[dict]] = {}
-    for order in sorted(store.get("orders", []), key=lambda item: item.get("createdAt", ""), reverse=True):
+    for order in sorted(scoped_orders, key=lambda item: item.get("createdAt", ""), reverse=True):
         if order.get("customerId") not in client_ids:
             continue
-        orders_by_client.setdefault(order.get("customerId", ""), []).append(enrich_order(order, store.get("credit_movements", [])))
+        orders_by_client.setdefault(order.get("customerId", ""), []).append(enrich_order(order, scoped_credit_movements))
     metrics = {
         "clients": len(clients_list),
         "active": sum(1 for client in clients_list if client.get("status") == "active"),
@@ -8366,7 +9766,7 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         "collection_status_options": COLLECTION_STATUS_OPTIONS,
         "credit_status_options": CREDIT_REQUEST_STATUS_OPTIONS,
         "credit_risk_options": CREDIT_RISK_OPTIONS,
-        "venezuela_locations": VENEZUELA_STATE_CITIES,
+        "chile_locations": CHILE_REGION_CITIES,
         "can_approve_credit": can_module_action("credit", "approve"),
         "can_edit_clients": can_module_action("clients", "edit"),
         "can_create_clients": can_module_action("clients", "create"),
@@ -8381,15 +9781,30 @@ def clients_page_context(store: dict, error: str = "") -> dict:
 def enrich_seller(store: dict, seller: dict) -> dict:
     enriched = dict(seller)
     seller_id = enriched.get("id", "")
-    movements = store.get("credit_movements", [])
+    seller_company_id = record_company_id(seller, store)
+    movements = [
+        movement
+        for movement in visible_records_for_current_company(store, "credit_movements")
+        if record_company_id(movement, store) == seller_company_id
+    ]
+    scoped_orders = [
+        order
+        for order in visible_records_for_current_company(store, "orders")
+        if record_company_id(order, store) == seller_company_id
+    ]
+    scoped_clients = [
+        client
+        for client in visible_records_for_current_company(store, "clients")
+        if record_company_id(client, store) == seller_company_id
+    ]
     seller_orders = [
         enrich_order(order, movements)
-        for order in store.get("orders", [])
+        for order in scoped_orders
         if order.get("sellerId") == seller_id
     ]
     seller_clients = [
-        enrich_client(client, store.get("orders", []), movements)
-        for client in store.get("clients", [])
+        enrich_client(client, scoped_orders, movements)
+        for client in scoped_clients
         if client.get("assignedSellerId") == seller_id
     ]
     now = datetime.now(timezone.utc)
@@ -8468,7 +9883,7 @@ def sellers_page_context(store: dict, error: str = "") -> dict:
     }
     all_sellers = [
         enrich_seller(store, seller)
-        for seller in store.get("admin_users", [])
+        for seller in visible_records_for_current_company(store, "admin_users")
         if seller.get("role") == "sales" and seller.get("status") != "deleted"
     ]
     sellers = all_sellers
@@ -8518,11 +9933,11 @@ def sellers_page_context(store: dict, error: str = "") -> dict:
         "seller_status_options": SELLER_STATUS_OPTIONS,
         "zones": sorted({seller.get("sellerZone", "") for seller in all_sellers if seller.get("sellerZone")}),
         "seller_charts": {
-            "sales_month": graphify_from_pairs(
+            "sales_month": insights_from_pairs(
                 [(seller.get("name", "Vendedor"), float(seller.get("salesMonthUsd") or 0)) for seller in sellers],
                 6,
             ),
-            "clients": graphify_from_pairs(
+            "clients": insights_from_pairs(
                 [(seller.get("name", "Vendedor"), float(seller.get("clientsCount") or 0)) for seller in sellers],
                 6,
             ),
@@ -8626,11 +10041,11 @@ def products_page_context(store: dict, error: str = "", include_bulk: bool = Tru
             ("replenishment", "Reposicion"),
         ],
         "product_charts": {
-            "stock": graphify_from_pairs(
+            "stock": insights_from_pairs(
                 [(product.get("sku", ""), float(product.get("availableStock") or 0)) for product in products],
                 6,
             ),
-            "media": graphify_from_pairs(
+            "media": insights_from_pairs(
                 [(product.get("sku", ""), float(product.get("mediaCount") or 0)) for product in products],
                 6,
             ),
@@ -8720,12 +10135,12 @@ def stock_page_context(store: dict, error: str = "", include_bulk: bool = True) 
             ("return", "Devolucion"),
         ],
         "stock_charts": {
-            "available": graphify_from_pairs(
+            "available": insights_from_pairs(
                 [(product.get("sku", ""), float(product.get("availableStock") or 0)) for product in products],
                 8,
             ),
-            "movement_types": graphify_from_pairs(list(movement_counts.items()), 6),
-            "critical": graphify_from_pairs(
+            "movement_types": insights_from_pairs(list(movement_counts.items()), 6),
+            "critical": insights_from_pairs(
                 [
                     (product.get("sku", ""), float(product.get("minimumStock") or 0) - float(product.get("availableStock") or 0))
                     for product in all_products
@@ -8761,14 +10176,14 @@ def assisted_order_payload_from_form() -> dict:
         "customerComment": request.form.get("customerComment", "").strip(),
         "internalComment": request.form.get("internalComment", "").strip(),
         "notes": (request.form.get("notes", "") or request.form.get("internalComment", "")).strip(),
-        "preview": {"exchangeRateUsdVes": current_rate()},
+        "preview": {"exchangeRateUsdClp": current_rate()},
     }
 
 
 def next_quote_number(client_name: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     suffix = secrets.token_hex(2).upper()
-    seed = re.sub(r"[^A-Za-z0-9]+", "", client_name or "Wulkan")[:8].upper()
+    seed = re.sub(r"[^A-Za-z0-9]+", "", client_name or "FVENTAS")[:8].upper()
     return f"COT-{stamp}-{seed}-{suffix}"
 
 
@@ -8808,7 +10223,7 @@ def quote_items_from_form(store: dict) -> tuple[list[dict], float, float, str]:
         quantity = safe_int(request.form.get(f"quantity{index}"), 0)
         if not product_id or quantity <= 0:
             continue
-        product = find_by_id(store.get("products", []), product_id)
+        product = find_company_record(store, "products", product_id)
         if not product:
             return [], 0.0, 0.0, f"Producto {index} no encontrado."
         unit_price = safe_float(
@@ -8825,7 +10240,7 @@ def quote_items_from_form(store: dict) -> tuple[list[dict], float, float, str]:
             {
                 "productId": product.get("id", ""),
                 "sku": product.get("sku", ""),
-                "title": product.get("title", "Producto Wulkan"),
+                "title": product.get("title", "Producto FVENTAS"),
                 "quantity": quantity,
                 "unitPriceUsd": unit_price,
                 "discountPercent": discount_percent,
@@ -8842,8 +10257,8 @@ def quote_items_from_form(store: dict) -> tuple[list[dict], float, float, str]:
 
 def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[dict | None, str]:
     client_id = request.form.get("clientId", "").strip()
-    client = find_by_id(store.get("clients", []), client_id)
-    if not can_access_client_record(client):
+    client = find_company_record(store, "clients", client_id)
+    if not can_access_client_record(client, store):
         return None, "Cliente no encontrado o fuera de tu alcance."
     items, gross_usd, total_usd, error = quote_items_from_form(store)
     if error:
@@ -8851,7 +10266,7 @@ def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[
     if not items:
         return None, "Agrega al menos un producto a la cotizacion."
 
-    exchange_rate = safe_float(request.form.get("exchangeRateUsdVes"), current_rate())
+    exchange_rate = safe_float(request.form.get("exchangeRateUsdClp"), current_rate())
     seller_id = client.get("assignedSellerId", "") if client else ""
     seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
     status = request.form.get("status", (existing or {}).get("status", "draft"))
@@ -8867,8 +10282,8 @@ def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[
     quote = copy.deepcopy(existing or {})
     now = utc_now()
     if not quote:
-        quote["id"] = next_id("quote", client.get("businessName", "wulkan"))
-        quote["quoteNumber"] = next_quote_number(client.get("businessName", "Wulkan"))
+        quote["id"] = next_id("quote", client.get("businessName", "fventas"))
+        quote["quoteNumber"] = next_quote_number(client.get("businessName", "FVENTAS"))
         quote["version"] = 1
         quote["versions"] = []
         quote["history"] = []
@@ -8877,6 +10292,7 @@ def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[
         quote["createdByName"] = session.get("admin_name", "Sistema")
     quote.update(
         {
+            "companyId": record_company_id(client, store),
             "clientId": client["id"],
             "client": {
                 "id": client["id"],
@@ -8894,7 +10310,9 @@ def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[
             "grossUsd": gross_usd,
             "discountUsd": round(max(0.0, gross_usd - total_usd), 2),
             "totalUsd": total_usd,
+            "totalClp": round(total_usd * exchange_rate, 2),
             "totalVes": round(total_usd * exchange_rate, 2),
+            "exchangeRateUsdClp": exchange_rate,
             "exchangeRateUsdVes": exchange_rate,
             "saleType": sale_type,
             "paymentTermDays": payment_term_days,
@@ -8922,7 +10340,7 @@ def enrich_quote(quote: dict) -> dict:
     enriched["statusLabel"] = quote_status_label(status)
     enriched["rawStatusLabel"] = quote_status_label(enriched.get("status", "draft"))
     enriched["saleTypeLabel"] = sale_type_label(enriched.get("saleType", "cash"))
-    enriched["clientName"] = (enriched.get("client") or {}).get("name", "Cliente Wulkan")
+    enriched["clientName"] = (enriched.get("client") or {}).get("name", "Cliente FVENTAS")
     enriched["sellerName"] = enriched.get("sellerName") or "Sin vendedor"
     enriched["itemsCount"] = sum(int(item.get("quantity") or 0) for item in enriched.get("items") or [])
     enriched["versions"] = sorted(enriched.get("versions") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
@@ -8962,21 +10380,25 @@ def quote_to_order_payload(quote: dict) -> dict:
             "grossUsd": quote.get("grossUsd", quote.get("totalUsd", 0)),
             "subtotalUsd": quote.get("totalUsd", 0),
             "totalUsd": quote.get("totalUsd", 0),
-            "totalVes": quote.get("totalVes", 0),
-            "exchangeRateUsdVes": quote.get("exchangeRateUsdVes", current_rate()),
+            "totalClp": quote.get("totalClp", quote.get("totalVes", 0)),
+            "totalVes": quote.get("totalVes", quote.get("totalClp", 0)),
+            "exchangeRateUsdClp": quote.get("exchangeRateUsdClp", quote.get("exchangeRateUsdVes", current_rate())),
+            "exchangeRateUsdVes": quote.get("exchangeRateUsdVes", quote.get("exchangeRateUsdClp", current_rate())),
         },
     }
 
 
 def quote_form_context(store: dict, quote: dict | None = None, error: str = "") -> dict:
+    scoped_orders = visible_records_for_current_company(store, "orders")
+    scoped_credit_movements = visible_records_for_current_company(store, "credit_movements")
     clients_list = [
-        enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+        enrich_client(client, scoped_orders, scoped_credit_movements)
         for client in visible_clients_for_current_user(store)
         if client.get("status") in {"active", "prospect", "review"}
     ]
     products = [
-        enrich_inventory_product(product, store.get("orders", []))
-        for product in store.get("products", [])
+        enrich_inventory_product(product, scoped_orders)
+        for product in visible_records_for_current_company(store, "products")
         if product.get("status") == "active"
     ]
     default_valid_until = (datetime.now(timezone.utc) + timedelta(days=7)).date().isoformat()
@@ -9033,7 +10455,7 @@ def quotes_page_context(store: dict, error: str = "") -> dict:
         seller_totals[seller] = seller_totals.get(seller, 0.0) + float(quote.get("totalUsd") or 0)
     sellers = [
         seller
-        for seller in store.get("admin_users", [])
+        for seller in visible_records_for_current_company(store, "admin_users")
         if seller.get("role") == "sales" and seller.get("status") != "deleted"
     ]
     metrics = {
@@ -9052,8 +10474,8 @@ def quotes_page_context(store: dict, error: str = "") -> dict:
         "seller_options": sorted(sellers, key=lambda item: item.get("name", "")),
         "client_options": sorted(visible_clients_for_current_user(store), key=lambda item: item.get("businessName", "")),
         "quote_charts": {
-            "status": graphify_from_pairs(list(status_counts.items()), 8),
-            "seller": graphify_from_pairs(list(seller_totals.items()), 6),
+            "status": insights_from_pairs(list(status_counts.items()), 8),
+            "seller": insights_from_pairs(list(seller_totals.items()), 6),
         },
         "can_create_quotes": can_module_action("quotes", "create"),
         "can_edit_quotes": can_module_action("quotes", "edit"),
@@ -9078,15 +10500,19 @@ def crm_record_payload_from_form(store: dict, existing: dict | None = None) -> t
         status = "active"
 
     client_id = request.form.get("clientId", "").strip()
-    client = find_by_id(store.get("clients", []), client_id) if client_id else None
-    if client_id and not can_access_client_record(client):
+    client = find_company_record(store, "clients", client_id) if client_id else None
+    if client_id and not can_access_client_record(client, store):
         return None, "Cliente vinculado no encontrado o fuera de tu alcance."
 
     seller_id = request.form.get("sellerId", "").strip()
     if client and not seller_id:
         seller_id = client.get("assignedSellerId", "")
-    seller = find_by_id(store.get("admin_users", []), seller_id) if seller_id else None
+    seller = find_company_record(store, "admin_users", seller_id) if seller_id else None
+    if seller and seller.get("role") != "sales":
+        seller = None
+        seller_id = ""
     seller_name = (seller or {}).get("name", "") or (client or {}).get("assignedSellerName", "")
+    company_id = record_company_id(existing, store) if existing else (record_company_id(client, store) if client else current_company_id(store))
 
     record = copy.deepcopy(existing or {})
     now = utc_now()
@@ -9098,6 +10524,7 @@ def crm_record_payload_from_form(store: dict, existing: dict | None = None) -> t
         record["createdByName"] = session.get("admin_name", "Sistema")
     record.update(
         {
+            "companyId": company_id,
             "title": title,
             "recordType": record_type,
             "pipelineStage": pipeline_stage,
@@ -9247,8 +10674,8 @@ def crm_page_context(store: dict, error: str = "") -> dict:
         "seller_options": sorted(sellers, key=lambda item: item.get("name", "")),
         "client_options": sorted(visible_clients_for_current_user(store), key=lambda item: item.get("businessName", "")),
         "crm_charts": {
-            "stage": graphify_from_pairs(list(stage_counts.items()), 8),
-            "value": graphify_from_pairs(list(value_by_stage.items()), 8),
+            "stage": insights_from_pairs(list(stage_counts.items()), 8),
+            "value": insights_from_pairs(list(value_by_stage.items()), 8),
         },
         "can_create_crm": can_module_action("crm", "create"),
         "can_edit_crm": can_module_action("crm", "edit"),
@@ -9362,9 +10789,9 @@ def orders_page_context(store: dict, error: str = "") -> dict:
             ("paid", "Pagada"),
         ],
         "order_charts": {
-            "status": graphify_from_pairs([(label, float(value)) for label, value in status_counts.items()], 6),
-            "sale_type": graphify_from_pairs(list(sale_type_totals.items()), 6),
-            "seller": graphify_from_pairs(list(seller_totals.items()), 6),
+            "status": insights_from_pairs([(label, float(value)) for label, value in status_counts.items()], 6),
+            "sale_type": insights_from_pairs(list(sale_type_totals.items()), 6),
+            "seller": insights_from_pairs(list(seller_totals.items()), 6),
         },
         "can_manage_orders": role_allowed(ORDER_MANAGEMENT_ROLES),
         "can_create_assisted_order": role_allowed(SALES_ROLES),
@@ -9475,9 +10902,9 @@ def commissions_page_context(store: dict, error: str = "") -> dict:
         "rule_options": COMMISSION_RULE_OPTIONS,
         "seller_options": sorted(store.get("sellers", []), key=lambda item: item.get("name", "")),
         "commission_charts": {
-            "status": graphify_from_pairs([(commission_status_label(key), value) for key, value in status_totals.items()], 8),
-            "seller": graphify_from_pairs(list(seller_totals.items()), 8),
-            "rule": graphify_from_pairs(list(rule_totals.items()), 8),
+            "status": insights_from_pairs([(commission_status_label(key), value) for key, value in status_totals.items()], 8),
+            "seller": insights_from_pairs(list(seller_totals.items()), 8),
+            "rule": insights_from_pairs(list(rule_totals.items()), 8),
         },
         "can_manage_commissions": role_allowed(COMMISSION_MANAGEMENT_ROLES),
         "can_export_commissions": can_module_action("commissions", "export"),
@@ -9702,7 +11129,7 @@ def reports_page_context(store: dict) -> dict:
         sales_day = parse_utc_datetime(order.get("createdAt", "")).date().isoformat()
         sales_by_day[sales_day] = sales_by_day.get(sales_day, 0) + value
         if safe_float(order.get("balanceUsd"), 0) > 0:
-            client_name = order.get("customerName") or "Cliente Wulkan"
+            client_name = order.get("customerName") or "Cliente FVENTAS"
             receivables_by_client[client_name] = receivables_by_client.get(client_name, 0) + safe_float(order.get("balanceUsd"), 0)
         seller_commissions[seller] = seller_commissions.get(seller, 0) + safe_float(order.get("commissionUsd"), 0)
         for line in reports_product_lines(order, products_by_id, products_by_sku):
@@ -9735,12 +11162,12 @@ def reports_page_context(store: dict) -> dict:
         "product_options": sorted(store.get("products", []), key=lambda item: item.get("title", "")),
         "order_status_options": ORDER_STATUS_OPTIONS,
         "charts": {
-            "sales_by_day": graphify_from_pairs(list(sales_by_day.items()), 8),
-            "seller_totals": graphify_from_pairs(list(seller_totals.items()), 8),
-            "category_totals": graphify_from_pairs(list(category_totals.items()), 8),
-            "receivables_by_client": graphify_from_pairs(list(receivables_by_client.items()), 8),
-            "stock_by_category": graphify_from_pairs(list(stock_by_category.items()), 8),
-            "seller_commissions": graphify_from_pairs(list(seller_commissions.items()), 8),
+            "sales_by_day": insights_from_pairs(list(sales_by_day.items()), 8),
+            "seller_totals": insights_from_pairs(list(seller_totals.items()), 8),
+            "category_totals": insights_from_pairs(list(category_totals.items()), 8),
+            "receivables_by_client": insights_from_pairs(list(receivables_by_client.items()), 8),
+            "stock_by_category": insights_from_pairs(list(stock_by_category.items()), 8),
+            "seller_commissions": insights_from_pairs(list(seller_commissions.items()), 8),
         },
         "can_export_reports": can_module_action("reports", "export"),
     }
@@ -9753,7 +11180,7 @@ def report_response_csv(context: dict) -> Response:
     writer.writeheader()
     for row in context["rows"]:
         writer.writerow({key: row.get(key, "") for key, _label in columns})
-    filename = f"reporte_{context['filters']['type']}_wulkan.csv"
+    filename = f"reporte_{context['filters']['type']}_fventas.csv"
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
@@ -9788,7 +11215,7 @@ def report_response_xlsx(context: dict):
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=f"reporte_{context['filters']['type']}_wulkan.xlsx",
+        download_name=f"reporte_{context['filters']['type']}_fventas.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -9852,7 +11279,7 @@ def active_announcements(placement: str | None = None, store: dict | None = None
     return sorted(announcements, key=lambda item: int(item.get("priority") or 0), reverse=True)
 
 
-@app.get("/")
+@app.get("/dashboard")
 def dashboard():
     store = load_store()
     orders = store["orders"]
@@ -10000,8 +11427,297 @@ def import_issues_export(module: str, draft_id: str):
     )
 
 
+def platform_companies_page_context(
+    store: dict,
+    error: str = "",
+    temporary_password: str = "",
+    created_email: str = "",
+) -> dict:
+    subscriptions_by_company = {
+        subscription.get("companyId"): subscription
+        for subscription in store.get("subscriptions", [])
+    }
+    rows = []
+    for company in sorted(store.get("companies", []), key=lambda item: item.get("createdAt", ""), reverse=True):
+        subscription = subscriptions_by_company.get(company.get("id"), {})
+        profile = market_profile(company.get("country") or subscription.get("country") or "CL")
+        default_pricing = plan_pricing_for_country(profile["code"])
+        subscription_currency = normalize_currency_code(
+            subscription.get("currency") or company.get("planCurrency"),
+            default_pricing["currency"],
+        )
+        subscription_price = safe_float(
+            subscription.get("price")
+            or subscription.get("priceClp")
+            or company.get("planPrice")
+            or company.get("planPriceClp"),
+            default_pricing["price"],
+        )
+        admins = [
+            user
+            for user in store.get("admin_users", [])
+            if user.get("companyId") == company.get("id")
+            and user.get("role") in WEB_ADMIN_ROLES
+            and user.get("status") != "deleted"
+        ]
+        rows.append(
+            {
+                "company": company,
+                "subscription": subscription,
+                "adminCount": len(admins),
+                "activeAdmins": sum(1 for user in admins if user.get("status") == "active"),
+                "marketProfile": profile,
+                "subscriptionCurrency": subscription_currency,
+                "subscriptionPrice": subscription_price,
+                "subscriptionDisplay": money_currency(subscription_price, subscription_currency),
+            }
+        )
+
+    active_rows = [
+        row
+        for row in rows
+        if row["subscription"].get("status") in SUBSCRIPTION_ACTIVE_STATUSES
+        or row["company"].get("status") in SUBSCRIPTION_ACTIVE_STATUSES
+    ]
+    pending_rows = [
+        row
+        for row in rows
+        if row["subscription"].get("status") == "pending_payment"
+        or row["company"].get("status") == "pending_payment"
+    ]
+    mrr_by_currency = {}
+    for row in active_rows:
+        currency = row["subscriptionCurrency"]
+        mrr_by_currency[currency] = mrr_by_currency.get(currency, 0.0) + row["subscriptionPrice"]
+    mrr_summary = " / ".join(
+        money_currency(amount, currency)
+        for currency, amount in sorted(mrr_by_currency.items())
+    ) or money_currency(0, SAAS_PLAN_CURRENCY)
+    metrics = {
+        "companies": len(rows),
+        "active": len(active_rows),
+        "pending": len(pending_rows),
+        "mrr_summary": mrr_summary,
+    }
+    return {
+        "heading": "Empresas SaaS",
+        "description": "Gestiona empresas suscritas, activacion del plan mensual y administradores iniciales.",
+        "rows": rows,
+        "metrics": metrics,
+        "error": error,
+        "temporary_password": temporary_password,
+        "created_email": created_email,
+        "subscription_status_options": SUBSCRIPTION_STATUS_OPTIONS,
+        "plan_name": SAAS_PLAN_NAME,
+        "default_plan": plan_pricing_for_country("CL"),
+        "market_country_options": MARKET_COUNTRY_OPTIONS,
+        "market_profiles": MARKET_PROFILES,
+    }
+
+
+@app.route("/platform/companies", methods=["GET", "POST"])
+@require_roles("platform_admin")
+def platform_companies():
+    store = load_store()
+    if request.method == "POST":
+        market_country = normalize_market_country(request.form.get("marketCountry", "CL"))
+        profile = market_profile(market_country)
+        pricing = plan_pricing_for_country(market_country)
+        company_name = sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False)
+        legal_name = sanitize_text(request.form.get("legalName", ""), max_length=180, allow_newlines=False)
+        tax_id = sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False)
+        owner_name = sanitize_text(request.form.get("ownerName", ""), max_length=160, allow_newlines=False)
+        owner_email = request.form.get("ownerEmail", "").strip().lower()
+        support_phone = sanitize_text(request.form.get("supportPhone", ""), max_length=80, allow_newlines=False)
+        status = request.form.get("subscriptionStatus", "active")
+        next_payment_at = sanitize_text(request.form.get("nextPaymentAt", ""), max_length=32, allow_newlines=False)
+        password = request.form.get("password", "").strip() or temporary_admin_password()
+        generated_password = not bool(request.form.get("password", "").strip())
+        error = ""
+
+        if not company_name:
+            error = "El nombre de la empresa es obligatorio."
+        elif not owner_name:
+            error = "El nombre del administrador es obligatorio."
+        elif not owner_email:
+            error = "El correo del administrador es obligatorio."
+        elif admin_user_by_email(store, owner_email):
+            error = "Ya existe un usuario con ese correo."
+        elif any(category_slug(company.get("name", "")) == category_slug(company_name) for company in store.get("companies", [])):
+            error = "Ya existe una empresa con ese nombre."
+        elif status not in dict(SUBSCRIPTION_STATUS_OPTIONS):
+            error = "El estado de suscripcion no es valido."
+        else:
+            credential_error = credential_form_error(password)
+            if credential_error:
+                error = credential_error
+
+        if error:
+            return render_template("platform_companies.html", **platform_companies_page_context(store, error))
+
+        now = utc_now()
+        company_id = next_id("company", company_name)
+        company_status = "active" if status in SUBSCRIPTION_ACTIVE_STATUSES else status
+        company = {
+            "id": company_id,
+            "name": company_name,
+            "slug": category_slug(company_name),
+            "legalName": legal_name or company_name,
+            "taxId": tax_id,
+            "country": profile["code"],
+            "currency": profile["localCurrency"],
+            "baseCurrency": profile["salesCurrency"],
+            "marketProfile": profile,
+            "taxLabel": profile["taxLabel"],
+            "planCurrency": pricing["currency"],
+            "planPrice": pricing["price"],
+            "status": company_status,
+            "planId": SAAS_PLAN_ID,
+            "planName": SAAS_PLAN_NAME,
+            "planPriceClp": pricing["priceClp"],
+            "ownerName": owner_name,
+            "ownerEmail": owner_email,
+            "supportPhone": support_phone,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        subscription = {
+            "id": next_id("sub", company_id),
+            "companyId": company_id,
+            "planId": SAAS_PLAN_ID,
+            "planName": SAAS_PLAN_NAME,
+            "status": status,
+            "billingPeriod": "monthly",
+            "country": profile["code"],
+            "currency": pricing["currency"],
+            "price": pricing["price"],
+            "priceClp": pricing["priceClp"],
+            "currentPeriodStart": now if status in SUBSCRIPTION_ACTIVE_STATUSES else "",
+            "currentPeriodEnd": "",
+            "trialEndsAt": "",
+            "lastPaymentAt": now if status == "active" else "",
+            "nextPaymentAt": next_payment_at,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        admin_user = {
+            "id": next_id("admin", owner_email),
+            "companyId": company_id,
+            "firstName": owner_name,
+            "lastName": "",
+            "name": owner_name,
+            "email": owner_email,
+            "role": "super_admin",
+            "status": "active",
+            "passwordHash": generate_password_hash(password),
+            "mustChangePassword": True,
+            "sellerCode": "",
+            "sellerZone": "",
+            "sellerTerritory": "",
+            "sellerSupervisor": "",
+            "phone": support_phone,
+            "mobileAccessEnabled": False,
+            "internalNotes": "Administrador inicial creado desde Empresas SaaS.",
+            "commissionRatePercent": 0,
+            "salesGoalUsd": 0,
+            "failedLoginAttempts": 0,
+            "lastFailedLoginAt": "",
+            "lastLoginAt": "",
+            "lastLoginIp": "",
+            "sessionVersion": 0,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        store.setdefault("companies", []).append(company)
+        store.setdefault("subscriptions", []).append(subscription)
+        store.setdefault("admin_users", []).append(admin_user)
+        record_create_event(store, "company", company_id, f"Empresa SaaS creada: {company_name}.", company)
+        record_create_event(store, "subscription", subscription["id"], f"Suscripcion creada para {company_name}.", subscription)
+        record_create_event(store, "admin_user", admin_user["id"], f"Administrador inicial creado: {owner_email}.", admin_user)
+        save_store(store)
+        push_admin_toast("Empresa SaaS creada correctamente.", "success", "Empresa activada")
+        return render_template(
+            "platform_companies.html",
+            **platform_companies_page_context(
+                load_store(),
+                temporary_password=password if generated_password else "",
+                created_email=owner_email,
+            ),
+        )
+
+    return render_template("platform_companies.html", **platform_companies_page_context(store))
+
+
+@app.post("/platform/companies/<company_id>/subscription")
+@require_roles("platform_admin")
+def company_subscription_update(company_id: str):
+    store = load_store()
+    company = get_company(store, company_id)
+    if not company:
+        return redirect(url_for("platform_companies"))
+
+    status = request.form.get("subscriptionStatus", "active")
+    if status not in dict(SUBSCRIPTION_STATUS_OPTIONS):
+        push_admin_toast("Estado de suscripcion no valido.", "danger", "Accion no aplicada")
+        return redirect(url_for("platform_companies"))
+
+    next_payment_at = sanitize_text(request.form.get("nextPaymentAt", ""), max_length=32, allow_newlines=False)
+    profile = market_profile(company.get("country") or "CL")
+    pricing = plan_pricing_for_country(profile["code"])
+    now = utc_now()
+    before_company = copy.deepcopy(company)
+    subscription = current_subscription(store, company_id)
+    if subscription is None:
+        subscription = {
+            "id": next_id("sub", company_id),
+            "companyId": company_id,
+            "planId": SAAS_PLAN_ID,
+            "planName": SAAS_PLAN_NAME,
+            "billingPeriod": "monthly",
+            "country": profile["code"],
+            "currency": pricing["currency"],
+            "price": pricing["price"],
+            "priceClp": pricing["priceClp"],
+            "createdAt": now,
+        }
+        store.setdefault("subscriptions", []).append(subscription)
+    before_subscription = copy.deepcopy(subscription)
+
+    company["status"] = "active" if status in SUBSCRIPTION_ACTIVE_STATUSES else status
+    company["country"] = profile["code"]
+    company["currency"] = profile["localCurrency"]
+    company["baseCurrency"] = profile["salesCurrency"]
+    company["marketProfile"] = profile
+    company["planCurrency"] = pricing["currency"]
+    company["planPrice"] = pricing["price"]
+    company["planPriceClp"] = pricing["priceClp"]
+    company["updatedAt"] = now
+    subscription["status"] = status
+    subscription["country"] = profile["code"]
+    subscription["price"] = pricing["price"]
+    subscription["priceClp"] = pricing["priceClp"]
+    subscription["currency"] = pricing["currency"]
+    subscription["nextPaymentAt"] = next_payment_at
+    subscription["updatedAt"] = now
+    if status == "active" and not subscription.get("lastPaymentAt"):
+        subscription["lastPaymentAt"] = now
+
+    record_change_event(
+        store,
+        "subscription_update",
+        "company",
+        company_id,
+        f"Estado de suscripcion actualizado a {subscription_status_label(status)} para {company.get('name', company_id)}.",
+        {"company": before_company, "subscription": before_subscription},
+        {"company": company, "subscription": subscription},
+    )
+    save_store(store)
+    push_admin_toast("Suscripcion actualizada.", "success", "Empresa SaaS")
+    return redirect(url_for("platform_companies"))
+
+
 @app.get("/permissions")
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def permissions():
     rows = permission_matrix_rows()
     action_index = {key: {"key": key, "label": label, "icon": icon} for key, label, icon in PERMISSION_ACTIONS}
@@ -10016,7 +11732,7 @@ def permissions():
 
 
 @app.route("/admin-users", methods=["GET", "POST"])
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def admin_users():
     store = load_store()
     if request.method == "POST":
@@ -10034,10 +11750,10 @@ def admin_users():
 
 
 @app.post("/admin-users/<user_id>/edit")
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def admin_user_edit(user_id: str):
     store = load_store()
-    user = find_by_id(store["admin_users"], user_id)
+    user = find_company_record(store, "admin_users", user_id)
     if user and user.get("role") == "sales":
         return forbidden_response()
     if user:
@@ -10061,10 +11777,10 @@ def admin_user_edit(user_id: str):
 
 
 @app.post("/admin-users/<user_id>/delete")
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def admin_user_delete(user_id: str):
     store = load_store()
-    user = find_by_id(store.get("admin_users", []), user_id)
+    user = find_company_record(store, "admin_users", user_id)
     if not user or user.get("role") == "sales" or user_id == session.get("admin_user_id"):
         return redirect(url_for("admin_users"))
     before = copy.deepcopy(user)
@@ -10086,10 +11802,10 @@ def admin_user_delete(user_id: str):
 
 
 @app.post("/admin-users/<user_id>/status")
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def admin_user_status(user_id: str):
     store = load_store()
-    user = find_by_id(store.get("admin_users", []), user_id)
+    user = find_company_record(store, "admin_users", user_id)
     target_status = request.form.get("status", "").strip()
     if not user or user.get("role") == "sales" or target_status not in {"active", "inactive", "blocked"}:
         return redirect(url_for("admin_users"))
@@ -10115,10 +11831,10 @@ def admin_user_status(user_id: str):
 
 
 @app.post("/admin-users/<user_id>/reset-password")
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def admin_user_reset_password(user_id: str):
     store = load_store()
-    user = find_by_id(store.get("admin_users", []), user_id)
+    user = find_company_record(store, "admin_users", user_id)
     if not user or user.get("role") == "sales" or user.get("status") == "deleted":
         return redirect(url_for("admin_users"))
     before = copy.deepcopy(user)
@@ -10149,10 +11865,10 @@ def admin_user_reset_password(user_id: str):
 
 
 @app.post("/admin-users/<user_id>/revoke-sessions")
-@require_roles("super_admin")
+@require_roles(*ADMIN_ONLY_ROLES)
 def admin_user_revoke_sessions(user_id: str):
     store = load_store()
-    user = find_by_id(store.get("admin_users", []), user_id)
+    user = find_company_record(store, "admin_users", user_id)
     if not user or user.get("role") == "sales" or user.get("status") == "deleted":
         return redirect(url_for("admin_users"))
     before = copy.deepcopy(user)
@@ -10186,7 +11902,7 @@ def sellers():
         seller = admin_user_payload()
         seller["role"] = "sales"
         if not seller.get("sellerCode"):
-            seller["sellerCode"] = seller["id"].replace("admin-", "VEN-").upper()[:24]
+            seller["sellerCode"] = seller["id"].replace("admin-", "CL-").upper()[:24]
         audit_events_start = len(store.get("audit_events", []))
         store["admin_users"].append(seller)
         record_create_event(store, "seller", seller["id"], f"Vendedor creado: {seller['name']}.", seller)
@@ -10212,7 +11928,7 @@ def sellers_import():
 @require_roles(*roles_for_action("sellers", "edit"))
 def seller_edit(seller_id: str):
     store = load_store()
-    seller = find_by_id(store["admin_users"], seller_id)
+    seller = find_company_record(store, "admin_users", seller_id)
     if seller and seller.get("role") == "sales":
         error = seller_form_error(store, seller)
         if error:
@@ -10225,13 +11941,13 @@ def seller_edit(seller_id: str):
             for item in store["admin_users"]
         ]
         changed_clients: list[dict] = []
-        for client in store.get("clients", []):
+        for client in visible_records_for_current_company(store, "clients"):
             if client.get("assignedSellerId") == seller_id:
                 client["assignedSellerName"] = updated.get("name", "")
                 client["updatedAt"] = utc_now()
                 changed_clients.append(client)
         changed_orders: list[dict] = []
-        for order in store.get("orders", []):
+        for order in visible_records_for_current_company(store, "orders"):
             if order.get("sellerId") == seller_id:
                 order["sellerName"] = updated.get("name", "")
                 order["updatedAt"] = utc_now()
@@ -10267,12 +11983,12 @@ def seller_edit(seller_id: str):
 @require_roles(*roles_for_action("sellers", "delete"))
 def seller_delete(seller_id: str):
     store = load_store()
-    seller = find_by_id(store.get("admin_users", []), seller_id)
+    seller = find_company_record(store, "admin_users", seller_id)
     if not seller or seller.get("role") != "sales":
         return redirect(url_for("sellers"))
     before = copy.deepcopy(seller)
-    has_clients = any(client.get("assignedSellerId") == seller_id for client in store.get("clients", []))
-    has_orders = any(order.get("sellerId") == seller_id for order in store.get("orders", []))
+    has_clients = any(client.get("assignedSellerId") == seller_id for client in visible_records_for_current_company(store, "clients"))
+    has_orders = any(order.get("sellerId") == seller_id for order in visible_records_for_current_company(store, "orders"))
     if has_clients or has_orders:
         seller["status"] = "inactive"
         seller["mobileAccessEnabled"] = False
@@ -10322,6 +12038,8 @@ def clients():
         error = client_form_error(store)
         if error:
             return render_template("clients.html", **clients_page_context(store, error))
+        audit_events_start = len(store.get("audit_events", []))
+        notifications_start = len(store.get("notifications", []))
         client = client_payload()
         store["clients"].append(client)
         record_create_event(store, "client", client["id"], f"Cliente creado: {client['businessName']}.", client)
@@ -10336,11 +12054,16 @@ def clients():
             module="clients",
             entity_type="client",
             entity_id=client["id"],
-            deep_link=f"wulkan://seller/clients/{client['id']}",
+            deep_link=f"fventas://seller/clients/{client['id']}",
             metadata={"clientId": client["id"]},
             dedupe_key=f"seller-client-assigned-{client['id']}",
         )
-        save_store(store)
+        if not persist_client_action(store, [client], audit_events_start, "crear cliente", notifications_start):
+            store["clients"] = [item for item in store.get("clients", []) if item.get("id") != client.get("id")]
+            store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
+            store["notifications"] = store.get("notifications", [])[:notifications_start]
+            error = "No se pudo guardar el cliente. Intenta nuevamente."
+            return render_template("clients.html", **clients_page_context(store, error))
         return redirect(url_for("clients"))
 
     return render_template("clients.html", **clients_page_context(store))
@@ -10356,14 +12079,16 @@ def clients_import():
 @require_roles(*roles_for_action("clients", "edit"))
 def client_edit(client_id: str):
     store = load_store()
-    client = find_by_id(store["clients"], client_id)
-    if not can_access_client_record(client):
+    client = find_company_record(store, "clients", client_id)
+    if not can_access_client_record(client, store):
         return forbidden_response()
     if client:
         error = client_form_error(store, client)
         if error:
             return render_template("clients.html", **clients_page_context(store, error))
         before = copy.deepcopy(client)
+        audit_events_start = len(store.get("audit_events", []))
+        notifications_start = len(store.get("notifications", []))
         updated = client_payload(client)
         store["clients"] = [updated if item["id"] == client_id else item for item in store["clients"]]
         record_change_event(
@@ -10394,11 +12119,16 @@ def client_edit(client_id: str):
                 module="clients",
                 entity_type="client",
                 entity_id=updated["id"],
-                deep_link=f"wulkan://seller/clients/{updated['id']}",
+                deep_link=f"fventas://seller/clients/{updated['id']}",
                 metadata={"clientId": updated["id"]},
                 dedupe_key=f"seller-client-assigned-{updated['id']}-{updated.get('updatedAt', '')}",
             )
-        save_store(store)
+        if not persist_client_action(store, [updated], audit_events_start, "editar cliente", notifications_start):
+            store["clients"] = [before if item["id"] == client_id else item for item in store["clients"]]
+            store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
+            store["notifications"] = store.get("notifications", [])[:notifications_start]
+            error = "No se pudo actualizar el cliente. Intenta nuevamente."
+            return render_template("clients.html", **clients_page_context(store, error))
     return redirect(url_for("clients"))
 
 
@@ -10406,19 +12136,21 @@ def client_edit(client_id: str):
 @require_roles(*roles_for_action("clients", "edit"))
 def client_status_update(client_id: str):
     store = load_store()
-    client = find_by_id(store.get("clients", []), client_id)
-    if not can_access_client_record(client):
+    client = find_company_record(store, "clients", client_id)
+    if not can_access_client_record(client, store):
         return forbidden_response()
     target_status = request.form.get("status", "").strip()
     allowed_statuses = {status for status, _label in CLIENT_STATUS_OPTIONS}
     if not client or target_status not in allowed_statuses:
         return redirect(url_for("clients"))
     before = copy.deepcopy(client)
+    audit_events_start = len(store.get("audit_events", []))
+    notifications_start = len(store.get("notifications", []))
     client["status"] = target_status
     client["updatedAt"] = utc_now()
     client["updatedVia"] = "admin"
     client["updatedById"] = session.get("admin_user_id", "")
-    client["updatedByName"] = session.get("admin_name", "Admin Wulkan")
+    client["updatedByName"] = session.get("admin_name", "FVENTAS Admin")
     client["updatedByRole"] = current_admin_role()
     if target_status == "blocked_debt":
         client["collectionStatus"] = "blocked"
@@ -10447,7 +12179,89 @@ def client_status_update(client_id: str):
             metadata={"clientId": client_id, "status": target_status},
             dedupe_key=f"admin-client-status-{client_id}-{client.get('updatedAt', '')}",
         )
-    save_store(store)
+    if not persist_client_action(store, [client], audit_events_start, "cambiar estado cliente", notifications_start):
+        client.update(before)
+        store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
+        store["notifications"] = store.get("notifications", [])[:notifications_start]
+    return redirect(url_for("clients"))
+
+
+@app.post("/clients/<client_id>/account-deletion/complete")
+@require_roles(*roles_for_action("clients", "delete"))
+def client_account_deletion_complete(client_id: str):
+    store = load_store()
+    client = find_company_record(store, "clients", client_id)
+    if not client:
+        push_admin_toast("No se encontro el cliente solicitado.", "warning", "Cliente no encontrado")
+        return redirect(url_for("clients"))
+
+    deletion_status = mobile_account_deletion_status(client)
+    if deletion_status not in {"requested", "processing", "approved"}:
+        push_admin_toast(
+            "Este cliente no tiene una solicitud de eliminacion pendiente.",
+            "warning",
+            "Sin solicitud pendiente",
+        )
+        return redirect(url_for("clients"))
+
+    audit_events_start = len(store.get("audit_events", []))
+    notifications_start = len(store.get("notifications", []))
+    before, changed_orders = complete_client_account_deletion(store, client)
+
+    record_change_event(
+        store,
+        "account_deletion_completed",
+        "client",
+        client_id,
+        "Solicitud de eliminacion cerrada: acceso movil bloqueado y datos personales anonimizados.",
+        before,
+        client,
+        actor={
+            "id": session.get("admin_user_id", ""),
+            "name": session.get("admin_name", "FVENTAS Admin"),
+            "role": current_admin_role(),
+        },
+        criticality="high",
+        metadata={
+            "requestId": before.get("deletionRequestId", ""),
+            "ordersAnonymized": len(changed_orders),
+            "policy": "android-ios-account-deletion",
+        },
+    )
+    notify_admin(
+        store,
+        "Cuenta B2B eliminada",
+        f"La solicitud de eliminacion de {before.get('businessName', client_id)} fue procesada.",
+        notification_type="success",
+        priority="normal",
+        module="clients",
+        entity_type="client",
+        entity_id=client_id,
+        dedupe_key=f"account-deletion-completed-{client_id}-{client.get('deletionCompletedAt', '')}",
+        metadata={"ordersAnonymized": len(changed_orders)},
+    )
+    push_admin_toast(
+        "Cuenta anonimizada y acceso movil bloqueado correctamente.",
+        "success",
+        "Solicitud cerrada",
+    )
+    if not persist_client_action(
+        store,
+        [client],
+        audit_events_start,
+        "cerrar eliminacion de cuenta",
+        notifications_start,
+        changed_orders=changed_orders,
+    ):
+        client.clear()
+        client.update(before)
+        store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
+        store["notifications"] = store.get("notifications", [])[:notifications_start]
+        push_admin_toast(
+            "No se pudo procesar la eliminacion de cuenta. Intenta nuevamente.",
+            "danger",
+            "Accion no aplicada",
+        )
     return redirect(url_for("clients"))
 
 
@@ -10455,17 +12269,18 @@ def client_status_update(client_id: str):
 @require_roles(*roles_for_action("clients", "delete"))
 def client_delete(client_id: str):
     store = load_store()
-    client = find_by_id(store.get("clients", []), client_id)
+    client = find_company_record(store, "clients", client_id)
     if not client:
         return redirect(url_for("clients"))
     before = copy.deepcopy(client)
-    has_orders = any(order.get("customerId") == client_id for order in store.get("orders", []))
+    audit_events_start = len(store.get("audit_events", []))
+    has_orders = any(order.get("customerId") == client_id for order in visible_records_for_current_company(store, "orders"))
     if has_orders:
         client["status"] = "inactive"
         client["updatedAt"] = utc_now()
         client["updatedVia"] = "admin"
         client["updatedById"] = session.get("admin_user_id", "")
-        client["updatedByName"] = session.get("admin_name", "Admin Wulkan")
+        client["updatedByName"] = session.get("admin_name", "FVENTAS Admin")
         client["updatedByRole"] = current_admin_role()
         after = client
     else:
@@ -10485,7 +12300,17 @@ def client_delete(client_id: str):
         "warning",
         "Cliente actualizado",
     )
-    save_store(store)
+    if not persist_client_action(
+        store,
+        [after] if after else [],
+        audit_events_start,
+        "eliminar cliente",
+        deleted_client_ids=[] if after else [client_id],
+    ):
+        if after:
+            client.update(before)
+        else:
+            store["clients"].append(before)
     return redirect(url_for("clients"))
 
 
@@ -10558,7 +12383,7 @@ def products_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=productos_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=productos_fventas.csv"},
     )
 
 
@@ -10568,20 +12393,20 @@ def products_import():
     return handle_bulk_import("products", "product", import_products_rows, "products")
 
 
-@app.post("/products/starter-wulkan")
+@app.post("/products/starter-fventas")
 @require_roles(*roles_for_action("products", "create"))
-def products_starter_wulkan():
+def products_starter_fventas():
     store = load_store()
     before = {
         "products": len(store.get("products", [])),
         "categories": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
     }
     try:
-        result = create_wulkan_starter_products(store)
+        result = create_fventas_starter_products(store)
     except Exception:
-        app.logger.exception("No se pudieron preparar productos base Wulkan")
+        app.logger.exception("No se pudieron preparar productos base FVENTAS")
         push_admin_toast(
-            "No se pudieron preparar los productos base Wulkan. Revisa las categorias o intenta nuevamente.",
+            "No se pudieron preparar los productos base FVENTAS. Revisa las categorias o intenta nuevamente.",
             "danger",
             "Seed no preparado",
         )
@@ -10617,8 +12442,8 @@ def products_starter_wulkan():
             store,
             "create",
             "product_seed",
-            "wulkan-base",
-            f"Productos base Wulkan creados: {created_count}. Categorias creadas: {created_categories_count}.",
+            "fventas-base",
+            f"Productos base FVENTAS creados: {created_count}. Categorias creadas: {created_categories_count}.",
             before,
             after,
         )
@@ -10627,16 +12452,16 @@ def products_starter_wulkan():
             changed_categories,
             changed_products,
             audit_events_start,
-            "productos base Wulkan",
+            "productos base FVENTAS",
         ):
             push_admin_toast(
-                f"Se crearon {created_count} productos base Wulkan con SKU, imagen, precio y stock inicial.",
+                f"Se crearon {created_count} productos base FVENTAS con SKU, imagen, precio y stock inicial.",
                 "success",
                 "Productos listos",
             )
     else:
         push_admin_toast(
-            "Los productos base Wulkan ya existen o requieren revisar categorias faltantes.",
+            "Los productos base FVENTAS ya existen o requieren revisar categorias faltantes.",
             "info" if not result["missingCategories"] else "warning",
             "Sin cambios",
         )
@@ -10691,7 +12516,7 @@ def product_new():
 @require_roles(*roles_for_action("products", "edit"))
 def product_edit(product_id: str):
     store = load_store()
-    product = find_by_id(store["products"], product_id)
+    product = find_company_record(store, "products", product_id)
     if product is None:
         return redirect(url_for("products"))
 
@@ -10743,11 +12568,11 @@ def product_edit(product_id: str):
 @require_roles(*roles_for_action("products", "create"))
 def product_duplicate(product_id: str):
     store = load_store()
-    product = find_by_id(store.get("products", []), product_id)
+    product = find_company_record(store, "products", product_id)
     if not product:
         return redirect(url_for("products"))
-    existing_skus = {item.get("sku", "").upper() for item in store.get("products", [])}
-    base_sku = f"{product.get('sku', 'WUL-PROD').upper()}-COPY"
+    existing_skus = {item.get("sku", "").upper() for item in visible_records_for_current_company(store, "products")}
+    base_sku = f"{product.get('sku', 'FVT-PROD').upper()}-COPY"
     new_sku = base_sku
     suffix = 2
     while new_sku in existing_skus:
@@ -10790,7 +12615,7 @@ def product_duplicate(product_id: str):
 @require_roles(*roles_for_action("products", "delete"))
 def product_delete(product_id: str):
     store = load_store()
-    product = find_by_id(store["products"], product_id)
+    product = find_company_record(store, "products", product_id)
     if not product:
         return redirect(url_for("products"))
     before = copy.deepcopy(product)
@@ -10802,7 +12627,9 @@ def product_delete(product_id: str):
     else:
         store["products"] = [item for item in store["products"] if item["id"] != product_id]
         store["media_assets"] = [
-            item for item in store.get("media_assets", []) if item.get("productId") != product_id
+            item
+            for item in store.get("media_assets", [])
+            if item.get("productId") != product_id or not can_access_company_record(item, store)
         ]
         after = None
     record_change_event(
@@ -10830,6 +12657,8 @@ def stock():
     if request.method == "POST":
         if not can_module_action("stock", "edit"):
             return forbidden_response()
+        scoped_products = visible_records_for_current_company(store, "products")
+        scoped_orders = visible_records_for_current_company(store, "orders")
         stock_before = {
             product["id"]: {
                 "sku": product.get("sku", ""),
@@ -10839,11 +12668,11 @@ def stock():
                 "stockLocation": product.get("stockLocation", ""),
                 "stockNotes": product.get("stockNotes", ""),
             }
-            for product in store.get("products", [])
+            for product in scoped_products
         }
         bulk_payload = request.form.get("bulkStock", "").strip()
         movement_type = normalize_stock_movement_type(request.form.get("type", "entry"))
-        reserved_by_product = stock_reserved_quantities(store.get("orders", []))
+        reserved_by_product = stock_reserved_quantities(scoped_orders)
         if bulk_payload:
             stock_by_sku = {}
             for line in split_lines(bulk_payload):
@@ -10854,7 +12683,7 @@ def stock():
                 else:
                     continue
                 stock_by_sku[sku.strip().upper()] = safe_int(quantity.strip(), 0)
-            for product in store.get("products", []):
+            for product in scoped_products:
                 if product["sku"] in stock_by_sku:
                     reserved = reserved_by_product.get(product["id"], 0)
                     before = int(product.get("stock") or 0)
@@ -10873,7 +12702,7 @@ def stock():
                     )
         else:
             product_id = request.form.get("productId")
-            product = find_by_id(store.get("products", []), product_id)
+            product = find_company_record(store, "products", product_id)
             quantity = safe_int(request.form.get("quantity"), 0)
             location = request.form.get("location", "").strip()
             note = request.form.get("note", "").strip()
@@ -10922,7 +12751,7 @@ def stock():
                 "stockLocation": product.get("stockLocation", ""),
                 "stockNotes": product.get("stockNotes", ""),
             }
-            for product in store.get("products", [])
+            for product in scoped_products
         }
         record_change_event(
             store,
@@ -10933,7 +12762,7 @@ def stock():
             stock_before,
             stock_after,
         )
-        for product in store.get("products", []):
+        for product in scoped_products:
             product_id = product.get("id", "")
             if product_id and stock_before.get(product_id) != stock_after.get(product_id):
                 notify_stock_state(store, product)
@@ -10989,7 +12818,7 @@ def stock_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=stock_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=stock_fventas.csv"},
     )
 
 
@@ -11026,14 +12855,19 @@ def categories():
     return render_template("categories.html", **category_page_context(store))
 
 
-@app.post("/categories/starter-wulkan")
+@app.post("/categories/starter-fventas")
 @require_roles(*roles_for_action("categories", "create"))
-def categories_starter_wulkan():
+def categories_starter_fventas():
     store = load_store()
     before = {"total": len([category for category in store.get("categories", []) if category.get("status") != "deleted"])}
-    result = create_wulkan_starter_categories(store)
+    audit_events_start = len(store.get("audit_events", []))
+    result = create_fventas_starter_categories(store)
     created_count = len(result["created"])
     if created_count:
+        created_ids = {category.get("id", "") for category in result["created"] if category.get("id")}
+        changed_categories = [
+            category for category in store.get("categories", []) if category.get("id") in created_ids
+        ]
         after = {
             "total": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
             "created": result["created"],
@@ -11043,15 +12877,20 @@ def categories_starter_wulkan():
             store,
             "create",
             "category_seed",
-            "wulkan-base",
-            f"Categorias base Wulkan creadas: {created_count}.",
+            "fventas-base",
+            f"Categorias base FVENTAS creadas: {created_count}.",
             before,
             after,
         )
-        save_store(store)
-        push_admin_toast(f"Se crearon {created_count} categorias base Wulkan.", "success", "Categorias listas")
+        if persist_category_action(store, changed_categories, audit_events_start, "categorias base FVENTAS"):
+            push_admin_toast(f"Se crearon {created_count} categorias base FVENTAS.", "success", "Categorias listas")
+        else:
+            store["categories"] = [
+                category for category in store.get("categories", []) if category.get("id") not in created_ids
+            ]
+            store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
     else:
-        push_admin_toast("Las categorias base Wulkan ya existen. Puedes editarlas o agregar imagenes.", "info", "Sin cambios")
+        push_admin_toast("Las categorias base FVENTAS ya existen. Puedes editarlas o agregar imagenes.", "info", "Sin cambios")
     return redirect(url_for("categories"))
 
 
@@ -11124,7 +12963,7 @@ def categories_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=categorias_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=categorias_fventas.csv"},
     )
 
 
@@ -11138,14 +12977,14 @@ def categories_import():
 @require_roles(*roles_for_action("categories", "edit"))
 def category_edit(category_id: str):
     store = load_store()
-    category = find_by_id(store["categories"], category_id)
+    category = find_company_record(store, "categories", category_id)
     if category:
         error = category_form_error(store, category)
         if error:
             return render_template("categories.html", **category_page_context(store, error))
         before = copy.deepcopy(category)
         category.update(category_payload(store, category))
-        for product in store["products"]:
+        for product in visible_records_for_current_company(store, "products"):
             if product.get("categoryId") == category_id:
                 product["categoryName"] = category["name"]
         record_change_event(
@@ -11165,7 +13004,7 @@ def category_edit(category_id: str):
 @require_roles(*roles_for_action("categories", "edit"))
 def category_status(category_id: str):
     store = load_store()
-    category = find_by_id(store.get("categories", []), category_id)
+    category = find_company_record(store, "categories", category_id)
     target_status = request.form.get("status", "").strip()
     if category and target_status in {key for key, _label in CATEGORY_STATUS_OPTIONS}:
         audit_events_start = len(store.get("audit_events", []))
@@ -11195,14 +13034,14 @@ def category_status(category_id: str):
 @require_roles(*roles_for_action("categories", "delete"))
 def category_delete(category_id: str):
     store = load_store()
-    category = find_by_id(store["categories"], category_id)
+    category = find_company_record(store, "categories", category_id)
     if not category:
         return redirect(url_for("categories"))
     audit_events_start = len(store.get("audit_events", []))
     before = copy.deepcopy(category)
     direct_children = [
         item
-        for item in store.get("categories", [])
+        for item in visible_records_for_current_company(store, "categories")
         if item.get("parentId") == category_id and item.get("status") != "deleted"
     ]
     product_references = product_count_for_categories(store, {category_id})
@@ -11228,52 +13067,41 @@ def category_delete(category_id: str):
             f"blocked delete {category_id}",
         )
         return redirect(url_for("categories"))
-    else:
-        deleted_at = utc_now()
-        replacement_parent_id = category.get("parentId", "")
-        changed_categories = []
-        for item in store.get("categories", []):
-            if item.get("id") == category_id:
-                item["status"] = "deleted"
-                item["visibleInApp"] = False
-                item["deletedAt"] = deleted_at
-                item["updatedAt"] = deleted_at
-                changed_categories.append(item)
-            elif item.get("parentId") == category_id:
-                child_before = copy.deepcopy(item)
-                item["parentId"] = replacement_parent_id if replacement_parent_id != item.get("id") else ""
-                item["updatedAt"] = deleted_at
-                changed_categories.append(item)
-                record_change_event(
-                    store,
-                    "update",
-                    "category",
-                    item.get("id", ""),
-                    f"Subcategoria conservada tras eliminar categoria padre: {item.get('name', item.get('id', ''))}.",
-                    child_before,
-                    item,
-                )
-        store["categories"] = [item for item in store["categories"] if item.get("id") != category_id]
+    deleted_at = utc_now()
+    changed_categories = []
+    promoted_children = []
+    for child in direct_children:
+        child_before = copy.deepcopy(child)
+        child["parentId"] = ""
+        child["updatedAt"] = deleted_at
+        changed_categories.append(child)
+        promoted_children.append(child.get("id", ""))
         record_change_event(
             store,
-            "delete",
+            "parent_promoted",
             "category",
-            category_id,
-            (
-                f"Categoria eliminada: {category.get('name', category_id)}. "
-                f"Subcategorias conservadas: {len(direct_children)}."
-            ),
-            before,
-            None,
+            child.get("id", ""),
+            f"Subcategoria promovida a categoria raiz por eliminacion de {category.get('name', category_id)}.",
+            child_before,
+            child,
         )
-        if direct_children:
-            push_admin_toast(
-                f"Categoria eliminada. {len(direct_children)} subcategoria(s) se conservaron sin borrarse.",
-                "warning",
-                "Categoria eliminada",
-            )
-        else:
-            push_admin_toast("Categoria eliminada correctamente.", "warning", "Categoria eliminada")
+    category["status"] = "deleted"
+    category["visibleInApp"] = False
+    category["deletedAt"] = deleted_at
+    category["updatedAt"] = deleted_at
+    changed_categories.append(category)
+    store["categories"] = [item for item in store["categories"] if item.get("id") != category_id]
+    record_change_event(
+        store,
+        "delete",
+        "category",
+        category_id,
+        f"Categoria eliminada: {category.get('name', category_id)}."
+        + (f" Subcategorias promovidas: {len(promoted_children)}." if promoted_children else ""),
+        before,
+        None,
+    )
+    push_admin_toast("Categoria eliminada correctamente.", "warning", "Categoria eliminada")
     persist_category_action(
         store,
         changed_categories,
@@ -11291,12 +13119,22 @@ def media_library():
         if not can_module_action("media_library", "create"):
             return forbidden_response()
         product_id = request.form.get("productId", "")
+        product = find_company_record(store, "products", product_id) if product_id else None
+        if product_id and not product:
+            return render_template(
+                "media_library.html",
+                products=visible_records_for_current_company(store, "products"),
+                assets=[],
+                bulk_result=consume_bulk_result("media_library"),
+                error="Selecciona un producto valido para asociar el recurso.",
+            ), 400
         uploaded_asset = save_upload(request.files.get("assetFile"), "library")
         asset_url = uploaded_asset or sanitize_url(request.form.get("assetUrl", ""))
         asset_type = request.form.get("assetType", "image")
-        title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False) or "Activo Wulkan"
+        title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False) or "Activo FVENTAS"
         if asset_url:
             asset = {
+                "companyId": current_company_id(store),
                 "id": next_id("asset", title),
                 "title": title,
                 "assetType": asset_type,
@@ -11305,7 +13143,6 @@ def media_library():
                 "createdAt": utc_now(),
             }
             store["media_assets"].append(asset)
-            product = find_by_id(store["products"], product_id)
             if product:
                 if asset_type == "pdf":
                     product.setdefault("pdfUrls", []).append(asset_url)
@@ -11317,11 +13154,13 @@ def media_library():
         save_store(store)
         return redirect(url_for("media_library"))
 
-    products = store["products"]
+    products = visible_records_for_current_company(store, "products")
     product_lookup = {product["id"]: product for product in products}
     assets = []
     for asset in reversed(store.get("media_assets", [])):
         if document_is_asset(asset) or asset.get("status") == "deleted":
+            continue
+        if not can_access_company_record(asset, store):
             continue
         enriched_asset = dict(asset)
         product = product_lookup.get(enriched_asset.get("productId"))
@@ -11347,11 +13186,14 @@ def media_library_import():
 @require_roles(*roles_for_action("media_library", "delete"))
 def media_asset_delete(asset_id: str):
     store = load_store()
-    asset = find_by_id(store.get("media_assets", []), asset_id)
+    asset = find_company_record(store, "media_assets", asset_id)
     if asset:
         before = copy.deepcopy(asset)
-        store["media_assets"] = [item for item in store.get("media_assets", []) if item.get("id") != asset_id]
-        product = find_by_id(store.get("products", []), asset.get("productId", ""))
+        store["media_assets"] = [
+            item for item in store.get("media_assets", [])
+            if item.get("id") != asset_id or not can_access_company_record(item, store)
+        ]
+        product = find_company_record(store, "products", asset.get("productId", ""))
         if product:
             url = asset.get("url", "")
             if asset.get("assetType") == "pdf":
@@ -11410,7 +13252,7 @@ def documents():
                 "status": request.form.get("status", "active") if request.form.get("status", "active") in dict(DOCUMENT_STATUS_OPTIONS) else "active",
                 "notes": sanitize_text(request.form.get("notes", ""), max_length=1200),
                 "createdById": session.get("admin_user_id", ""),
-                "createdByName": session.get("admin_name", "Admin Wulkan"),
+                "createdByName": session.get("admin_name", "FVENTAS Admin"),
                 "createdAt": utc_now(),
                 "updatedAt": utc_now(),
             }
@@ -11452,7 +13294,7 @@ def documents_import():
 @require_roles(*roles_for_action("documents", "view"))
 def document_open(asset_id: str):
     store = load_store()
-    asset = find_by_id(store.get("media_assets", []), asset_id)
+    asset = find_company_record(store, "media_assets", asset_id)
     if not can_open_document(asset, store):
         abort(403)
     signed_url = document_signed_url(asset)
@@ -11482,7 +13324,7 @@ def document_private_file(token: str):
         abort(403)
 
     store = load_store()
-    asset = find_by_id(store.get("media_assets", []), payload.get("assetId", ""))
+    asset = find_company_record(store, "media_assets", payload.get("assetId", ""))
     if not can_open_document(asset, store):
         abort(403)
     raw_url = sanitize_url(asset.get("url", ""))
@@ -11542,7 +13384,7 @@ def documents_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=documentos_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=documentos_fventas.csv"},
     )
 
 
@@ -11550,7 +13392,7 @@ def documents_export():
 @require_roles(*roles_for_action("documents", "delete"))
 def document_delete(asset_id: str):
     store = load_store()
-    asset = find_by_id(store.get("media_assets", []), asset_id)
+    asset = find_company_record(store, "media_assets", asset_id)
     if asset and document_is_asset(asset):
         before = copy.deepcopy(asset)
         asset["status"] = "deleted"
@@ -11607,7 +13449,7 @@ def service_technicians_import():
 @require_roles(*roles_for_action("service_technicians", "edit"))
 def service_technician_edit(technician_id: str):
     store = load_store()
-    technician = find_by_id(store.get("service_technicians", []), technician_id)
+    technician = find_company_record(store, "service_technicians", technician_id)
     if technician:
         before = copy.deepcopy(technician)
         updated = service_technician_payload(technician)
@@ -11632,7 +13474,7 @@ def service_technician_edit(technician_id: str):
 @require_roles(*roles_for_action("service_technicians", "delete"))
 def service_technician_delete(technician_id: str):
     store = load_store()
-    technician = find_by_id(store.get("service_technicians", []), technician_id)
+    technician = find_company_record(store, "service_technicians", technician_id)
     if technician:
         before = copy.deepcopy(technician)
         technician["status"] = "deleted"
@@ -11707,7 +13549,7 @@ def credit_dashboard_context(store: dict) -> dict:
             continue
         enriched_movement = dict(movement)
         client = client_lookup.get(enriched_movement.get("clientId", ""))
-        enriched_movement["clientName"] = client.get("businessName", "Cliente Wulkan") if client else "Cliente Wulkan"
+        enriched_movement["clientName"] = client.get("businessName", "Cliente FVENTAS") if client else "Cliente FVENTAS"
         payments.append(enriched_movement)
     due_orders = [
         order
@@ -11833,7 +13675,7 @@ def credit_export():
         output,
         fieldnames=[
             "cliente",
-            "rif",
+            "documento_fiscal",
             "email",
             "vendedor",
             "estado_credito",
@@ -11858,7 +13700,7 @@ def credit_export():
         writer.writerow(
             {
                 "cliente": client.get("businessName", ""),
-                "rif": client.get("taxId", ""),
+                "documento_fiscal": client.get("taxId", ""),
                 "email": client.get("email", ""),
                 "vendedor": client.get("assignedSellerName", ""),
                 "estado_credito": client.get("creditStatusLabel", ""),
@@ -11880,7 +13722,7 @@ def credit_export():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=credito_b2b_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=credito_b2b_fventas.csv"},
     )
 
 
@@ -11912,7 +13754,7 @@ def credit_due_export():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=vencimientos_credito_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=vencimientos_credito_fventas.csv"},
     )
 
 
@@ -11924,7 +13766,7 @@ def credit_history_export():
     output = io.StringIO()
     writer = csv.DictWriter(
         output,
-        fieldnames=["fecha", "orden", "cliente", "metodo", "referencia", "monto_usd", "monto_ves", "usuario", "nota"],
+        fieldnames=["fecha", "orden", "cliente", "metodo", "referencia", "monto_usd", "monto_clp", "usuario", "nota"],
         lineterminator="\n",
     )
     writer.writeheader()
@@ -11937,7 +13779,7 @@ def credit_history_export():
                 "metodo": payment.get("method", ""),
                 "referencia": payment.get("reference", ""),
                 "monto_usd": payment.get("amountUsd", 0),
-                "monto_ves": payment.get("amountVes", 0),
+                "monto_clp": payment.get("amountClp", payment.get("amountVes", 0)),
                 "usuario": payment.get("createdBy", ""),
                 "nota": payment.get("note", ""),
             }
@@ -11945,7 +13787,7 @@ def credit_history_export():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=historial_credito_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=historial_credito_fventas.csv"},
     )
 
 
@@ -11953,8 +13795,8 @@ def credit_history_export():
 @require_roles(*roles_for_action("credit", "approve"))
 def credit_decision(client_id: str):
     store = load_store()
-    client = find_by_id(store.get("clients", []), client_id)
-    if not client:
+    client = find_company_record(store, "clients", client_id)
+    if not client or not can_access_client_record(client, store):
         return redirect(url_for("credit"))
 
     before = copy.deepcopy(client)
@@ -12123,7 +13965,7 @@ def notifications():
 def notification_read(notification_id: str):
     store = load_store()
     notification = find_by_id(store.get("notifications", []), notification_id)
-    if not notification or not notification_visible_to_current_admin(notification):
+    if not notification or not notification_visible_to_current_admin(store, notification):
         return redirect(url_for("notifications"))
     before = copy.deepcopy(notification)
     notification["status"] = "read"
@@ -12149,7 +13991,7 @@ def notifications_read_all():
     now = utc_now()
     updated = 0
     for notification in store.get("notifications", []):
-        if notification.get("status") == "unread" and notification_visible_to_current_admin(notification):
+        if notification.get("status") == "unread" and notification_visible_to_current_admin(store, notification):
             notification["status"] = "read"
             notification["readAt"] = now
             notification["updatedAt"] = now
@@ -12248,7 +14090,7 @@ def business_rules_page_context(store: dict) -> dict:
         code="orders.customer.required",
         title="Orden siempre con cliente",
         module="Ordenes",
-        description="No se permite crear ni mantener ordenes sin cliente ferretero asociado.",
+        description="No se permite crear ni mantener ordenes sin cliente B2B asociado.",
         count=len(orders_without_client),
         examples=[order.get("orderId", order.get("id", "")) for order in orders_without_client],
         href=business_rule_href("orders", "orders"),
@@ -12267,7 +14109,7 @@ def business_rules_page_context(store: dict) -> dict:
         code="orders.items.required",
         title="Orden siempre con productos",
         module="Ordenes",
-        description="Toda orden debe contener items validos del catalogo publicado por Wulkan.",
+        description="Toda orden debe contener items validos del catalogo publicado por FVENTAS.",
         count=len(orders_without_items) + len(invalid_item_orders),
         examples=[order.get("orderId", order.get("id", "")) for order in orders_without_items + invalid_item_orders],
         href=business_rule_href("orders", "orders"),
@@ -12375,15 +14217,15 @@ def business_rules_page_context(store: dict) -> dict:
         href=business_rule_href("products", "products"),
     )
 
-    client_rif_duplicates = duplicate_record_groups(clients, "taxId", "businessName")
+    client_rut_duplicates = duplicate_record_groups(clients, "taxId", "businessName")
     add_business_rule(
         rules,
-        code="clients.rif.unique",
-        title="RIF unico",
+        code="clients.tax_id.unique",
+        title="Documento fiscal unico",
         module="Clientes",
-        description="El RIF no debe repetirse para evitar credito duplicado, cartera mezclada o facturacion incorrecta.",
-        count=len(client_rif_duplicates),
-        examples=[f"{rif.upper()}: {', '.join(names)}" for rif, names in client_rif_duplicates.items()],
+        description="El documento fiscal no debe repetirse para evitar credito duplicado, cartera mezclada o facturacion incorrecta.",
+        count=len(client_rut_duplicates),
+        examples=[f"{rut.upper()}: {', '.join(names)}" for rut, names in client_rut_duplicates.items()],
         href=business_rule_href("clients", "clients"),
     )
 
@@ -12399,7 +14241,7 @@ def business_rules_page_context(store: dict) -> dict:
         code="products.price.non_negative",
         title="Precios no negativos",
         module="Productos",
-        description="Los precios publico, ferretero, anterior y costo referencial deben ser validos antes de publicar.",
+        description="Los precios publico, B2B, anterior y costo referencial deben ser validos antes de publicar.",
         count=len(invalid_price_products),
         examples=[product.get("sku", product.get("id", "")) for product in invalid_price_products],
         href=business_rule_href("products", "products"),
@@ -12488,7 +14330,7 @@ def business_rules_page_context(store: dict) -> dict:
         "rules": rules,
         "incidents": [rule for rule in rules if rule["status"] != "ok"],
         "metrics": metrics,
-        "status_graph": graphify_from_pairs(
+        "status_graph": insights_from_pairs(
             [
                 ("OK", metrics["ok"]),
                 ("Atencion", metrics["warning"]),
@@ -12496,7 +14338,7 @@ def business_rules_page_context(store: dict) -> dict:
             ],
             3,
         ),
-        "module_graph": graphify_from_pairs(list(module_counts.items()), 8),
+        "module_graph": insights_from_pairs(list(module_counts.items()), 8),
     }
 
 
@@ -12569,7 +14411,7 @@ def maintenance_page_context(store: dict) -> dict:
         and storage_backend == "s3"
         and bool(app.config.get("REQUIRE_MOBILE_TOKEN"))
         and not bool(app.config.get("SQL_FALLBACK_TO_JSON"))
-        and app.config.get("SECRET_KEY") != "wulkan-dev"
+        and app.config.get("SECRET_KEY") not in {"fventas-dev"}
     )
     add_maintenance_area(
         areas,
@@ -12589,7 +14431,7 @@ def maintenance_page_context(store: dict) -> dict:
         key="indexes",
         title="Indices SQL",
         module="Base de datos",
-        status="ok" if latest_migration.endswith("0010_performance_indexes") else "warning",
+        status="ok" if latest_migration.endswith("0011_tenant_scoped_client_product_indexes") else "warning",
         detail=f"{len(migration_files)} migraciones Alembic. Ultima: {latest_migration}.",
         href=url_for("maintenance_export"),
         action="Exportar estado",
@@ -12632,7 +14474,7 @@ def maintenance_page_context(store: dict) -> dict:
         module="Release",
         status="ok" if app.config.get("BUILD_SHA") else ("warning" if is_production else "ok"),
         detail=f"Version {app.config.get('APP_VERSION')} - build {app.config.get('BUILD_SHA') or 'no informado'}.",
-        action="Configurar WULKAN_BUILD_SHA" if not app.config.get("BUILD_SHA") else "",
+        action="Configurar FVENTAS_BUILD_SHA" if not app.config.get("BUILD_SHA") else "",
     )
     if docs_root.exists():
         required_docs = [
@@ -12711,7 +14553,7 @@ def maintenance_page_context(store: dict) -> dict:
         "runtime_rows": runtime_rows,
         "latest_migration": latest_migration,
         "counts": counts,
-        "status_graph": graphify_from_pairs(
+        "status_graph": insights_from_pairs(
             [
                 ("OK", metrics["ok"]),
                 ("Atencion", metrics["warning"]),
@@ -12719,7 +14561,7 @@ def maintenance_page_context(store: dict) -> dict:
             ],
             3,
         ),
-        "volume_graph": graphify_from_pairs(
+        "volume_graph": insights_from_pairs(
             [
                 ("Productos", counts["products"]),
                 ("Clientes", counts["clients"]),
@@ -12769,7 +14611,7 @@ def maintenance_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=wulkan_mantenimiento.csv"},
+        headers={"Content-Disposition": "attachment; filename=fventas_mantenimiento.csv"},
     )
 
 
@@ -12881,11 +14723,11 @@ def audit_page_context(store: dict) -> dict:
         "snapshotGap": snapshot_gap,
         "snapshotRate": snapshot_rate,
     }
-    graphify_summary = f"{metrics['writes']} cambios / {metrics['actors']} actores"
+    insights_summary = f"{metrics['writes']} cambios / {metrics['actors']} actores"
     return {
         "events": events,
         "metrics": metrics,
-        "graphify_summary": graphify_summary,
+        "insights_summary": insights_summary,
         "filters": filters,
         "action_options": sorted({event.get("action", "") for event in all_events if event.get("action")}),
         "entity_options": sorted({event.get("entityType", "") for event in all_events if event.get("entityType")}),
@@ -12898,10 +14740,10 @@ def audit_page_context(store: dict) -> dict:
             ("read", "Lectura"),
         ],
         "charts": {
-            "actions": graphify_from_pairs(list(action_counts.items()), 8),
-            "entities": graphify_from_pairs(list(entity_counts.items()), 8),
-            "actors": graphify_from_pairs(list(actor_counts.items()), 8),
-            "severity": graphify_from_pairs(list(severity_counts.items()), 8),
+            "actions": insights_from_pairs(list(action_counts.items()), 8),
+            "entities": insights_from_pairs(list(entity_counts.items()), 8),
+            "actors": insights_from_pairs(list(actor_counts.items()), 8),
+            "severity": insights_from_pairs(list(severity_counts.items()), 8),
         },
         "can_export_audit": can_module_action("audit", "export"),
     }
@@ -12919,18 +14761,51 @@ def payment_terms_from_text(value: str) -> list[int]:
 
 def settings_payload_from_form(existing: dict) -> dict:
     now = utc_now()
+    market_country = normalize_market_country(request.form.get("marketCountry") or existing.get("marketCountry") or "CL")
+    profile = market_profile(market_country)
+    exchange_rate = safe_float(
+        request.form.get("exchangeRateBaseToLocal")
+        or request.form.get("exchangeRateUsdClp")
+        or request.form.get("exchangeRateUsdVes"),
+        profile.get("exchangeRateBaseToLocal", 950),
+    )
+    sales_currency = normalize_currency_code(
+        request.form.get("salesCurrency") or request.form.get("primaryCurrency"),
+        profile.get("salesCurrency", "USD"),
+    )
+    local_currency = normalize_currency_code(
+        request.form.get("localCurrency") or request.form.get("referenceCurrency"),
+        profile.get("localCurrency", "CLP"),
+    )
+    pricing = plan_pricing_for_country(market_country)
     payload = dict(existing or {})
     payload.update(
         {
-            "companyName": sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False) or "Wulkan Venezuela",
+            "companyName": sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False) or f"FVENTAS {profile['label']}",
             "companyLegalName": sanitize_text(request.form.get("companyLegalName", ""), max_length=180, allow_newlines=False),
             "taxId": sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False),
             "supportEmail": request.form.get("supportEmail", "").strip().lower(),
             "supportPhone": sanitize_text(request.form.get("supportPhone", ""), max_length=60, allow_newlines=False),
             "logoUrl": sanitize_url(request.form.get("logoUrl", "")),
-            "primaryCurrency": request.form.get("primaryCurrency", "USD").strip().upper() or "USD",
-            "referenceCurrency": request.form.get("referenceCurrency", "VES").strip().upper() or "VES",
-            "exchangeRateUsdVes": safe_float(request.form.get("exchangeRateUsdVes"), 38.5),
+            "marketCountry": market_country,
+            "marketCountryName": profile["label"],
+            "country": profile["code"],
+            "taxLabel": profile["taxLabel"],
+            "taxPlaceholder": profile["taxPlaceholder"],
+            "phonePrefix": profile["phonePrefix"],
+            "phonePlaceholder": profile["phonePlaceholder"],
+            "locale": profile["locale"],
+            "timezone": profile["timezone"],
+            "salesCurrency": sales_currency,
+            "localCurrency": local_currency,
+            "primaryCurrency": sales_currency,
+            "referenceCurrency": local_currency,
+            "exchangeRateBaseToLocal": exchange_rate,
+            "exchangeRateUsdClp": exchange_rate,
+            "exchangeRateUsdVes": exchange_rate,
+            "planCurrency": pricing["currency"],
+            "planPrice": pricing["price"],
+            "planPriceClp": pricing["priceClp"],
             "defaultPaymentTermsDays": payment_terms_from_text(request.form.get("defaultPaymentTermsDays", "")),
             "creditApprovalThresholdUsd": safe_float(request.form.get("creditApprovalThresholdUsd"), 0),
             "overdueBlockDays": max(0, safe_int(request.form.get("overdueBlockDays"), 15)),
@@ -12952,11 +14827,38 @@ def settings_payload_from_form(existing: dict) -> dict:
 
 def settings_page_context(store: dict, error: str = "", success: str = "") -> dict:
     settings_data = business_settings(store)
+    currency_data = currency_context(store)
+    profile = currency_data["market_profile"]
+    pricing = plan_pricing_for_country(profile["code"])
+    settings_data.update(
+        {
+            "marketCountry": currency_data["market_country"],
+            "marketCountryName": profile["label"],
+            "taxLabel": settings_data.get("taxLabel") or profile["taxLabel"],
+            "taxPlaceholder": settings_data.get("taxPlaceholder") or profile["taxPlaceholder"],
+            "phonePrefix": settings_data.get("phonePrefix") or profile["phonePrefix"],
+            "phonePlaceholder": settings_data.get("phonePlaceholder") or profile["phonePlaceholder"],
+            "locale": settings_data.get("locale") or profile["locale"],
+            "timezone": settings_data.get("timezone") or profile["timezone"],
+            "salesCurrency": currency_data["sales_currency"],
+            "localCurrency": currency_data["local_currency"],
+            "exchangeRateBaseToLocal": currency_data["exchange_rate"],
+            "primaryCurrency": currency_data["sales_currency"],
+            "referenceCurrency": currency_data["local_currency"],
+            "planCurrency": settings_data.get("planCurrency") or pricing["currency"],
+            "planPrice": settings_data.get("planPrice") or pricing["price"],
+            "planPriceClp": settings_data.get("planPriceClp") or pricing["priceClp"],
+        }
+    )
     return {
         "settings": settings_data,
         "payment_terms_text": ", ".join(str(term) for term in settings_data.get("defaultPaymentTermsDays", [0])),
         "notification_emails_text": "\n".join(settings_data.get("notificationEmails", [])),
         "commission_rule_options": COMMISSION_RULE_OPTIONS,
+        "market_country_options": MARKET_COUNTRY_OPTIONS,
+        "market_profiles": MARKET_PROFILES,
+        "market_profile": profile,
+        "currency_options": CURRENCY_OPTIONS,
         "error": error,
         "success": success,
         "can_edit_settings": can_module_action("settings", "edit"),
@@ -13019,7 +14921,7 @@ def audit_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=auditoria_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=auditoria_fventas.csv"},
     )
 
 
@@ -13122,7 +15024,7 @@ def crm_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=crm_comercial_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=crm_comercial_fventas.csv"},
     )
 
 
@@ -13196,7 +15098,7 @@ def crm_activity_create(record_id: str):
 def crm_delete(record_id: str):
     store = load_store()
     record = find_by_id(store.get("crm_records", []), record_id)
-    if not record or not can_module_action("crm", "delete"):
+    if not record or not can_access_crm_record(record, store) or not can_module_action("crm", "delete"):
         return redirect(url_for("crm"))
     before = copy.deepcopy(record)
     record["status"] = "deleted"
@@ -13239,7 +15141,7 @@ def quotes_export():
         "plazo_dias",
         "version",
         "total_usd",
-        "total_ves",
+        "total_clp",
         "items",
         "orden_convertida",
     ]
@@ -13258,7 +15160,7 @@ def quotes_export():
                 "plazo_dias": quote.get("paymentTermDays", 0),
                 "version": quote.get("version", 1),
                 "total_usd": quote.get("totalUsd", 0),
-                "total_ves": quote.get("totalVes", 0),
+                "total_clp": quote.get("totalClp", quote.get("totalVes", 0)),
                 "items": "|".join(
                     f"{item.get('sku', '')}:{item.get('quantity', 0)}"
                     for item in quote.get("items") or []
@@ -13269,7 +15171,7 @@ def quotes_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=cotizaciones_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=cotizaciones_fventas.csv"},
     )
 
 
@@ -13373,8 +15275,8 @@ def quote_duplicate(quote_id: str):
     if not source or not can_access_quote_record(source, store):
         return redirect(url_for("quotes"))
     quote = copy.deepcopy(source)
-    quote["id"] = next_id("quote", quote.get("clientName") or quote.get("quoteNumber", "wulkan"))
-    quote["quoteNumber"] = next_quote_number((quote.get("client") or {}).get("name", "Wulkan"))
+    quote["id"] = next_id("quote", quote.get("clientName") or quote.get("quoteNumber", "fventas"))
+    quote["quoteNumber"] = next_quote_number((quote.get("client") or {}).get("name", "FVENTAS"))
     quote["status"] = "draft"
     quote["version"] = 1
     quote["versions"] = []
@@ -13534,7 +15436,7 @@ def orders_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=ordenes_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=ordenes_fventas.csv"},
     )
 
 
@@ -13544,8 +15446,8 @@ def order_new():
     store = load_store()
     if request.method == "POST":
         payload = assisted_order_payload_from_form()
-        client = find_by_id(store.get("clients", []), payload.get("customerId", ""))
-        if not can_access_client_record(client):
+        client = find_company_record(store, "clients", payload.get("customerId", ""))
+        if not can_access_client_record(client, store):
             return forbidden_response()
         order, error = build_commercial_order(
             store,
@@ -13560,7 +15462,7 @@ def order_new():
             store,
             "order",
             order["orderId"],
-            f"Pedido asistido creado para {order['customer'].get('name', 'Cliente Wulkan')}.",
+            f"Pedido asistido creado para {order['customer'].get('name', 'Cliente FVENTAS')}.",
             order,
         )
         notify_order_created(store, order)
@@ -13584,7 +15486,7 @@ def order_status_update(order_id: str):
     if target_status not in allowed_statuses:
         return redirect(url_for("orders"))
 
-    client = find_by_id(store.get("clients", []), order.get("customerId", ""))
+    client = find_company_record(store, "clients", order.get("customerId", ""))
     movements = store.get("credit_movements", [])
     balance = order_balance_usd(order, movements)
     note = request.form.get("note", "").strip()
@@ -13595,6 +15497,32 @@ def order_status_update(order_id: str):
         ), 400
 
     sale_type = order.get("saleType", "cash")
+    if target_status == "delivered":
+        delivery_block_reason = order_release_block_reason(order, movements)
+        if delivery_block_reason:
+            order["dispatchStatus"] = "payment_hold"
+            order["stockStatus"] = "payment_hold"
+            order["paymentHoldReason"] = delivery_block_reason
+            order["currentOwner"] = "Cobranza"
+            order["managedBy"] = session.get("admin_name", "Admin")
+            order["managedAt"] = utc_now()
+            order["updatedAt"] = utc_now()
+            order["balanceUsd"] = balance
+            order["paidUsd"] = order_paid_usd(order, movements)
+            append_order_history(order, order.get("status", ""), delivery_block_reason)
+            record_change_event(
+                store,
+                "delivery_blocked",
+                "order",
+                order_id,
+                delivery_block_reason,
+                before,
+                order,
+                criticality="high",
+            )
+            save_store(store)
+            return render_template("orders.html", **orders_page_context(store, delivery_block_reason)), 400
+
     if target_status in ORDER_CREDIT_RESERVING_STATUSES and sale_type == "credit_line":
         available = credit_available(
             client,
@@ -13617,7 +15545,7 @@ def order_status_update(order_id: str):
         target_status = "credit_review"
         if sale_type == "credit_line":
             order["creditStatus"] = "manual_review"
-        note = note or "Stock insuficiente para reservar o entregar esta orden."
+        note = note or order.get("paymentHoldReason") or "Stock insuficiente para reservar o entregar esta orden."
 
     if target_status in {"cancelled", "rejected"}:
         order["creditStatus"] = "cancelled"
@@ -13633,7 +15561,7 @@ def order_status_update(order_id: str):
         order["currentOwner"] = "Inventario"
     elif target_status == "delivered":
         order["dispatchStatus"] = "delivered"
-        order["currentOwner"] = "Cobranza" if balance > 0 else "Comercial"
+        order["currentOwner"] = "Cierre"
     elif target_status in {"paid", "cancelled", "rejected"}:
         order["currentOwner"] = "Cierre"
 
@@ -13674,16 +15602,17 @@ def order_payment_create(order_id: str):
     if amount_usd <= 0:
         return redirect(next_url)
 
-    exchange_rate = float(request.form.get("exchangeRateUsdVes") or order.get("exchangeRateUsdVes") or current_rate())
-    amount_ves = float(request.form.get("amountVes") or round(amount_usd * exchange_rate, 2))
+    exchange_rate = float(request.form.get("exchangeRateUsdClp") or order.get("exchangeRateUsdClp") or current_rate())
+    amount_clp = float(request.form.get("amountClp") or request.form.get("amountVes") or round(amount_usd * exchange_rate, 2))
     movement = {
         "id": next_id("credit-payment", order.get("orderId") or order.get("id", "")),
         "movementType": "payment",
         "clientId": order.get("customerId", ""),
         "orderId": order.get("orderId") or order.get("id", ""),
         "amountUsd": amount_usd,
-        "amountVes": amount_ves,
-        "exchangeRateUsdVes": exchange_rate,
+        "amountClp": amount_clp,
+        "amountVes": amount_clp,
+        "exchangeRateUsdClp": exchange_rate,
         "method": request.form.get("method", "cash"),
         "reference": request.form.get("reference", "").strip(),
         "note": request.form.get("note", "").strip(),
@@ -13864,7 +15793,7 @@ def collections_export():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=cobranza_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=cobranza_fventas.csv"},
     )
 
 
@@ -13872,13 +15801,13 @@ def collections_export():
 @require_roles(*roles_for_action("collections", "export"))
 def collection_statement(client_id: str):
     store = load_store()
-    client = find_by_id(store.get("clients", []), client_id)
-    if not client:
+    client = find_company_record(store, "clients", client_id)
+    if not client or not can_access_client_record(client, store):
         return redirect(url_for("collections"))
     movements = store.get("credit_movements", [])
     orders = [
         enrich_order(order, movements)
-        for order in store.get("orders", [])
+        for order in visible_orders_for_current_user(store)
         if order.get("customerId") == client_id and order.get("status") not in {"cancelled", "rejected"}
     ]
     output = io.StringIO()
@@ -13929,7 +15858,7 @@ def collection_action(order_id: str):
     order = find_order(store.get("orders", []), order_id)
     if not order or not can_access_order_record(order, store):
         return redirect(url_for("collections"))
-    client = find_by_id(store.get("clients", []), order.get("customerId", ""))
+    client = find_company_record(store, "clients", order.get("customerId", ""))
     before = copy.deepcopy({"order": order, "client": client})
     action = request.form.get("action", "in_management")
     note = request.form.get("collectionComment", "").strip()
@@ -14103,7 +16032,7 @@ def dispatch_export():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=despacho_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=despacho_fventas.csv"},
     )
 
 
@@ -14138,7 +16067,10 @@ def dispatch_update(order_id: str):
             order[field] = incoming
     if evidence_url:
         order["deliveryEvidenceUrl"] = evidence_url
-    order["dispatchStatus"] = target_status
+    audit_action = "dispatch_update"
+    audit_criticality = None
+    if target_status != "delivered":
+        order["dispatchStatus"] = target_status
     if target_status == "preparing":
         order["status"] = "preparing"
         order["currentOwner"] = "Despacho"
@@ -14148,10 +16080,30 @@ def dispatch_update(order_id: str):
         order["dispatchedAt"] = order.get("dispatchedAt") or now
         order["currentOwner"] = "Despacho"
     elif target_status == "delivered":
-        order["deliveredAt"] = order.get("deliveredAt") or now
-        apply_inventory_transition(store, order, "delivered")
-        order["status"] = "delivered" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else "paid"
-        order["currentOwner"] = "Cobranza" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else "Cierre"
+        delivery_block_reason = order_release_block_reason(order, store.get("credit_movements", []))
+        if delivery_block_reason:
+            target_status = "payment_hold"
+            order["dispatchStatus"] = target_status
+            order["stockStatus"] = "payment_hold"
+            order["paymentHoldReason"] = delivery_block_reason
+            order["currentOwner"] = "Cobranza"
+            order["logisticsNote"] = order.get("logisticsNote") or delivery_block_reason
+            audit_action = "delivery_blocked"
+            audit_criticality = "high"
+        else:
+            order["deliveredAt"] = order.get("deliveredAt") or now
+            if apply_inventory_transition(store, order, "delivered"):
+                order["dispatchStatus"] = "delivered"
+                order["status"] = "paid"
+                order["currentOwner"] = "Cierre"
+                order["paymentHoldReason"] = ""
+                if float(order.get("commissionUsd") or 0) > 0:
+                    order["commissionStatus"] = "commission_approved"
+            else:
+                target_status = "failed"
+                order["dispatchStatus"] = target_status
+                order["currentOwner"] = "Despacho"
+                order["logisticsNote"] = order.get("logisticsNote") or "Stock insuficiente para entregar esta orden."
     elif target_status == "closed":
         order["currentOwner"] = "Cierre"
     elif target_status in {"failed", "rescheduled", "returned"}:
@@ -14169,12 +16121,13 @@ def dispatch_update(order_id: str):
     append_order_history(order, order.get("status", ""), f"Despacho: {dispatch_status_label(target_status)}.")
     record_change_event(
         store,
-        "dispatch_update",
+        audit_action,
         "order",
         order_id,
         f"Despacho actualizado a {dispatch_status_label(target_status)}.",
         before,
         order,
+        criticality=audit_criticality,
     )
     save_store(store)
     return redirect(url_for("dispatch"))
@@ -14239,7 +16192,7 @@ def commissions_export():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=comisiones_wulkan.csv"},
+        headers={"Content-Disposition": "attachment; filename=comisiones_fventas.csv"},
     )
 
 
@@ -14473,7 +16426,7 @@ def api_create_order():
     order, error = build_commercial_order(
         store,
         payload,
-        actor={"id": customer_id, "name": customer_payload.get("name", "Cliente Wulkan"), "role": "client"},
+        actor={"id": customer_id, "name": customer_payload.get("name", "Cliente FVENTAS"), "role": "client"},
         default_channel="mobile",
     )
     if error:
@@ -14483,7 +16436,7 @@ def api_create_order():
         store,
         "order",
         order["orderId"],
-        f"Orden movil creada por {order['customer'].get('name', 'Cliente Wulkan')}.",
+        f"Orden movil creada por {order['customer'].get('name', 'Cliente FVENTAS')}.",
         order,
         actor={"id": customer_id, "name": order["customer"].get("name", ""), "role": "client"},
     )
@@ -14580,7 +16533,7 @@ def api_mobile_seller_summary():
         {
             "summary": {
                 "sellerId": user["id"],
-                "sellerName": user.get("name", "Vendedor Wulkan"),
+                "sellerName": user.get("name", "Vendedor FVENTAS"),
                 "role": user.get("role", ""),
                 "roleLabel": ROLE_LABELS.get(user.get("role", ""), "Vendedor"),
                 "sellerCode": user.get("sellerCode", ""),
@@ -14626,14 +16579,14 @@ def api_mobile_seller_summary():
         }
     )
 
-@app.get("/api/v1/mobile/locations/venezuela")
-@app.get("/api/mobile/locations/venezuela")
-def api_mobile_locations_venezuela():
+@app.get("/api/v1/mobile/locations/chile")
+@app.get("/api/mobile/locations/chile")
+def api_mobile_locations_chile():
     return jsonify(
         {
             "items": [
                 {"state": state, "cities": cities}
-                for state, cities in VENEZUELA_STATE_CITIES.items()
+                for state, cities in CHILE_REGION_CITIES.items()
             ]
         }
     )
@@ -14649,6 +16602,8 @@ def api_mobile_seller_clients():
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
+        user_company_id = mobile_user_company_id(store, user)
+        profile = active_market_profile_for_store(store, user_company_id)
         email = str(payload.get("email") or "").strip().lower()
         business_name = str(payload.get("businessName") or payload.get("name") or "").strip()
         raw_idempotency_key = request.headers.get("Idempotency-Key") or payload.get("idempotencyKey") or ""
@@ -14662,32 +16617,40 @@ def api_mobile_seller_clients():
             field_errors["email"] = "Ingresa un correo valido, por ejemplo cliente@empresa.com."
         if app.config.get("ENV") == "production":
             unsafe_text = f"{business_name} {email}".lower()
-            if email.endswith("@wulkan.local"):
-                field_errors["email"] = "Usa un correo real del cliente. @wulkan.local solo sirve para desarrollo."
+            if email.endswith("@fventas.local"):
+                field_errors["email"] = "Usa un correo real del cliente. @fventas.local solo sirve para desarrollo."
             elif "demo" in unsafe_text:
                 field_errors["businessName"] = "No uses datos demo en produccion. Ingresa datos reales del cliente."
-        normalized_tax_id = normalize_venezuelan_rif(payload.get("taxId"))
-        normalized_phone = normalize_venezuelan_phone(payload.get("phone"))
-        normalized_whatsapp = normalize_venezuelan_phone(payload.get("whatsapp")) if payload.get("whatsapp") else normalized_phone
-        normalized_state, normalized_city, location_error = normalize_venezuelan_location(
+        normalized_tax_id = normalize_tax_id_for_market(payload.get("taxId"), profile)
+        normalized_phone = normalize_phone_for_market(payload.get("phone"), profile)
+        normalized_whatsapp = (
+            normalize_phone_for_market(payload.get("whatsapp"), profile)
+            if payload.get("whatsapp")
+            else normalized_phone
+        )
+        normalized_state, normalized_city, location_error = normalize_location_for_market(
             payload.get("state"),
             payload.get("city"),
+            profile,
         )
         if not normalized_tax_id:
-            field_errors["taxId"] = "Ingresa un RIF venezolano valido, por ejemplo J-12345678-9."
+            field_errors["taxId"] = (
+                f"Ingresa un {profile.get('taxLabel', 'documento fiscal')} valido. "
+                f"Ejemplo: {profile.get('taxPlaceholder', 'ID fiscal')}."
+            )
         if not normalized_phone:
-            field_errors["phone"] = "Ingresa un telefono venezolano valido, por ejemplo 0412-1234567."
+            field_errors["phone"] = f"Ingresa un telefono valido. Ejemplo: {profile.get('phonePlaceholder', '+ codigo pais telefono')}."
         if payload.get("whatsapp") and not normalized_whatsapp:
-            field_errors["whatsapp"] = "Ingresa un WhatsApp venezolano valido."
+            field_errors["whatsapp"] = "Ingresa un WhatsApp valido."
         if location_error:
             field_errors["location"] = location_error
         if field_errors:
             return jsonify({"error": "Revisa los datos del cliente.", "errors": field_errors}), 400
 
         def find_existing_mobile_client(source_store: dict) -> dict | None:
-            for candidate in source_store.get("clients", []):
+            for candidate in mobile_company_records(source_store, "clients", user):
                 candidate_email = str(candidate.get("email", "")).strip().lower()
-                candidate_tax_id = normalize_venezuelan_rif(candidate.get("taxId", "")).lower()
+                candidate_tax_id = normalize_tax_id_for_market(candidate.get("taxId", ""), profile).lower()
                 candidate_key = str(candidate.get("idempotencyKey", "")).strip()
                 if idempotency_key and candidate_key == idempotency_key:
                     return candidate
@@ -14725,9 +16688,10 @@ def api_mobile_seller_clients():
                 duplicate_client = client_identity_exists(
                     email=email,
                     tax_id=normalized_tax_id,
+                    company_id=user_company_id,
                 )
                 if duplicate_client:
-                    duplicate_field = "correo" if duplicate_client.get("field") == "email" else "RIF"
+                    duplicate_field = "correo" if duplicate_client.get("field") == "email" else profile.get("taxLabel", "documento fiscal")
                     return jsonify(
                         {
                             "error": (
@@ -14759,6 +16723,7 @@ def api_mobile_seller_clients():
         now = utc_now()
         client = {
             "id": next_id("client", email or business_name),
+            "companyId": user_company_id,
             "legalName": str(payload.get("legalName") or business_name).strip(),
             "commercialName": str(payload.get("commercialName") or business_name).strip(),
             "businessName": business_name,
@@ -14769,7 +16734,7 @@ def api_mobile_seller_clients():
             "phone": normalized_phone,
             "whatsapp": normalized_whatsapp,
             "email": email,
-            "clientType": "ferretero",
+            "clientType": "b2b",
             "clientCategory": str(payload.get("clientCategory") or "standard"),
             "priceList": str(payload.get("priceList") or "b2b"),
             "authorizedDiscountPercent": authorized_discount,
@@ -14778,7 +16743,7 @@ def api_mobile_seller_clients():
             "address": str(payload.get("address") or "").strip(),
             "fiscalAddress": str(payload.get("fiscalAddress") or payload.get("address") or "").strip(),
             "shippingAddress": str(payload.get("shippingAddress") or payload.get("address") or "").strip(),
-            "country": str(payload.get("country") or "VE").strip(),
+            "country": str(payload.get("country") or profile.get("code") or "CL").strip(),
             "state": normalized_state,
             "city": normalized_city,
             "deliveryZone": str(payload.get("deliveryZone") or "").strip(),
@@ -14801,11 +16766,11 @@ def api_mobile_seller_clients():
             "source": "seller_mobile",
             "createdVia": "seller_mobile",
             "createdById": user["id"],
-            "createdByName": user.get("name", "Vendedor Wulkan"),
+            "createdByName": user.get("name", "Vendedor FVENTAS"),
             "createdByRole": user.get("role", "sales"),
             "updatedVia": "seller_mobile",
             "updatedById": user["id"],
-            "updatedByName": user.get("name", "Vendedor Wulkan"),
+            "updatedByName": user.get("name", "Vendedor FVENTAS"),
             "updatedByRole": user.get("role", "sales"),
             "createdAt": now,
             "updatedAt": now,
@@ -14824,7 +16789,7 @@ def api_mobile_seller_clients():
         create_notification(
             store,
             title="Cliente nuevo por vendedor",
-            body=f"{user.get('name', 'Vendedor Wulkan')} creo {client['businessName']}.",
+            body=f"{user.get('name', 'Vendedor FVENTAS')} creo {client['businessName']}.",
             notification_type="client_created_by_seller",
             priority="normal",
             recipient_type="admin",
@@ -14833,7 +16798,7 @@ def api_mobile_seller_clients():
             entity_type="client",
             entity_id=client["id"],
             href=notification_url("clients", q=client["businessName"]),
-            metadata={"clientId": client["id"], "sellerId": user["id"]},
+            metadata={"companyId": user_company_id, "clientId": client["id"], "sellerId": user["id"]},
             dedupe_key=f"admin-client-created-{client['id']}",
         )
         notify_seller(
@@ -14846,8 +16811,8 @@ def api_mobile_seller_clients():
             module="clients",
             entity_type="client",
             entity_id=client["id"],
-            deep_link=f"wulkan://seller/clients/{client['id']}",
-            metadata={"clientId": client["id"]},
+            deep_link=f"fventas://seller/clients/{client['id']}",
+            metadata={"companyId": user_company_id, "clientId": client["id"]},
             dedupe_key=f"seller-client-assigned-{client['id']}",
         )
         notify_credit_requested(store, client)
@@ -14870,7 +16835,7 @@ def api_mobile_seller_clients():
                         return existing_client_response(existing_client, fresh_store)
                 except Exception:
                     app.logger.exception("No se pudo resolver duplicidad luego de fallo SQL.")
-                return jsonify({"error": "Ya existe un cliente con ese correo o RIF. Revisa Clientes antes de reintentar."}), 409
+                return jsonify({"error": f"Ya existe un cliente con ese correo o {profile.get('taxLabel', 'documento fiscal')}. Revisa Clientes antes de reintentar."}), 409
             if use_sql_backend():
                 try:
                     from sql_store import sync_client_records
@@ -14921,7 +16886,7 @@ def api_mobile_seller_orders():
         order, error = build_commercial_order(
             store,
             payload,
-            actor={"id": user["id"], "name": user.get("name", "Vendedor Wulkan"), "role": user.get("role", "sales")},
+            actor={"id": user["id"], "name": user.get("name", "Vendedor FVENTAS"), "role": user.get("role", "sales")},
             default_channel="seller_mobile",
         )
         if error:
@@ -14931,7 +16896,7 @@ def api_mobile_seller_orders():
             store,
             "order",
             order["orderId"],
-            f"Pedido asistido movil creado por {user.get('name', 'Vendedor Wulkan')}.",
+            f"Pedido asistido movil creado por {user.get('name', 'Vendedor FVENTAS')}.",
             order,
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
@@ -14979,7 +16944,7 @@ def api_mobile_seller_quotes():
         customer_id = str(payload.get("customerId") or (payload.get("customer") or {}).get("id") or "").strip()
         if not can_mobile_seller_access_client(store, user, customer_id):
             return jsonify({"error": "Cliente fuera de tu cartera."}), 403
-        client = find_by_id(store.get("clients", []), customer_id)
+        client = find_by_id(mobile_company_records(store, "clients", user), customer_id)
         raw_items = payload.get("items") or []
         if not isinstance(raw_items, list) or not raw_items:
             return jsonify({"error": "Agrega al menos un producto a la cotizacion."}), 400
@@ -14987,7 +16952,7 @@ def api_mobile_seller_quotes():
         items: list[dict] = []
         gross_usd = 0.0
         total_usd = 0.0
-        products = store.get("products", [])
+        products = mobile_company_records(store, "products", user)
         for index, raw_item in enumerate(raw_items, start=1):
             if not isinstance(raw_item, dict):
                 return jsonify({"error": f"Producto {index} invalido."}), 400
@@ -15019,7 +16984,7 @@ def api_mobile_seller_quotes():
                 {
                     "productId": product.get("id", ""),
                     "sku": product.get("sku", ""),
-                    "title": product.get("title", "Producto Wulkan"),
+                    "title": product.get("title", "Producto FVENTAS"),
                     "quantity": quantity,
                     "unitPriceUsd": unit_price,
                     "discountPercent": discount_percent,
@@ -15032,7 +16997,7 @@ def api_mobile_seller_quotes():
                 }
             )
 
-        exchange_rate = safe_float((payload.get("preview") or {}).get("exchangeRateUsdVes"), current_rate())
+        exchange_rate = safe_float((payload.get("preview") or {}).get("exchangeRateUsdClp"), current_rate())
         sale_type = str(payload.get("saleType") or "cash")
         if sale_type not in dict(SALE_TYPE_OPTIONS):
             sale_type = "cash"
@@ -15041,8 +17006,9 @@ def api_mobile_seller_quotes():
             payment_term_days = 0
         now = utc_now()
         quote = {
-            "id": next_id("quote", client.get("businessName", "wulkan")),
-            "quoteNumber": next_quote_number(client.get("businessName", "Wulkan")),
+            "id": next_id("quote", client.get("businessName", "fventas")),
+            "companyId": mobile_user_company_id(store, user),
+            "quoteNumber": next_quote_number(client.get("businessName", "FVENTAS")),
             "version": 1,
             "versions": [],
             "history": [],
@@ -15058,12 +17024,14 @@ def api_mobile_seller_quotes():
                 "state": client.get("state", ""),
             },
             "sellerId": user["id"],
-            "sellerName": user.get("name", "Vendedor Wulkan"),
+            "sellerName": user.get("name", "Vendedor FVENTAS"),
             "items": items,
             "grossUsd": round(gross_usd, 2),
             "discountUsd": round(max(0.0, gross_usd - total_usd), 2),
             "totalUsd": round(total_usd, 2),
+            "totalClp": round(total_usd * exchange_rate, 2),
             "totalVes": round(total_usd * exchange_rate, 2),
+            "exchangeRateUsdClp": exchange_rate,
             "exchangeRateUsdVes": exchange_rate,
             "saleType": sale_type,
             "paymentTermDays": payment_term_days,
@@ -15074,7 +17042,7 @@ def api_mobile_seller_quotes():
             "source": "seller_mobile",
             "createdAt": now,
             "createdById": user["id"],
-            "createdByName": user.get("name", "Vendedor Wulkan"),
+            "createdByName": user.get("name", "Vendedor FVENTAS"),
             "updatedAt": now,
         }
         if quote["status"] not in dict(QUOTE_STATUS_OPTIONS):
@@ -15085,7 +17053,7 @@ def api_mobile_seller_quotes():
             store,
             "quote",
             quote["id"],
-            f"Cotizacion movil creada por {user.get('name', 'Vendedor Wulkan')}.",
+            f"Cotizacion movil creada por {user.get('name', 'Vendedor FVENTAS')}.",
             quote,
             actor={"id": user["id"], "name": user.get("name", ""), "role": user.get("role", "")},
         )
@@ -15111,7 +17079,7 @@ def api_mobile_seller_activities():
         customer_id = str(payload.get("customerId") or payload.get("clientId") or "").strip()
         if not can_mobile_seller_access_client(store, user, customer_id):
             return jsonify({"error": "Cliente fuera de tu cartera."}), 403
-        client = find_by_id(store.get("clients", []), customer_id)
+        client = find_by_id(mobile_company_records(store, "clients", user), customer_id)
         note = str(payload.get("note") or payload.get("activityNote") or "").strip()
         if not note:
             return jsonify({"error": "La actividad requiere una nota."}), 400
@@ -15119,7 +17087,7 @@ def api_mobile_seller_activities():
         if activity_type not in dict(CRM_ACTIVITY_TYPE_OPTIONS):
             activity_type = "note"
         record_id = str(payload.get("recordId") or "").strip()
-        record = find_by_id(store.get("crm_records", []), record_id) if record_id else None
+        record = find_by_id(mobile_company_records(store, "crm_records", user), record_id) if record_id else None
         if record and record not in seller_scope_crm_records(store, user):
             return jsonify({"error": "Registro CRM fuera de tu cartera."}), 403
         before_record = copy.deepcopy(record) if record else None
@@ -15127,6 +17095,7 @@ def api_mobile_seller_activities():
             now = utc_now()
             record = {
                 "id": next_id("crm", client.get("businessName", "seguimiento")),
+                "companyId": mobile_user_company_id(store, user),
                 "title": str(payload.get("title") or f"Seguimiento {client.get('businessName', 'cliente')}").strip(),
                 "recordType": str(payload.get("recordType") or "opportunity"),
                 "pipelineStage": str(payload.get("pipelineStage") or "contacted"),
@@ -15134,7 +17103,7 @@ def api_mobile_seller_activities():
                 "clientId": client["id"],
                 "clientName": client.get("businessName", ""),
                 "sellerId": user["id"],
-                "sellerName": user.get("name", "Vendedor Wulkan"),
+                "sellerName": user.get("name", "Vendedor FVENTAS"),
                 "contactName": client.get("contactName", ""),
                 "phone": client.get("phone", ""),
                 "email": client.get("email", ""),
@@ -15150,7 +17119,7 @@ def api_mobile_seller_activities():
                 "activities": [],
                 "createdAt": now,
                 "createdById": user["id"],
-                "createdByName": user.get("name", "Vendedor Wulkan"),
+                "createdByName": user.get("name", "Vendedor FVENTAS"),
                 "updatedAt": now,
             }
             if record["recordType"] not in dict(CRM_RECORD_TYPE_OPTIONS):
@@ -15167,7 +17136,7 @@ def api_mobile_seller_activities():
             "note": note,
             "nextActionAt": str(payload.get("nextActionAt") or "").strip(),
             "createdById": user["id"],
-            "createdByName": user.get("name", "Vendedor Wulkan"),
+            "createdByName": user.get("name", "Vendedor FVENTAS"),
             "createdAt": now,
         }
         record.setdefault("activities", []).append(activity)
@@ -15240,11 +17209,26 @@ def api_client_credit():
 @app.get("/api/v1/mobile/meta")
 def api_mobile_meta():
     store = load_store()
+    currency_data = currency_context(store)
+    profile = currency_data["market_profile"]
     return jsonify(
         {
             "meta": mobile_api_meta(),
+            "market": {
+                "country": profile.get("code", "CL"),
+                "countryName": profile.get("label", "Mercado configurado"),
+                "taxLabel": profile.get("taxLabel", "Documento fiscal"),
+                "taxPlaceholder": profile.get("taxPlaceholder", "Documento fiscal"),
+                "phonePrefix": profile.get("phonePrefix", "+56"),
+                "phonePlaceholder": profile.get("phonePlaceholder", "+56 9 1234 5678"),
+                "salesCurrency": currency_data["sales_currency"],
+                "localCurrency": currency_data["local_currency"],
+                "exchangeRate": currency_data["exchange_rate"],
+                "locale": profile.get("locale", "es-CL"),
+                "timezone": profile.get("timezone", "America/Santiago"),
+            },
             "capabilities": {
-                "auth": ["login", "logout", "refresh", "change_password", "recover_password"],
+                "auth": ["login", "logout", "refresh", "change_password", "recover_password", "request_account_deletion"],
                 "mobile": ["home", "products", "product_detail", "categories", "banners", "cart", "orders", "credit", "profile"],
                 "seller": ["summary", "clients", "orders", "quotes", "activities", "commissions"],
                 "storage": app.config.get("STORAGE_BACKEND"),
@@ -15286,6 +17270,7 @@ def api_mobile_home():
             "sortOrder": category.get("sortOrder", 0),
             "parentId": category.get("parentId", ""),
             "productsCount": category.get("productsCount", 0),
+            "visibleInApp": bool(category.get("visibleInApp")),
         }
         for category in sorted(
             [enrich_category(item, store) for item in store.get("categories", []) if item.get("status", "active") == "active"],
@@ -15351,6 +17336,7 @@ def api_categories():
             "sortOrder": category.get("sortOrder", 0),
             "parentId": category.get("parentId", ""),
             "productsCount": category.get("productsCount", 0),
+            "visibleInApp": bool(category.get("visibleInApp")),
         }
         for category in sorted(
             [enrich_category(item, store) for item in store["categories"] if item.get("status", "active") == "active"],
@@ -15403,6 +17389,32 @@ def api_client_login():
         None,
     )
     if client and check_password_hash(client.get("passwordHash", ""), password):
+        if mobile_account_access_blocked(client):
+            record_audit_event(
+                store,
+                "mobile_login_blocked",
+                "client",
+                client["id"],
+                "Login movil bloqueado por solicitud de eliminacion de cuenta.",
+                actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
+                metadata={"email": email, "deletionStatus": client.get("deletionStatus", "")},
+                criticality="high",
+            )
+            save_store(store)
+            return mobile_account_deletion_response(), 403
+        company_id = record_company_id(client, store)
+        if not company_subscription_allows_access(store, company_id):
+            record_audit_event(
+                store,
+                "mobile_login_blocked",
+                "subscription",
+                company_id,
+                "Login movil de cliente bloqueado por suscripcion pendiente o suspendida.",
+                actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
+                metadata={"email": email, "companyId": company_id},
+            )
+            save_store(store)
+            return mobile_subscription_response(company_id)
         reset_login_attempts("mobile", email)
         client["lastLoginAt"] = utc_now()
         client["lastMobileLoginIp"] = request_ip_address()
@@ -15433,6 +17445,32 @@ def api_client_login():
         None,
     )
     if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
+        if mobile_account_access_blocked(admin_user):
+            record_audit_event(
+                store,
+                "mobile_login_blocked",
+                "admin_user",
+                admin_user["id"],
+                "Login movil operativo bloqueado por solicitud de eliminacion de cuenta.",
+                actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": admin_user.get("role", "")},
+                metadata={"email": email, "deletionStatus": admin_user.get("deletionStatus", "")},
+                criticality="high",
+            )
+            save_store(store)
+            return mobile_account_deletion_response(), 403
+        company_id = record_company_id(admin_user, store)
+        if not company_subscription_allows_access(store, company_id):
+            record_audit_event(
+                store,
+                "mobile_login_blocked",
+                "subscription",
+                company_id,
+                "Login movil operativo bloqueado por suscripcion pendiente o suspendida.",
+                actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": admin_user.get("role", "")},
+                metadata={"email": email, "companyId": company_id},
+            )
+            save_store(store)
+            return mobile_subscription_response(company_id)
         reset_login_attempts("mobile", email)
         admin_user["lastMobileLoginAt"] = utc_now()
         admin_user["lastMobileLoginIp"] = request_ip_address()
@@ -15472,6 +17510,19 @@ def api_mobile_refresh_token():
 
     if token_payload and token_payload.get("type") == "admin":
         user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        if user and mobile_account_access_blocked(user):
+            record_audit_event(
+                store,
+                "mobile_refresh_blocked",
+                "admin_user",
+                user.get("id", ""),
+                "Refresh movil bloqueado por solicitud de eliminacion de cuenta.",
+                actor={"id": user.get("id", ""), "name": user.get("name", ""), "role": user.get("role", "")},
+                metadata={"deletionStatus": user.get("deletionStatus", "")},
+                criticality="high",
+            )
+            save_store(store)
+            return mobile_account_deletion_response(), 403
         if (
             not user
             or user.get("status") != "active"
@@ -15483,6 +17534,19 @@ def api_mobile_refresh_token():
         return jsonify(mobile_admin_payload(user, issue_mobile_admin_token(user)))
 
     client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    if client and mobile_account_access_blocked(client):
+        record_audit_event(
+            store,
+            "mobile_refresh_blocked",
+            "client",
+            client.get("id", ""),
+            "Refresh movil bloqueado por solicitud de eliminacion de cuenta.",
+            actor={"id": client.get("id", ""), "name": client.get("businessName", ""), "role": "client"},
+            metadata={"deletionStatus": client.get("deletionStatus", "")},
+            criticality="high",
+        )
+        save_store(store)
+        return mobile_account_deletion_response(), 403
     if not client or client.get("status") != "active" or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion"):
         return jsonify({"error": "Cliente no encontrado."}), 401
     return jsonify(mobile_customer_payload(client, store, issue_mobile_token(client)))
@@ -15532,6 +17596,8 @@ def api_client_change_password():
         subject_type = "admin_user"
         subject = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
         subject_name_key = "name"
+        if subject and mobile_account_access_blocked(subject):
+            return mobile_account_deletion_response(), 403
         if (
             not subject
             or subject.get("status") != "active"
@@ -15542,6 +17608,8 @@ def api_client_change_password():
             return jsonify({"error": "Token movil invalido."}), 401
     elif not subject or subject.get("status") != "active" or not mobile_token_version_valid(subject, token_payload, "mobileSessionVersion"):
         return jsonify({"error": "Cliente no encontrado."}), 404
+    elif mobile_account_access_blocked(subject):
+        return mobile_account_deletion_response(), 403
 
     payload = request.get_json(silent=True) or {}
     current_password = payload.get("currentPassword", "")
@@ -15593,6 +17661,69 @@ def api_client_change_password():
     else:
         access_token = issue_mobile_admin_token(subject)
     return jsonify({"status": "updated", "mustChangePassword": False, "accessToken": access_token, "tokenType": "Bearer"})
+
+
+@app.post("/api/v1/mobile/account/deletion-request")
+@app.post("/api/mobile/account/deletion-request")
+def api_mobile_account_deletion_request():
+    store = load_store()
+    token_payload = mobile_token_payload()
+    if not token_payload:
+        return jsonify({"meta": mobile_api_meta(), "error": "Token movil requerido.", "code": "mobile_token_required"}), 401
+
+    subject_type = "client"
+    subject = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    version_key = "mobileSessionVersion"
+    valid_subject = bool(subject and subject.get("status") == "active")
+
+    if token_payload.get("type") == "admin":
+        subject_type = "admin_user"
+        subject = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        version_key = "sessionVersion"
+        valid_subject = bool(
+            subject
+            and subject.get("status") == "active"
+            and subject.get("role") in MOBILE_SALES_ROLES
+            and subject.get("mobileAccessEnabled", True) is not False
+        )
+
+    if not subject or not valid_subject or not mobile_token_version_valid(subject, token_payload, version_key):
+        return jsonify({"meta": mobile_api_meta(), "error": "Token movil invalido.", "code": "mobile_token_invalid"}), 401
+
+    if mobile_account_deletion_status(subject) in ACCOUNT_DELETION_BLOCKING_STATUSES:
+        return jsonify(
+            {
+                "meta": mobile_api_meta(),
+                "status": "requested",
+                "requestId": subject.get("deletionRequestId", ""),
+                "message": "Solicitud ya registrada.",
+            }
+        )
+
+    payload = request.get_json(silent=True) or {}
+    actor = {
+        "id": subject.get("id", ""),
+        "name": subject.get("businessName") or subject.get("name") or subject.get("email", ""),
+        "role": subject.get("role", "client") if subject_type == "admin_user" else "client",
+    }
+    request_id, created = request_mobile_account_deletion(
+        store,
+        subject_type,
+        subject,
+        channel="mobile",
+        reason=payload.get("reason", ""),
+        actor=actor,
+    )
+    save_store(store)
+    return jsonify(
+        {
+            "meta": mobile_api_meta(),
+            "status": "requested",
+            "requestId": request_id,
+            "created": created,
+            "message": "Solicitud recibida. FVENTAS revisara la cuenta y bloqueara el acceso movil mientras se procesa.",
+        }
+    )
 
 
 @app.post("/api/v1/mobile/auth/recover-password")
@@ -15668,7 +17799,7 @@ def api_mobile_recover_password():
     return jsonify(
         {
             "status": "received",
-            "message": "Si el correo existe, Wulkan gestionara la recuperacion de acceso.",
+            "message": "Si el correo existe, FVENTAS gestionara la recuperacion de acceso.",
         }
     )
 
@@ -15786,12 +17917,40 @@ def api_locations():
 
 @app.context_processor
 def inject_helpers():
+    currency_data = currency_context()
+    active_company = {"id": DEFAULT_COMPANY_ID, "name": "FVENTAS", "status": "active"}
+    active_subscription = {}
+    try:
+        if session.get("admin_authenticated"):
+            store = load_store()
+            active_company = current_company(store)
+            active_subscription = current_subscription(store, active_company.get("id")) or {}
+    except Exception:
+        active_company = {"id": DEFAULT_COMPANY_ID, "name": "FVENTAS", "status": "active"}
+        active_subscription = {}
     return {
         "money_usd": money_usd,
-        "usd_to_ves": usd_to_ves,
-        "brand_name": "Wulkan",
+        "money_currency": money_currency,
+        "convert_currency": convert_currency,
+        "usd_to_clp": usd_to_clp,
+        "currency_context": currency_context,
+        "market_country": currency_data["market_country"],
+        "market_profile": currency_data["market_profile"],
+        "market_country_label": currency_data["market_profile"].get("label", ""),
+        "sales_currency": currency_data["sales_currency"],
+        "local_currency": currency_data["local_currency"],
+        "exchange_rate": currency_data["exchange_rate"],
+        "brand_name": "FVENTAS",
+        "active_company": active_company,
+        "active_company_name": active_company.get("name", "FVENTAS"),
+        "active_subscription": active_subscription,
+        "subscription_status_label": subscription_status_label,
     }
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=app.config.get("ENV") != "production")
+    app.run(
+        host=os.environ.get("FVENTAS_DEV_HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "5000")),
+        debug=app.config.get("ENV") != "production",
+    )

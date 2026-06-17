@@ -52,12 +52,12 @@
   <div class="empty-state">
     <div class="empty-icon"><i class="bi bi-search"></i></div>
     <strong>Sin coincidencias</strong>
-    <span>Prueba con SKU, RIF, nombre comercial, numero de orden o correo.</span>
+    <span>Prueba con SKU, {{ market_profile.taxLabel }}, nombre comercial, numero de orden o correo.</span>
   </div>
   {% else %}
   <div class="empty-state">
     <div class="empty-icon"><i class="bi bi-command"></i></div>
-    <strong>Busca en el panel Wulkan</strong>
+    <strong>Busca en el panel FVENTAS</strong>
     <span>El buscador respeta permisos por rol y no muestra informacion restringida.</span>
   </div>
   {% endif %}

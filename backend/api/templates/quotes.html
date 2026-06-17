@@ -6,10 +6,10 @@
 <article class="panel order-chart h-100">
   <div class="panel-header">
     <h2>{{ title }}</h2>
-    <span>Graphify</span>
+    <span>FVENTAS Insights</span>
   </div>
   {% if chart.values %}
-  <div class="graphify-bars" data-labels='{{ chart["labels"] | tojson }}' data-values='{{ chart["values"] | tojson }}'></div>
+  <div class="insight-bars" data-labels='{{ chart["labels"] | tojson }}' data-values='{{ chart["values"] | tojson }}'></div>
   {% else %}
   <div class="empty-state compact">
     <div class="empty-icon"><i class="bi bi-file-earmark-text"></i></div>
@@ -177,7 +177,7 @@
           </td>
           <td>
             <strong>{{ money_usd(quote.totalUsd) }}</strong>
-            <small class="d-block text-secondary">VES {{ "{:,.2f}".format(quote.totalVes or 0) }}</small>
+            <small class="d-block text-secondary">{{ money_currency(quote.totalClp or quote.totalVes or 0, local_currency) }}</small>
           </td>
           <td>
             <span class="badge {{ quote.displayStatus | badge_class }}">{{ quote.statusLabel }}</span>

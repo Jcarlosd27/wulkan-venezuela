@@ -1,6 +1,6 @@
-# DigitalOcean para Wulkan Venezuela
+# DigitalOcean para FVENTAS
 
-Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil en DigitalOcean.
+Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil de FVENTAS en DigitalOcean.
 
 ## Componentes
 
@@ -11,7 +11,7 @@ Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil en
 
 ## Archivos preparados
 
-- `.do/app.yaml`: spec de App Platform conectada a GitHub `Jcarlosd27/wulkan-venezuela`.
+- `.do/app.yaml`: spec de App Platform conectada a GitHub.
 - `backend/api/Dockerfile`: contenedor productivo.
 - `backend/api/scripts/start_web.sh`: ejecuta migraciones Alembic y levanta Gunicorn usando `$PORT`.
 - `infra/digitalocean/.env.digitalocean.example`: variables para revisar o copiar en App Platform.
@@ -22,39 +22,39 @@ Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil en
 En el plan pequeno de App Platform se recomienda partir con:
 
 ```bash
-WULKAN_WEB_WORKERS=1
-WULKAN_WEB_THREADS=4
-WULKAN_DB_POOL_SIZE=2
-WULKAN_DB_MAX_OVERFLOW=2
+FVENTAS_WEB_WORKERS=1
+FVENTAS_WEB_THREADS=4
+FVENTAS_DB_POOL_SIZE=2
+FVENTAS_DB_MAX_OVERFLOW=2
 ```
 
 Esto evita levantar copias innecesarias de Flask/Gunicorn y mantiene un pool SQL acotado. Si la RAM se mantiene bajo 70% y el trafico crece, se puede escalar subiendo el tamano del contenedor antes de aumentar workers.
 
 ## Crear la app en DigitalOcean
 
-1. Crear un Space, por ejemplo `wulkan-assets`, en la region elegida. Para la configuracion actual se usa `atl1`.
+1. Crear un Space, por ejemplo `fventas-assets`, en la region elegida.
 2. Crear una llave de Spaces y guardarla como `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY`.
 3. Crear la App Platform desde el repositorio de GitHub o importando `.do/app.yaml`.
 4. Reemplazar estos valores antes del primer deploy:
-   - `WULKAN_SECRET_KEY`
+   - `FVENTAS_SECRET_KEY`
    - `AWS_ACCESS_KEY_ID`
    - `AWS_SECRET_ACCESS_KEY`
-   - `WULKAN_STORAGE_PUBLIC_BASE_URL`
-   - `WULKAN_S3_BUCKET`
-   - `WULKAN_S3_REGION`
-   - `WULKAN_S3_ENDPOINT_URL`
-5. Confirmar que la base `wulkan-db` quede enlazada y que `WULKAN_DATABASE_URL` use `${wulkan-db.DATABASE_URL}`.
+   - `FVENTAS_STORAGE_PUBLIC_BASE_URL`
+   - `FVENTAS_S3_BUCKET`
+   - `FVENTAS_S3_REGION`
+   - `FVENTAS_S3_ENDPOINT_URL`
+5. Confirmar que la base de datos quede enlazada y que `FVENTAS_DATABASE_URL` use la variable interna entregada por App Platform.
 
-El backend falla al arrancar en produccion si intenta usar JSON, SQLite, storage local o secreto de desarrollo. Con `WULKAN_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque tambien deshabilita cuentas, clientes, productos, categorias, anuncios y servicios tecnicos demo para que la app solo muestre datos creados o cargados por Wulkan.
+El backend falla al arrancar en produccion si intenta usar JSON, SQLite, storage local o secreto de desarrollo. Con `FVENTAS_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque tambien deshabilita cuentas, clientes, productos, categorias, anuncios y servicios tecnicos demo para que la app solo muestre datos creados o cargados por la empresa suscrita.
 
 ## Crear el primer super admin
 
-Despues del primer deploy, abrir la consola del componente `wulkan-admin` en DigitalOcean y ejecutar:
+Despues del primer deploy, abrir la consola del componente web en DigitalOcean y ejecutar:
 
 ```bash
 python scripts/create_admin.py \
-  --email admin@wulkanvenezuela.com \
-  --name "Admin Wulkan" \
+  --email admin@empresa.com \
+  --name "Admin FVENTAS" \
   --role super_admin
 ```
 
@@ -65,7 +65,7 @@ El script pide una contrasena temporal segura y obliga a cambiarla al iniciar se
 ```bash
 cd backend/api
 python scripts/readiness_check.py --strict
-python scripts/smoke_production.py --base-url https://crmwulky.com.ve
+python scripts/smoke_production.py --base-url https://app.fventas.cl
 ```
 
 `readiness_check.py --strict` debe pasar antes de venta comercial: exige super admin real, sin demos activos, catalogo/categorias reales y configuracion SQL/S3/token movil. Si todavia no hay productos reales cargados, el smoke puede fallar en catalogo aunque el servicio este sano.
@@ -84,8 +84,8 @@ Editar `apps/mobile/dart_defines.digitalocean.example.json` con el dominio real:
 
 ```json
 {
-  "WULKAN_ADMIN_API_URL": "https://crmwulky.com.ve/api/mobile",
-  "WULKAN_MOBILE_ORDER_API_URL": "https://crmwulky.com.ve/api/mobile/orders"
+  "FVENTAS_ADMIN_API_URL": "https://app.fventas.cl/api/mobile",
+  "FVENTAS_MOBILE_ORDER_API_URL": "https://app.fventas.cl/api/mobile/orders"
 }
 ```
 

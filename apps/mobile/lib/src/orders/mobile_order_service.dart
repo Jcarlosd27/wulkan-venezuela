@@ -30,7 +30,9 @@ class MobileSecureOrderDraft {
             "quantity": item.quantity,
           },
       ],
-      "exchangeRateUsdVes": preview.exchangeRateUsdVes,
+      "exchangeRateUsdLocal": preview.exchangeRateUsdLocal,
+      "exchangeRateUsdClp": preview.exchangeRateUsdLocal,
+      "exchangeRateUsdVes": preview.exchangeRateUsdLocal,
       if (customerId.isNotEmpty) "customerId": customerId,
       "saleType": saleType,
       "paymentTermDays": paymentTermDays,
@@ -46,7 +48,7 @@ class PreparedMobileOrderService implements MobileOrderService {
   @override
   Future<String> createSecureOrder(MobileSecureOrderDraft draft) async {
     throw StateError(
-      "La app esta en modo Mock. Compilala con WULKAN_MOBILE_ORDER_API_URL y WULKAN_MOBILE_DATA_SOURCE=api para registrar ordenes en el admin.",
+      "La app esta en modo Mock. Compilala con FVENTAS_MOBILE_ORDER_API_URL y FVENTAS_MOBILE_DATA_SOURCE=api para registrar ordenes en el admin.",
     );
   }
 }
@@ -136,8 +138,12 @@ class ApiMobileOrderService implements MobileOrderService {
       "preview": {
         "subtotalUsd": draft.preview.subtotalUsd,
         "totalUsd": draft.preview.totalUsd,
-        "totalVes": draft.preview.totalVes,
-        "exchangeRateUsdVes": draft.preview.exchangeRateUsdVes,
+        "totalLocal": draft.preview.totalLocal,
+        "totalClp": draft.preview.totalLocal,
+        "totalVes": draft.preview.totalLocal,
+        "exchangeRateUsdLocal": draft.preview.exchangeRateUsdLocal,
+        "exchangeRateUsdClp": draft.preview.exchangeRateUsdLocal,
+        "exchangeRateUsdVes": draft.preview.exchangeRateUsdLocal,
         "requiresOperatorReview": draft.preview.requiresOperatorReview,
         "blockingReasons": draft.preview.blockingReasons,
       },

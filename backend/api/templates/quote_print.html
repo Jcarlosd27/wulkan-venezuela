@@ -2,13 +2,13 @@
 <html lang="es">
   <head>
     <meta charset="utf-8">
-    <title>{{ quote.quoteNumber }} - Wulkan</title>
+    <title>{{ quote.quoteNumber }} - FVENTAS</title>
     <style>
       body { font-family: Arial, sans-serif; color: #171717; margin: 36px; }
-      header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #ff4b0b; padding-bottom: 18px; margin-bottom: 24px; }
+      header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #0d6efd; padding-bottom: 18px; margin-bottom: 24px; }
       h1 { margin: 0; font-size: 28px; }
       h2 { font-size: 16px; margin: 24px 0 8px; }
-      .brand { font-weight: 800; font-size: 24px; color: #ff4b0b; letter-spacing: 0; }
+      .brand { font-weight: 800; font-size: 24px; color: #0d6efd; letter-spacing: 0; }
       .muted { color: #6b7280; font-size: 12px; }
       .box { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
       table { border-collapse: collapse; width: 100%; margin-top: 12px; }
@@ -17,7 +17,7 @@
       .right { text-align: right; }
       .totals { margin-left: auto; width: 320px; }
       .totals td { font-size: 14px; }
-      .total-row td { font-size: 18px; font-weight: 800; color: #ff4b0b; }
+      .total-row td { font-size: 18px; font-weight: 800; color: #0d6efd; }
       @media print { body { margin: 18mm; } .no-print { display: none; } }
     </style>
   </head>
@@ -25,8 +25,8 @@
     <button class="no-print" onclick="window.print()">Imprimir / guardar PDF</button>
     <header>
       <div>
-        <div class="brand">WULKAN</div>
-        <div class="muted">Jardin - Bosque - Industrial - Maquinaria</div>
+        <div class="brand">FVENTAS</div>
+        <div class="muted">Gestion comercial B2B {{ market_country_label }}</div>
       </div>
       <div class="right">
         <h1>Cotizacion</h1>
@@ -69,8 +69,8 @@
     <table class="totals">
       <tr><td>Subtotal</td><td class="right">{{ money_usd(quote.grossUsd) }}</td></tr>
       <tr><td>Descuento</td><td class="right">{{ money_usd(quote.discountUsd) }}</td></tr>
-      <tr class="total-row"><td>Total USD</td><td class="right">{{ money_usd(quote.totalUsd) }}</td></tr>
-      <tr><td>Total VES ref.</td><td class="right">VES {{ "{:,.2f}".format(quote.totalVes or 0) }}</td></tr>
+      <tr class="total-row"><td>Total {{ sales_currency }}</td><td class="right">{{ money_currency(quote.totalUsd, sales_currency) }}</td></tr>
+      <tr><td>Total {{ local_currency }} ref.</td><td class="right">{{ money_currency(quote.totalClp or quote.totalVes or 0, local_currency) }}</td></tr>
     </table>
 
     {% if quote.comment %}
@@ -80,6 +80,6 @@
     </section>
     {% endif %}
 
-    <p class="muted">Documento generado desde Wulkan CRM. Los montos en bolivares son referenciales segun tasa vigente indicada en la cotizacion.</p>
+    <p class="muted">Documento generado desde FVENTAS CRM. Los montos en moneda local son referenciales segun tasa vigente indicada en la cotizacion.</p>
   </body>
 </html>

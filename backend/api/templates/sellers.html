@@ -6,11 +6,11 @@
 <article class="panel seller-chart">
   <div class="panel-header">
     <h2>{{ title }}</h2>
-    <span>Graphify</span>
+    <span>FVENTAS Insights</span>
   </div>
   {% if chart.values %}
   <div
-    class="graphify-bars"
+    class="insight-bars"
     data-labels='{{ chart["labels"] | tojson }}'
     data-values='{{ chart["values"] | tojson }}'
   ></div>
@@ -146,7 +146,7 @@
   <div class="panel-header">
     <div>
       <h2>Equipo comercial</h2>
-      <span>Cartera, avance de meta, comisiones y acceso movil sincronizado con Android.</span>
+      <span>Cartera, avance de meta, comisiones y acceso movil sincronizado con la app movil.</span>
     </div>
     <span>{{ sellers | length }} registros</span>
   </div>

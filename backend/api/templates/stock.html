@@ -14,11 +14,11 @@
 <article class="panel stock-panel">
   <div class="panel-header">
     <h2>{{ title }}</h2>
-    <span>Graphify</span>
+    <span>FVENTAS Insights</span>
   </div>
   {% if chart.values %}
   <div
-    class="graphify-bars"
+    class="insight-bars"
     data-labels='{{ chart["labels"] | tojson }}'
     data-values='{{ chart["values"] | tojson }}'
   ></div>
@@ -349,7 +349,7 @@
       </div>
       <div class="modal-body">
         <label class="form-label fw-semibold">Listado SKU</label>
-        <textarea class="form-control" name="bulkStock" rows="7" placeholder="WUL-MOT-45CC: 12&#10;WUL-REP-CAD18: 30"></textarea>
+        <textarea class="form-control" name="bulkStock" rows="7" placeholder="FVT-MOT-45CC: 12&#10;FVT-REP-CAD18: 30"></textarea>
         <small class="text-secondary d-block mt-2">Formato permitido: <code>SKU: cantidad</code> o <code>SKU, cantidad</code>. No baja por debajo de unidades reservadas.</small>
       </div>
       <div class="modal-footer">

@@ -143,16 +143,16 @@
       <div class="panel-header">
         <div>
           <h2>{{ title }}</h2>
-          <span>Graphify</span>
+          <span>FVENTAS Insights</span>
         </div>
       </div>
       {% set max_value = graph["values"]|max if graph["values"] else 0 %}
-      <div class="graphify-bars">
+      <div class="insight-bars">
         {% for label in graph["labels"] %}
         {% set value = graph["values"][loop.index0] %}
-        <div class="graphify-row">
-          <span class="graphify-label">{{ label }}</span>
-          <progress class="graphify-progress" max="{{ max_value or 1 }}" value="{{ value }}" aria-label="{{ title }} {{ label }}"></progress>
+        <div class="insight-row">
+          <span class="insight-label">{{ label }}</span>
+          <progress class="insight-progress" max="{{ max_value or 1 }}" value="{{ value }}" aria-label="{{ title }} {{ label }}"></progress>
           <strong>{{ value }}</strong>
         </div>
         {% else %}

@@ -51,6 +51,7 @@ abstract class MobileAuthRepository {
     required String newPassword,
   });
   Future<void> recoverPassword({required String email});
+  Future<void> requestAccountDeletion({String reason = ""});
   Future<void> signOut();
 }
 
@@ -79,22 +80,23 @@ class MockMobileAuthRepository implements MobileAuthRepository {
     }
 
     final normalizedEmail = email.trim().toLowerCase();
-    final isSeller = normalizedEmail.contains("vendedor") ||
-        normalizedEmail.contains("seller") ||
-        normalizedEmail.contains("ventas");
+    final localPart = normalizedEmail.split("@").first;
+    final isSeller = localPart.contains("vendedor") ||
+        localPart.contains("seller") ||
+        localPart.contains("ventas");
 
     _session = MobileUserSession(
-      id: isSeller ? "seller-local-wulkan" : "client-local-wulkan",
-      name: isSeller ? "Vendedor Wulkan" : "Cliente Wulkan",
+      id: isSeller ? "seller-local-fventas" : "client-local-fventas",
+      name: isSeller ? "Vendedor FVENTAS" : "Cliente FVENTAS",
       email: normalizedEmail,
-      roleLabel: isSeller ? "Vendedor" : "Ferretero B2B",
+      roleLabel: isSeller ? "Vendedor" : "Cliente B2B",
       isAuthenticated: true,
       accountRole: isSeller ? "sales" : "client",
       allowedPaymentTermsDays: const [0, 15, 30],
       defaultSaleType: isSeller ? "cash" : "term_credit",
       assignedSeller: const MobileSellerSnapshot(
-        id: "seller-local-wulkan",
-        name: "Vendedor Wulkan",
+        id: "seller-local-fventas",
+        name: "Vendedor FVENTAS",
       ),
     );
     return _session!;
@@ -114,6 +116,11 @@ class MockMobileAuthRepository implements MobileAuthRepository {
   }
 
   @override
+  Future<void> requestAccountDeletion({String reason = ""}) async {
+    _session = null;
+  }
+
+  @override
   Future<void> signOut() async {
     _session = null;
   }
@@ -126,7 +133,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
   })  : _baseUri = Uri.parse(baseUrl),
         _storage = storage ?? const FlutterSecureStorage();
 
-  static const _sessionKey = "wulkan_mobile_session";
+  static const _sessionKey = "fventas_mobile_session";
   final Uri _baseUri;
   final FlutterSecureStorage _storage;
   MobileUserSession? _session;
@@ -248,11 +255,11 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         data["clientType"]?.toString() ??
         "client";
     final roleLabel = data["roleLabel"]?.toString() ??
-        (accountRole == "sales" ? "Vendedor" : "Ferretero B2B");
+        (accountRole == "sales" ? "Vendedor" : "Cliente B2B");
 
     return MobileUserSession(
       id: data["id"]?.toString() ?? "",
-      name: data["businessName"]?.toString() ?? "Cliente Wulkan",
+      name: data["businessName"]?.toString() ?? "Cliente FVENTAS",
       email: data["email"]?.toString() ?? fallbackEmail,
       roleLabel: roleLabel,
       isAuthenticated: true,
@@ -346,6 +353,41 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
   }
 
   @override
+  Future<void> requestAccountDeletion({String reason = ""}) async {
+    final session = _session ?? await _readStoredSession();
+    if (session == null || session.accessToken.isEmpty) {
+      throw StateError("Debes iniciar sesion para solicitar la eliminacion.");
+    }
+
+    final uri = _baseUri.replace(
+      path: "${_baseUri.path}/account/deletion-request",
+    );
+    final client = HttpClient();
+
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      request.headers.set("Authorization", "Bearer ${session.accessToken}");
+      request.write(jsonEncode({"reason": reason}));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final payload = body.isNotEmpty ? jsonDecode(body) : null;
+        final message = payload is Map<String, dynamic>
+            ? payload["error"]?.toString()
+            : null;
+        throw StateError(message ?? "No se pudo registrar la solicitud.");
+      }
+
+      _session = null;
+      await _storage.delete(key: _sessionKey);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  @override
   Future<void> signOut() async {
     final session = _session ?? await _readStoredSession();
 
@@ -416,9 +458,9 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
 
       return MobileUserSession(
         id: id,
-        name: payload["name"]?.toString() ?? "Cliente Wulkan",
+        name: payload["name"]?.toString() ?? "Cliente FVENTAS",
         email: payload["email"]?.toString() ?? "",
-        roleLabel: payload["roleLabel"]?.toString() ?? "Ferretero B2B",
+        roleLabel: payload["roleLabel"]?.toString() ?? "Cliente B2B",
         isAuthenticated: true,
         accountRole: payload["accountRole"]?.toString() ?? "client",
         accessToken: token,

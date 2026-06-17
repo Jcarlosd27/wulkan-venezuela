@@ -28,7 +28,7 @@
         <div class="row g-3">
           <div class="col-12 col-md-3">
             <label class="form-label fw-semibold">SKU</label>
-            <input class="form-control text-uppercase" name="sku" required autofocus placeholder="WUL-MOT-45CC" value="{{ product.sku if product else '' }}" aria-label="SKU">
+            <input class="form-control text-uppercase" name="sku" required autofocus placeholder="FVT-MOT-45CC" value="{{ product.sku if product else '' }}" aria-label="SKU">
             <small class="text-secondary">Unico para stock y pedidos.</small>
           </div>
           <div class="col-12 col-md-3">
@@ -37,11 +37,11 @@
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">Nombre comercial</label>
-            <input class="form-control" name="title" required placeholder="Motosierra Wulkan 45cc" value="{{ product.title if product else '' }}" aria-label="Nombre comercial">
+            <input class="form-control" name="title" required placeholder="Motosierra FVENTAS 45cc" value="{{ product.title if product else '' }}" aria-label="Nombre comercial">
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label fw-semibold">Marca</label>
-            <input class="form-control" name="brand" placeholder="Wulkan" value="{{ product.brand if product else 'Wulkan' }}" aria-label="Marca">
+            <input class="form-control" name="brand" placeholder="FVENTAS" value="{{ product.brand if product else 'FVENTAS' }}" aria-label="Marca">
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label fw-semibold">Modelo</label>
@@ -95,7 +95,7 @@
         <div class="panel-header">
           <div>
             <h2>Publicacion en app</h2>
-            <span>Controla que se publica y como se destaca en Android.</span>
+            <span>Controla que se publica y como se destaca en la app movil.</span>
           </div>
         </div>
         <div class="row g-3">
@@ -145,37 +145,37 @@
         <div class="panel-header">
           <div>
             <h2>Precios y margen</h2>
-            <span>USD es la moneda operativa; VES se calcula como referencia.</span>
+            <span>{{ sales_currency }} es la moneda operativa; {{ local_currency }} se calcula como referencia.</span>
           </div>
         </div>
         <div class="row g-3">
           <div class="col-6 col-lg-4">
-            <label class="form-label fw-semibold">Precio publico USD</label>
-            <input class="form-control" name="publicPriceUsd" inputmode="decimal" required value="{{ product.publicPriceUsd if product else '' }}" aria-label="Precio publico USD">
+            <label class="form-label fw-semibold">Precio publico {{ sales_currency }}</label>
+            <input class="form-control" name="publicPriceUsd" inputmode="decimal" required value="{{ product.publicPriceUsd if product else '' }}" aria-label="Precio publico {{ sales_currency }}">
           </div>
           <div class="col-6 col-lg-4">
-            <label class="form-label fw-semibold">Precio B2B USD</label>
-            <input class="form-control" name="b2bPriceUsd" inputmode="decimal" value="{{ product.b2bPriceUsd if product else '' }}" aria-label="Precio B2B USD">
+            <label class="form-label fw-semibold">Precio B2B {{ sales_currency }}</label>
+            <input class="form-control" name="b2bPriceUsd" inputmode="decimal" value="{{ product.b2bPriceUsd if product else '' }}" aria-label="Precio B2B {{ sales_currency }}">
           </div>
           <div class="col-6 col-lg-4">
-            <label class="form-label fw-semibold">Precio anterior USD</label>
-            <input class="form-control" name="originalPriceUsd" inputmode="decimal" value="{{ product.originalPriceUsd if product else '' }}" aria-label="Precio anterior USD">
+            <label class="form-label fw-semibold">Precio anterior {{ sales_currency }}</label>
+            <input class="form-control" name="originalPriceUsd" inputmode="decimal" value="{{ product.originalPriceUsd if product else '' }}" aria-label="Precio anterior {{ sales_currency }}">
           </div>
           <div class="col-6 col-lg-4">
             <label class="form-label fw-semibold">Descuento %</label>
             <input class="form-control" name="discountPercent" inputmode="decimal" value="{{ product.discountPercent if product else 0 }}" aria-label="Descuento">
           </div>
           <div class="col-6 col-lg-4">
-            <label class="form-label fw-semibold">Costo ref. USD</label>
-            <input class="form-control" name="costReferenceUsd" inputmode="decimal" value="{{ product.costReferenceUsd if product else '' }}" aria-label="Costo referencial USD">
+            <label class="form-label fw-semibold">Costo ref. {{ sales_currency }}</label>
+            <input class="form-control" name="costReferenceUsd" inputmode="decimal" value="{{ product.costReferenceUsd if product else '' }}" aria-label="Costo referencial {{ sales_currency }}">
           </div>
           <div class="col-6 col-lg-4">
             <label class="form-label fw-semibold">Margen estimado %</label>
             <input class="form-control" name="marginPercent" inputmode="decimal" value="{{ product.marginPercent if product else '' }}" aria-label="Margen estimado">
           </div>
           <div class="col-12 col-lg-4">
-            <label class="form-label fw-semibold">Tasa USD/VES</label>
-            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ product.exchangeRateUsdVes if product else rate }}" aria-label="Tasa USD VES">
+            <label class="form-label fw-semibold">Tasa {{ sales_currency }}/{{ local_currency }}</label>
+            <input class="form-control" name="exchangeRateUsdClp" inputmode="decimal" value="{{ (product.exchangeRateUsdClp or product.exchangeRateUsdVes) if product else rate }}" aria-label="Tasa {{ sales_currency }} {{ local_currency }}">
           </div>
         </div>
       </article>
@@ -265,7 +265,7 @@
           </div>
           <div class="col-12">
             <label class="form-label fw-semibold">Productos relacionados por SKU</label>
-            <textarea class="form-control" name="relatedSkus" rows="3" placeholder="WUL-REP-CAD18&#10;WUL-ACE-2T" aria-label="Productos relacionados por SKU">{{ (product.relatedSkus | join('\n')) if product else '' }}</textarea>
+            <textarea class="form-control" name="relatedSkus" rows="3" placeholder="FVT-REP-CAD18&#10;FVT-ACE-2T" aria-label="Productos relacionados por SKU">{{ (product.relatedSkus | join('\n')) if product else '' }}</textarea>
           </div>
         </div>
       </article>

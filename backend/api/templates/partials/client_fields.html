@@ -1,7 +1,7 @@
 {% set selected_terms = client.allowedPaymentTermsDays if client is defined else [0] %}
 {% set selected_sale_type = client.defaultSaleType if client is defined else 'cash' %}
 {% set selected_status = client.status if client is defined else 'prospect' %}
-{% set selected_type = client.clientType if client is defined else 'ferretero' %}
+{% set selected_type = client.clientType if client is defined else 'b2b' %}
 {% set selected_category = client.clientCategory if client is defined else 'standard' %}
 {% set selected_price_list = client.priceList if client is defined else 'b2b' %}
 {% set selected_collection = client.collectionStatus if client is defined else 'without_debt' %}
@@ -9,6 +9,8 @@
 {% set selected_state = client.state if client is defined else '' %}
 {% set selected_city = client.city if client is defined else '' %}
 {% set field_id_prefix = field_prefix if field_prefix is defined else 'client' %}
+{% set location_options = chile_locations if chile_locations is defined else {} %}
+{% set market = currency_context().market_profile %}
 
 <div class="client-form-stack">
   <section class="form-section">
@@ -30,8 +32,8 @@
         <input class="form-control" id="{{ field_id_prefix }}-commercialName" name="commercialName" value="{{ client.commercialName if client is defined else '' }}" placeholder="Alias o nombre corto" aria-label="Alias comercial">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-taxId">RIF / documento fiscal</label>
-        <input class="form-control" id="{{ field_id_prefix }}-taxId" name="taxId" required value="{{ client.taxId if client is defined else '' }}" placeholder="J-00000000-0" autocomplete="off" maxlength="14" pattern="[VvEeJjGgPp][- ]?[0-9]{7,9}[- ]?[0-9]?" aria-label="RIF o documento fiscal">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-taxId">{{ market.taxLabel }} / documento fiscal</label>
+        <input class="form-control" id="{{ field_id_prefix }}-taxId" name="taxId" required value="{{ client.taxId if client is defined else '' }}" placeholder="{{ market.taxPlaceholder }}" autocomplete="off" maxlength="40" aria-label="Documento fiscal">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-email">Email / usuario movil</label>
@@ -69,15 +71,15 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-phone">Telefono</label>
-        <input class="form-control" id="{{ field_id_prefix }}-phone" name="phone" required value="{{ client.phone if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel" aria-label="Telefono">
+        <input class="form-control" id="{{ field_id_prefix }}-phone" name="phone" required value="{{ client.phone if client is defined else '' }}" placeholder="{{ market.phonePlaceholder }}" inputmode="tel" autocomplete="tel" aria-label="Telefono">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-whatsapp">WhatsApp</label>
-        <input class="form-control" id="{{ field_id_prefix }}-whatsapp" name="whatsapp" value="{{ client.whatsapp if client is defined else '' }}" placeholder="0412-1234567" inputmode="tel" autocomplete="tel" aria-label="WhatsApp">
+        <input class="form-control" id="{{ field_id_prefix }}-whatsapp" name="whatsapp" value="{{ client.whatsapp if client is defined else '' }}" placeholder="{{ market.phonePlaceholder }}" inputmode="tel" autocomplete="tel" aria-label="WhatsApp">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-country">Pais</label>
-        <input class="form-control" id="{{ field_id_prefix }}-country" name="country" value="{{ client.country if client is defined else 'VE' }}" aria-label="Pais">
+        <input class="form-control" id="{{ field_id_prefix }}-country" name="country" value="{{ client.country if client is defined else market.code }}" aria-label="Pais">
       </div>
       <div class="col-12 col-lg-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-address">Direccion general</label>
@@ -91,21 +93,32 @@
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-shippingAddress">Direccion despacho</label>
         <input class="form-control" id="{{ field_id_prefix }}-shippingAddress" name="shippingAddress" value="{{ client.shippingAddress if client is defined else '' }}" aria-label="Direccion despacho">
       </div>
-      <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-state">Estado / region</label>
-        <select class="form-select" id="{{ field_id_prefix }}-state" name="state" required data-venezuela-state aria-label="Estado o region">
-          <option value="">Selecciona estado</option>
-          {% for state in venezuela_locations.keys() %}
-          <option value="{{ state }}" {% if selected_state == state %}selected{% endif %}>{{ state }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-city">Ciudad</label>
-        <select class="form-select" id="{{ field_id_prefix }}-city" name="city" required data-venezuela-city data-selected-city="{{ selected_city }}" aria-label="Ciudad">
-          <option value="">Selecciona ciudad</option>
-        </select>
-      </div>
+      {% if market.code == "CL" %}
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-state">Region</label>
+          <select class="form-select" id="{{ field_id_prefix }}-state" name="state" required data-chile-region aria-label="Region">
+            <option value="">Selecciona region</option>
+            {% for state in location_options.keys() %}
+            <option value="{{ state }}" {% if selected_state == state %}selected{% endif %}>{{ state }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-city">Ciudad</label>
+          <select class="form-select" id="{{ field_id_prefix }}-city" name="city" required data-chile-city data-selected-city="{{ selected_city }}" aria-label="Ciudad o comuna">
+            <option value="">Selecciona ciudad/comuna</option>
+          </select>
+        </div>
+      {% else %}
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-state">Region, estado o provincia</label>
+          <input class="form-control" id="{{ field_id_prefix }}-state" name="state" required value="{{ selected_state }}" placeholder="Region, estado o provincia" aria-label="Region, estado o provincia">
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-city">Ciudad</label>
+          <input class="form-control" id="{{ field_id_prefix }}-city" name="city" required value="{{ selected_city }}" placeholder="Ciudad" aria-label="Ciudad">
+        </div>
+      {% endif %}
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-deliveryZone">Zona comercial</label>
         <input class="form-control" id="{{ field_id_prefix }}-deliveryZone" name="deliveryZone" value="{{ client.deliveryZone if client is defined else '' }}" placeholder="Ruta o zona" aria-label="Zona comercial">

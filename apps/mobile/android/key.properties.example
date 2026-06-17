@@ -1,4 +1,4 @@
 storePassword=change-me
 keyPassword=change-me
-keyAlias=wulkan-release
-storeFile=wulkan-release-key.jks
+keyAlias=fventas-release
+storeFile=fventas-release-key.jks

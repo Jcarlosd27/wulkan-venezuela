@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import app as wulkan_app
+import app as FVENTAS_app
 from store import utc_now
 from werkzeug.security import generate_password_hash
 
@@ -16,9 +16,31 @@ from werkzeug.security import generate_password_hash
 def base_store() -> dict:
     now = utc_now()
     return {
+        "companies": [
+            {
+                "id": "company-fventas-chile",
+                "name": "FVENTAS",
+                "status": "active",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
+        "subscriptions": [
+            {
+                "id": "sub-fventas-chile",
+                "companyId": "company-fventas-chile",
+                "planId": "fventas-pro-monthly",
+                "status": "active",
+                "priceClp": 69990,
+                "currency": "CLP",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
         "categories": [
             {
                 "id": "cat-rules",
+                "companyId": "company-fventas-chile",
                 "name": "Reglas",
                 "slug": "reglas",
                 "status": "active",
@@ -30,7 +52,8 @@ def base_store() -> dict:
         "products": [
             {
                 "id": "prod-rules",
-                "sku": "WUL-RULE-01",
+                "companyId": "company-fventas-chile",
+                "sku": "FVT-RULE-01",
                 "title": "Producto Reglas",
                 "description": "Producto para reglas criticas.",
                 "productType": "machine",
@@ -40,7 +63,7 @@ def base_store() -> dict:
                 "originalPriceUsd": 120,
                 "discountPercent": 0,
                 "b2bPriceUsd": 90,
-                "exchangeRateUsdVes": 38.5,
+                "exchangeRateUsdVes": 950.0,
                 "stock": 2,
                 "reserved": 0,
                 "status": "active",
@@ -59,16 +82,17 @@ def base_store() -> dict:
         "clients": [
             {
                 "id": "client-rules",
-                "businessName": "Ferreteria Reglas",
-                "email": "cliente.rules@wulkan.test",
+                "companyId": "company-fventas-chile",
+                "businessName": "Cliente Reglas",
+                "email": "cliente.rules@FVENTAS.test",
                 "passwordHash": generate_password_hash("ClienteRules2026"),
                 "status": "active",
-                "clientType": "ferretero",
-                "taxId": "J-11111111-1",
-                "phone": "+580000000000",
+                "clientType": "b2b",
+                "taxId": "11.111.111-1",
+                "phone": "+56 9 1000 0000",
                 "address": "Direccion reglas",
-                "city": "Valencia",
-                "state": "Carabobo",
+                "city": "Santiago",
+                "state": "Metropolitana",
                 "creditEnabled": True,
                 "creditLimitUsd": 100,
                 "creditUsedUsd": 0,
@@ -87,10 +111,11 @@ def base_store() -> dict:
         "orders": [
             {
                 "id": "order-cancelled-rules",
+                "companyId": "company-fventas-chile",
                 "orderId": "order-cancelled-rules",
                 "customerId": "client-rules",
-                "customer": {"id": "client-rules", "name": "Ferreteria Reglas"},
-                "items": [{"productId": "prod-rules", "sku": "WUL-RULE-01", "quantity": 1, "unitPriceUsd": 90}],
+                "customer": {"id": "client-rules", "name": "Cliente Reglas"},
+                "items": [{"productId": "prod-rules", "sku": "FVT-RULE-01", "quantity": 1, "unitPriceUsd": 90}],
                 "totalUsd": 90,
                 "netUsd": 90,
                 "balanceUsd": 0,
@@ -109,10 +134,11 @@ def base_store() -> dict:
             },
             {
                 "id": "order-no-stock-rules",
+                "companyId": "company-fventas-chile",
                 "orderId": "order-no-stock-rules",
                 "customerId": "client-rules",
-                "customer": {"id": "client-rules", "name": "Ferreteria Reglas"},
-                "items": [{"productId": "prod-rules", "sku": "WUL-RULE-01", "quantity": 10, "unitPriceUsd": 90}],
+                "customer": {"id": "client-rules", "name": "Cliente Reglas"},
+                "items": [{"productId": "prod-rules", "sku": "FVT-RULE-01", "quantity": 10, "unitPriceUsd": 90}],
                 "totalUsd": 900,
                 "netUsd": 900,
                 "balanceUsd": 900,
@@ -132,8 +158,9 @@ def base_store() -> dict:
         "admin_users": [
             {
                 "id": "admin-rules",
+                "companyId": "company-fventas-chile",
                 "name": "Admin Reglas",
-                "email": "admin.rules@wulkan.test",
+                "email": "admin.rules@FVENTAS.test",
                 "passwordHash": generate_password_hash("AdminRules2026"),
                 "role": "super_admin",
                 "status": "active",
@@ -144,8 +171,9 @@ def base_store() -> dict:
             },
             {
                 "id": "operator-rules",
+                "companyId": "company-fventas-chile",
                 "name": "Operador Reglas",
-                "email": "operador.rules@wulkan.test",
+                "email": "operador.rules@FVENTAS.test",
                 "passwordHash": generate_password_hash("OperadorRules2026"),
                 "role": "operator",
                 "status": "active",
@@ -180,16 +208,16 @@ def main() -> int:
         state.clear()
         state.update(snapshot)
 
-    wulkan_app.load_store = lambda: state
-    wulkan_app.save_store = save_store_override
-    wulkan_app.app.config.update(
+    FVENTAS_app.load_store = lambda: state
+    FVENTAS_app.save_store = save_store_override
+    FVENTAS_app.app.config.update(
         TESTING=True,
         SECRET_KEY="business-rules-smoke-secret",
         REQUIRE_MOBILE_TOKEN=True,
         WTF_CSRF_ENABLED=False,
     )
 
-    with wulkan_app.app.test_client() as client:
+    with FVENTAS_app.app.test_client() as client:
         with client.session_transaction() as session:
             session["admin_authenticated"] = True
             session["admin_user_id"] = "admin-rules"
@@ -200,16 +228,16 @@ def main() -> int:
         rules_page = assert_status(client.get("/business-rules"), 200, "modulo reglas negocio")
         assert "Reglas negocio" in rules_page.get_data(as_text=True)
 
-        _, error = wulkan_app.build_commercial_order(state, {"customerId": "", "items": []})
+        _, error = FVENTAS_app.build_commercial_order(state, {"customerId": "", "items": []})
         assert "Cliente" in error
-        _, error = wulkan_app.build_commercial_order(state, {"customerId": "client-rules", "items": []})
+        _, error = FVENTAS_app.build_commercial_order(state, {"customerId": "client-rules", "items": []})
         assert "productos" in error
-        _, error = wulkan_app.build_commercial_order(
+        _, error = FVENTAS_app.build_commercial_order(
             state,
             {
                 "customerId": "client-rules",
                 "saleType": "cash",
-                "items": [{"productId": "prod-rules", "sku": "WUL-RULE-01", "quantity": 1}],
+                "items": [{"productId": "prod-rules", "sku": "FVT-RULE-01", "quantity": 1}],
             },
         )
         assert "cobranza" in error
@@ -220,7 +248,7 @@ def main() -> int:
                 "/products/new",
                 data={
                     "_csrf_token": "csrf-rules",
-                    "sku": "WUL-RULE-01",
+                    "sku": "FVT-RULE-01",
                     "title": "Producto Duplicado",
                     "categoryId": "cat-rules",
                     "productType": "machine",
@@ -241,7 +269,7 @@ def main() -> int:
                 "/products/new",
                 data={
                     "_csrf_token": "csrf-rules",
-                    "sku": "WUL-RULE-02",
+                    "sku": "FVT-RULE-02",
                     "title": "Producto Precio Malo",
                     "categoryId": "cat-rules",
                     "productType": "machine",
@@ -263,25 +291,25 @@ def main() -> int:
                 "/clients",
                 data={
                     "_csrf_token": "csrf-rules",
-                    "businessName": "Ferreteria RIF Duplicado",
-                    "email": "duplicado.rules@wulkan.test",
+                    "businessName": "Cliente RUT Duplicado",
+                    "email": "duplicado.rules@FVENTAS.test",
                     "password": "DuplicadoRules2026",
-                    "taxId": "J-11111111-1",
+                    "taxId": "11.111.111-1",
                     "status": "active",
-                    "clientType": "ferretero",
+                    "clientType": "b2b",
                     "collectionStatus": "without_debt",
                     "creditRequestStatus": "none",
                 },
             ),
             200,
-            "bloquea RIF duplicado",
+            "bloquea RUT duplicado",
         )
         assert len(state["clients"]) == before_clients
 
         login = assert_status(
             client.post(
                 "/api/mobile/auth/login",
-                json={"email": "cliente.rules@wulkan.test", "password": "ClienteRules2026"},
+                json={"email": "cliente.rules@FVENTAS.test", "password": "ClienteRules2026"},
             ),
             200,
             "login cliente bloqueado por cobranza",
@@ -292,7 +320,7 @@ def main() -> int:
                 headers={"Authorization": f"Bearer {login['accessToken']}"},
                 json={
                     "saleType": "cash",
-                    "items": [{"productId": "prod-rules", "sku": "WUL-RULE-01", "quantity": 1}],
+                    "items": [{"productId": "prod-rules", "sku": "FVT-RULE-01", "quantity": 1}],
                 },
             ),
             400,

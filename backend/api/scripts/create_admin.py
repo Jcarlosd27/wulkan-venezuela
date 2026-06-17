@@ -14,11 +14,24 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from db import SessionLocal, init_database
+from core.db import SessionLocal, init_database
 from models import AdminUser
+from store import DEFAULT_COMPANY_ID
 
 
-ROLES = {"super_admin", "commercial_manager", "operator", "sales", "inventory", "readonly"}
+ROLES = {
+    "platform_admin",
+    "super_admin",
+    "general_manager",
+    "commercial_manager",
+    "operator",
+    "sales",
+    "inventory",
+    "collections",
+    "dispatch",
+    "auditor",
+    "readonly",
+}
 PASSWORD_MIN_LENGTH = 10
 
 
@@ -43,10 +56,11 @@ def password_errors(password: str) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create or reset a Wulkan admin user.")
+    parser = argparse.ArgumentParser(description="Create or reset a FVENTAS admin user.")
     parser.add_argument("--email", required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--role", default="super_admin", choices=sorted(ROLES))
+    parser.add_argument("--company-id", default=DEFAULT_COMPANY_ID)
     parser.add_argument("--password", default="")
     parser.add_argument("--inactive", action="store_true", help="Create the user as inactive.")
     args = parser.parse_args()
@@ -79,6 +93,7 @@ def main() -> None:
         user.updated_at = now
         user.payload = {
             "id": user.id,
+            "companyId": args.company_id,
             "name": user.name,
             "email": user.email,
             "role": user.role,

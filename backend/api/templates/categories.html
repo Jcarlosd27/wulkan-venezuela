@@ -7,13 +7,13 @@
   <div class="panel-header">
     <div>
       <h2>{{ title }}</h2>
-      <span>Resumen compacto Graphify</span>
+      <span>Resumen comercial</span>
     </div>
     <span><i class="bi {{ icon }}"></i></span>
   </div>
   {% if chart.values %}
   <div
-    class="graphify-bars"
+    class="insight-bars"
     data-labels='{{ chart["labels"] | tojson }}'
     data-values='{{ chart["values"] | tojson }}'
   ></div>
@@ -33,7 +33,7 @@
   <div class="modal-header">
     <div>
       <h2 class="modal-title h5">{{ "Editar categoria" if category else "Nueva categoria" }}</h2>
-      <p class="mb-0 text-secondary">Controla como se ordena y publica esta familia en Android.</p>
+      <p class="mb-0 text-secondary">Controla como se ordena y publica esta familia en la app movil.</p>
     </div>
     <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
   </div>
@@ -113,10 +113,10 @@
   </button>
   {% endif %}
   {% if can_create_categories %}
-  <form method="post" action="{{ url_for('categories_starter_wulkan') }}" data-confirm="Se crearan las categorias base Wulkan sin productos ni stock.">
+  <form method="post" action="{{ url_for('categories_starter_fventas') }}" data-confirm="Se crearan las categorias base FVENTAS sin productos ni stock.">
     {{ csrf_field() }}
     <button class="btn btn-outline-dark" type="submit">
-      <i class="bi bi-diagram-3"></i> Categorias base Wulkan
+      <i class="bi bi-diagram-3"></i> Categorias base FVENTAS
     </button>
   </form>
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
@@ -244,7 +244,7 @@
   <div class="panel-header">
     <div>
       <h2>Categorias del ecommerce</h2>
-      <span>Orden, imagen, jerarquia y estado usado por Android.</span>
+      <span>Orden, imagen, jerarquia y estado usado por la app movil.</span>
     </div>
     <span>{{ categories | length }} registros</span>
   </div>
@@ -343,10 +343,10 @@
                 <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#newCategoryModal">
                   <i class="bi bi-plus-lg"></i> Crear manual
                 </button>
-                <form method="post" action="{{ url_for('categories_starter_wulkan') }}" data-confirm="Se crearan las categorias base Wulkan sin productos ni stock.">
+                <form method="post" action="{{ url_for('categories_starter_fventas') }}" data-confirm="Se crearan las categorias base FVENTAS sin productos ni stock.">
                   {{ csrf_field() }}
                   <button class="btn btn-sm btn-outline-dark" type="submit">
-                    <i class="bi bi-diagram-3"></i> Usar base Wulkan
+                    <i class="bi bi-diagram-3"></i> Usar base FVENTAS
                   </button>
                 </form>
               </div>
@@ -377,11 +377,7 @@
 {% set bulk_modal_id = "categoriesImportModal" %}
 {% set bulk_action = url_for("categories_import") %}
 {% set bulk_title = "Importar categorias" %}
-{% set bulk_help = "Crea o actualiza familias del catalogo con slug, imagen, icono, orden y visibilidad para Android." %}
+{% set bulk_help = "Crea o actualiza familias del catalogo con slug, imagen, icono, orden y visibilidad para la app movil." %}
 {% set bulk_columns = ["nombre", "slug", "descripcion", "imagen_url", "icono", "orden", "categoria_padre", "visible_app", "estado"] %}
 {% include "partials/bulk_import_modal.html" %}
-{% endblock %}
-
-{% block scripts %}
-<script src="{{ url_for('static', filename='js/graphify.js') }}"></script>
 {% endblock %}

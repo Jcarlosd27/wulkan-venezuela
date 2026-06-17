@@ -44,11 +44,11 @@
       <div class="panel-header">
         <div>
           <h2>Estado de reglas</h2>
-          <span>Graphify</span>
+          <span>FVENTAS Insights</span>
         </div>
       </div>
       <div
-        class="graphify-bars"
+        class="insight-bars"
         data-labels='{{ status_graph["labels"] | tojson }}'
         data-values='{{ status_graph["values"] | tojson }}'
       ></div>
@@ -59,12 +59,12 @@
       <div class="panel-header">
         <div>
           <h2>Incidencias por modulo</h2>
-          <span>Graphify</span>
+          <span>FVENTAS Insights</span>
         </div>
       </div>
       {% if module_graph["values"] %}
       <div
-        class="graphify-bars"
+        class="insight-bars"
         data-labels='{{ module_graph["labels"] | tojson }}'
         data-values='{{ module_graph["values"] | tojson }}'
       ></div>

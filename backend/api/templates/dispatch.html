@@ -142,6 +142,9 @@
               <td>
                 <span class="badge {{ order.dispatchStatus | badge_class }}">{{ order.dispatchStatusLabel }}</span>
                 <small class="d-block text-secondary">{{ order.logisticsOwner }}</small>
+                {% if order.paymentHoldReason %}
+                <small class="d-block text-warning fw-semibold">{{ order.paymentHoldReason }}</small>
+                {% endif %}
               </td>
               {% if can_edit_dispatch %}
               <td class="text-end">
@@ -171,15 +174,15 @@
     <article class="panel h-100">
       <div class="panel-header">
         <div>
-          <h2>Graphify despacho</h2>
+          <h2>Insight de despacho</h2>
           <span>Distribucion por estado logistico.</span>
         </div>
       </div>
-      <div class="graphify-bars">
+      <div class="insight-bars">
         {% for item in status_graph["items"] %}
-        <div class="graphify-row">
-          <span class="graphify-label">{{ item.label }}</span>
-          <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
+        <div class="insight-row">
+          <span class="insight-label">{{ item.label }}</span>
+          <span class="insight-track"><span class="insight-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
           <strong>{{ item.value }}</strong>
         </div>
         {% else %}

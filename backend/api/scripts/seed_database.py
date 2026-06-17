@@ -14,7 +14,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from db import SessionLocal, drop_database, init_database
+from core.db import SessionLocal, drop_database, init_database
 from models import (
     AdminUser,
     Announcement,
@@ -106,7 +106,7 @@ def seed_clients(session, store: dict[str, Any]) -> None:
             "email": client.get("email", "").lower(),
             "password_hash": client.get("passwordHash", ""),
             "must_change_password": bool(client.get("mustChangePassword")),
-            "client_type": client.get("clientType", "ferretero"),
+            "client_type": client.get("clientType", "b2b"),
             "status": client.get("status", "active"),
             "credit_enabled": bool(client.get("creditEnabled")),
             "credit_limit_usd": float(client.get("creditLimitUsd") or 0),
@@ -315,11 +315,11 @@ def seed_database(reset: bool = False) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed Wulkan SQL database from the JSON store.")
+    parser = argparse.ArgumentParser(description="Seed FVENTAS SQL database from the JSON store.")
     parser.add_argument("--reset", action="store_true", help="Drop and recreate all tables before seeding.")
     args = parser.parse_args()
     seed_database(reset=args.reset)
-    print("Wulkan database seeded.")
+    print("FVENTAS database seeded.")
 
 
 if __name__ == "__main__":

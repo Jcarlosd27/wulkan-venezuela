@@ -105,16 +105,16 @@
       <div class="panel-header">
         <div>
           <h2>Estados</h2>
-          <span>Graphify</span>
+          <span>FVENTAS Insights</span>
         </div>
       </div>
       {% set status_max = commission_charts.status["values"]|max if commission_charts.status["values"] else 0 %}
-      <div class="graphify-bars">
+      <div class="insight-bars">
       {% for label in commission_charts.status["labels"] %}
       {% set value = commission_charts.status["values"][loop.index0] %}
-      <div class="graphify-row">
-        <span class="graphify-label">{{ label }}</span>
-        <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if status_max == 0 else (value / status_max * 100) }}%"></span></span>
+      <div class="insight-row">
+        <span class="insight-label">{{ label }}</span>
+        <span class="insight-track"><span class="insight-value" style="width: {{ 0 if status_max == 0 else (value / status_max * 100) }}%"></span></span>
         <strong>{{ money_usd(value) }}</strong>
       </div>
       {% else %}
@@ -135,12 +135,12 @@
         </div>
       </div>
       {% set seller_max = commission_charts.seller["values"]|max if commission_charts.seller["values"] else 0 %}
-      <div class="graphify-bars">
+      <div class="insight-bars">
       {% for label in commission_charts.seller["labels"] %}
       {% set value = commission_charts.seller["values"][loop.index0] %}
-      <div class="graphify-row">
-        <span class="graphify-label">{{ label }}</span>
-        <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if seller_max == 0 else (value / seller_max * 100) }}%"></span></span>
+      <div class="insight-row">
+        <span class="insight-label">{{ label }}</span>
+        <span class="insight-track"><span class="insight-value" style="width: {{ 0 if seller_max == 0 else (value / seller_max * 100) }}%"></span></span>
         <strong>{{ money_usd(value) }}</strong>
       </div>
       {% else %}
@@ -161,12 +161,12 @@
         </div>
       </div>
       {% set rule_max = commission_charts.rule["values"]|max if commission_charts.rule["values"] else 0 %}
-      <div class="graphify-bars">
+      <div class="insight-bars">
       {% for label in commission_charts.rule["labels"] %}
       {% set value = commission_charts.rule["values"][loop.index0] %}
-      <div class="graphify-row">
-        <span class="graphify-label">{{ label }}</span>
-        <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if rule_max == 0 else (value / rule_max * 100) }}%"></span></span>
+      <div class="insight-row">
+        <span class="insight-label">{{ label }}</span>
+        <span class="insight-track"><span class="insight-value" style="width: {{ 0 if rule_max == 0 else (value / rule_max * 100) }}%"></span></span>
         <strong>{{ money_usd(value) }}</strong>
       </div>
       {% else %}

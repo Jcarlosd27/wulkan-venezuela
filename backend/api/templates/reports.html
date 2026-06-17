@@ -138,16 +138,16 @@
       <div class="panel-header">
         <div>
           <h2>{{ title }}</h2>
-          <span>Graphify</span>
+          <span>FVENTAS Insights</span>
         </div>
       </div>
       {% set max_value = graph["values"]|max if graph["values"] else 0 %}
-      <div class="graphify-bars">
+      <div class="insight-bars">
         {% for label in graph["labels"] %}
         {% set value = graph["values"][loop.index0] %}
-        <div class="graphify-row">
-          <span class="graphify-label">{{ label }}</span>
-          <span class="graphify-track"><span class="graphify-value" style="width: {{ 0 if max_value == 0 else (value / max_value * 100) }}%"></span></span>
+        <div class="insight-row">
+          <span class="insight-label">{{ label }}</span>
+          <span class="insight-track"><span class="insight-value" style="width: {{ 0 if max_value == 0 else (value / max_value * 100) }}%"></span></span>
           <strong>{{ value }}</strong>
         </div>
         {% else %}
@@ -163,7 +163,7 @@
   <div class="panel-header">
     <div>
       <h2>Reporte {{ report_title }}</h2>
-      <span>Datos reales filtrados desde el panel Wulkan.</span>
+      <span>Datos reales filtrados desde el panel FVENTAS.</span>
     </div>
     <span>{{ rows | length }} registros</span>
   </div>

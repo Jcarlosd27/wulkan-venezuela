@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wulkan_mobile/src/data/mobile_repository.dart';
-import 'package:wulkan_mobile/src/domain/mobile_models.dart';
+import 'package:fventas_mobile/src/data/mobile_repository.dart';
+import 'package:fventas_mobile/src/domain/mobile_models.dart';
 
 void main() {
   group('MockMobileRepository', () {
@@ -17,7 +17,7 @@ void main() {
       final products = await repository.listProducts();
 
       expect(products.length, 3);
-      expect(products.map((product) => product.sku), contains('WUL-MOT-45CC'));
+      expect(products.map((product) => product.sku), contains('FVT-MOT-45CC'));
       expect(products.any((product) => product.requiresTechnicalValidation),
           isTrue);
     });
@@ -51,7 +51,7 @@ void main() {
       );
 
       expect(chainsawPage.products.map((product) => product.sku),
-          contains('WUL-MOT-45CC'));
+          contains('FVT-MOT-45CC'));
       expect(
         validationPage.products.any(
           (product) =>
@@ -73,20 +73,21 @@ void main() {
       final locations = await repository.listLocations();
 
       expect(locations, hasLength(2));
-      expect(locations.first.name, contains('Caracas'));
+      expect(locations.first.name, contains('Punto autorizado'));
+      expect(locations.first.address, 'Sucursal principal');
       expect(locations.first.whatsapp, isNotEmpty);
       expect(locations.first.specialties, contains('Garantia'));
     });
 
     test('returns B2B credit and order summaries', () async {
-      final credit = await repository.getCredit('client-local-wulkan');
-      final orders = await repository.listOrders('client-local-wulkan');
+      final credit = await repository.getCredit('client-local-fventas');
+      final orders = await repository.listOrders('client-local-fventas');
 
       expect(credit.creditAvailableUsd, 0);
       expect(credit.status, 'without_credit');
       expect(credit.defaultSaleType, 'cash');
       expect(credit.allowedPaymentTermsDays, contains(0));
-      expect(credit.assignedSeller.name, 'Vendedor Wulkan');
+      expect(credit.assignedSeller.name, 'Vendedor FVENTAS');
       expect(orders, isEmpty);
     });
   });
@@ -94,7 +95,7 @@ void main() {
   group('API mappers', () {
     test('maps API product shape into mobile product', () {
       final product = mapApiProduct('prod-motosierra-45cc', {
-        'sku': 'WUL-MOT-45CC',
+        'sku': 'FVT-MOT-45CC',
         'name': 'Motosierra 45cc',
         'description': 'Equipo de corte para uso tecnico y jardin.',
         'categoryName': 'Maquinaria y jardin',
@@ -103,7 +104,7 @@ void main() {
         'availableStock': 12,
         'requiresQuote': false,
         'requiresTechnicalValidation': false,
-        'pdfUrls': ['https://cdn.wulkan/ficha-motosierra.pdf'],
+        'pdfUrls': ['https://cdn.fventas.cl/ficha-motosierra.pdf'],
       });
 
       expect(product.name, 'Motosierra 45cc');
@@ -111,13 +112,13 @@ void main() {
       expect(product.b2bPriceUsd, 162);
       expect(product.availableStock, 12);
       expect(product.badge, 'Comprar');
-      expect(
-          product.pdfUrls, contains('https://cdn.wulkan/ficha-motosierra.pdf'));
+      expect(product.pdfUrls,
+          contains('https://cdn.fventas.cl/ficha-motosierra.pdf'));
     });
 
     test('marks technical validation products with validar badge', () {
       final product = mapApiProduct('prod-cadena-18', {
-        'sku': 'WUL-REP-CAD18',
+        'sku': 'FVT-REP-CAD18',
         'name': 'Cadena 18 pulgadas compatible',
         'publicPriceUsd': 18,
         'b2bPriceUsd': 15,
@@ -132,7 +133,7 @@ void main() {
     test('maps order commission fields for seller mobile view', () {
       final order = mapApiOrder({
         'orderId': 'ord-mobile-100',
-        'customerName': 'Ferreteria Central',
+        'customerName': 'Cliente B2B Central',
         'saleType': 'credit_line',
         'saleTypeLabel': 'Linea de credito',
         'status': 'approved',
@@ -148,7 +149,7 @@ void main() {
       });
 
       expect(order.id, 'ord-mobile-100');
-      expect(order.customerName, 'Ferreteria Central');
+      expect(order.customerName, 'Cliente B2B Central');
       expect(order.saleType, 'credit_line');
       expect(order.saleTypeLabel, 'Linea de credito');
       expect(order.balanceUsd, 150);

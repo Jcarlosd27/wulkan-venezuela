@@ -1,13 +1,13 @@
-# Wulkan Flask Admin
+# FVENTAS Flask Admin
 
-Admin panel y API movil para Wulkan Venezuela.
+Admin panel y API movil para FVENTAS multiempresa y multipais.
 
 ## Stack
 
 - Flask
 - Bootstrap 5.3
 - UIX local en `static/css/uix.css`
-- Graphify local en `graphify.py` y `static/js/graphify.js`
+- Motor local de FVENTAS Insights en `core/insights.py` y `static/js/insights.js`
 - SQLAlchemy y Alembic para base productiva
 - Gunicorn para runtime WSGI productivo
 - Storage local en desarrollo y S3-compatible en produccion
@@ -64,14 +64,14 @@ backend/api/.env.example
 Fuente de datos:
 
 ```text
-WULKAN_DATA_BACKEND=json
+FVENTAS_DATA_BACKEND=json
 ```
 
 Para operar contra SQL:
 
 ```powershell
-$env:WULKAN_DATA_BACKEND="sql"
-$env:WULKAN_SQL_FALLBACK_TO_JSON="0"
+$env:FVENTAS_DATA_BACKEND="sql"
+$env:FVENTAS_SQL_FALLBACK_TO_JSON="0"
 ```
 
 Migrar base:
@@ -101,30 +101,30 @@ python scripts/seed_database.py
 Variables recomendadas para produccion:
 
 ```bash
-WULKAN_ENV=production
-WULKAN_APP_VERSION=1.0.0
-WULKAN_BUILD_SHA=<commit-git>
-WULKAN_SECRET_KEY=<secreto-real-largo>
-WULKAN_DATA_BACKEND=sql
-WULKAN_SQL_FALLBACK_TO_JSON=0
-WULKAN_REQUIRE_MOBILE_TOKEN=1
-WULKAN_DATABASE_URL=postgresql+psycopg://user:password@host:5432/wulkan
-WULKAN_LOGIN_MAX_ATTEMPTS=5
-WULKAN_LOGIN_WINDOW_SECONDS=300
-WULKAN_MAX_UPLOAD_MB=16
-WULKAN_BACKUP_DIR=backups
-WULKAN_LOG_LEVEL=INFO
-WULKAN_RUN_MIGRATIONS=1
-WULKAN_HARDEN_DEFAULT_ACCOUNTS=1
-WULKAN_STORAGE_BACKEND=s3
-WULKAN_STORAGE_PUBLIC_BASE_URL=https://wulkan-assets.atl1.cdn.digitaloceanspaces.com
-WULKAN_S3_BUCKET=wulkan-assets
-WULKAN_S3_REGION=atl1
-WULKAN_S3_ENDPOINT_URL=https://atl1.digitaloceanspaces.com
-WULKAN_S3_PREFIX=production
+FVENTAS_ENV=production
+FVENTAS_APP_VERSION=1.0.0
+FVENTAS_BUILD_SHA=<commit-git>
+FVENTAS_SECRET_KEY=<secreto-real-largo>
+FVENTAS_DATA_BACKEND=sql
+FVENTAS_SQL_FALLBACK_TO_JSON=0
+FVENTAS_REQUIRE_MOBILE_TOKEN=1
+FVENTAS_DATABASE_URL=postgresql+psycopg://user:password@host:5432/FVENTAS
+FVENTAS_LOGIN_MAX_ATTEMPTS=5
+FVENTAS_LOGIN_WINDOW_SECONDS=300
+FVENTAS_MAX_UPLOAD_MB=16
+FVENTAS_BACKUP_DIR=backups
+FVENTAS_LOG_LEVEL=INFO
+FVENTAS_RUN_MIGRATIONS=1
+FVENTAS_HARDEN_DEFAULT_ACCOUNTS=1
+FVENTAS_STORAGE_BACKEND=s3
+FVENTAS_STORAGE_PUBLIC_BASE_URL=https://FVENTAS-assets.atl1.cdn.digitaloceanspaces.com
+FVENTAS_S3_BUCKET=FVENTAS-assets
+FVENTAS_S3_REGION=atl1
+FVENTAS_S3_ENDPOINT_URL=https://atl1.digitaloceanspaces.com
+FVENTAS_S3_PREFIX=production
 ```
 
-En `production`, Flask falla al arrancar si intenta usar secreto de desarrollo, backend JSON, SQLite, fallback a JSON o storage local. Con `WULKAN_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque productivo deshabilita cuentas demo y oculta el catalogo demo inicial.
+En `production`, Flask falla al arrancar si intenta usar secreto de desarrollo, backend JSON, SQLite, fallback a JSON o storage local. Con `FVENTAS_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque productivo deshabilita cuentas demo y oculta el catalogo demo inicial.
 
 ## Produccion con Docker
 
@@ -139,14 +139,14 @@ Crear admin inicial:
 
 ```bash
 docker compose -f docker-compose.production.yml --env-file .env.production exec api \
-  python scripts/create_admin.py --email admin@wulkan.com --name "Admin Wulkan" --role super_admin
+  python scripts/create_admin.py --email admin@FVENTAS.com --name "Admin FVENTAS" --role super_admin
 ```
 
 Smoke test:
 
 ```bash
 python scripts/readiness_check.py --strict
-python scripts/smoke_production.py --base-url https://wulkan.example.com
+python scripts/smoke_production.py --base-url https://FVENTAS.example.com
 ```
 
 Backup:
@@ -162,11 +162,17 @@ El proyecto incluye una spec para App Platform en `.do/app.yaml` y una guia oper
 Arquitectura recomendada:
 
 - App Platform ejecuta este backend con Docker.
-- Managed PostgreSQL usa `WULKAN_DATABASE_URL` o `DATABASE_URL`.
-- DigitalOcean Spaces usa `WULKAN_STORAGE_BACKEND=s3`.
+- Managed PostgreSQL usa `FVENTAS_DATABASE_URL` o `DATABASE_URL`.
+- DigitalOcean Spaces usa `FVENTAS_STORAGE_BACKEND=s3`.
 - La app movil se compila con `apps/mobile/dart_defines.digitalocean.example.json`.
 
 El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade head` al iniciar, deshabilita seeds demo en produccion y luego levanta Gunicorn con el puerto entregado por DigitalOcean.
+
+## Estructura backend
+
+Los modulos de infraestructura viven en `core/`. Los archivos historicos `config.py`, `db.py`, `storage.py`, `uix.py`, `insights.py` y `chile_locations.py` quedan solo como compatibilidad para scripts antiguos. Codigo nuevo debe importar desde `core`.
+
+Guia completa: `../../docs/architecture/PROJECT_STRUCTURE.md`.
 
 ## Seguridad admin
 
@@ -177,5 +183,5 @@ El contenedor usa `scripts/start_web.sh`, ejecuta `python -m alembic upgrade hea
 - Auditoria disponible en `/audit` para `super_admin`.
 - Usuarios admin y clientes nuevos quedan con contrasena temporal y `mustChangePassword`.
 - El admin cambia su clave en `/account/password`.
-- El ferretero cambia su clave con `POST /api/mobile/auth/change-password`.
+- El cliente B2B cambia su clave con `POST /api/mobile/auth/change-password`.
 - Login admin y movil tienen bloqueo temporal por intentos fallidos.

@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("payment_terms_days", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("total_usd", sa.Float(), nullable=False, server_default="0"),
         sa.Column("total_ves", sa.Float(), nullable=False, server_default="0"),
-        sa.Column("exchange_rate_usd_ves", sa.Float(), nullable=False, server_default="38.5"),
+        sa.Column("exchange_rate_usd_ves", sa.Float(), nullable=False, server_default="950"),
         sa.Column("items", sa.JSON(), nullable=False),
         sa.Column("client_snapshot", sa.JSON(), nullable=False),
         sa.Column("versions", sa.JSON(), nullable=False),

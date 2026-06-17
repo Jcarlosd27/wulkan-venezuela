@@ -18,11 +18,11 @@
   <article class="panel dashboard-chart">
     <div class="panel-header">
       <h2>{{ title }}</h2>
-      <span>Graphify</span>
+      <span>FVENTAS Insights</span>
     </div>
     {% if chart.values %}
     <div
-      class="graphify-bars"
+      class="insight-bars"
       data-labels='{{ chart["labels"] | tojson }}'
       data-values='{{ chart["values"] | tojson }}'
     ></div>
@@ -217,10 +217,10 @@
     <article class="panel">
       <div class="panel-header">
         <h2>Rotacion de productos</h2>
-        <span>Graphify</span>
+        <span>FVENTAS Insights</span>
       </div>
       <div
-        class="graphify-bars"
+        class="insight-bars"
         data-labels='{{ rotation_chart["labels"] | tojson }}'
         data-values='{{ rotation_chart["values"] | tojson }}'
       ></div>

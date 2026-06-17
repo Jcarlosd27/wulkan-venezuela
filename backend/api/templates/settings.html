@@ -16,14 +16,14 @@
       <div class="metric-icon"><i class="bi bi-building"></i></div>
       <span>Empresa</span>
       <strong>{{ settings.companyName }}</strong>
-      <em>{{ settings.companyLegalName or "Operacion Venezuela" }}</em>
+      <em>{{ settings.companyLegalName or ("Operacion " ~ settings.marketCountryName) }}</em>
     </article>
   </div>
   <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-currency-exchange"></i></div>
-      <span>Tasa USD/VES</span>
-      <strong>{{ settings.exchangeRateUsdVes }}</strong>
+      <span>Tasa {{ settings.primaryCurrency }}/{{ settings.referenceCurrency }}</span>
+      <strong>{{ settings.exchangeRateBaseToLocal or settings.exchangeRateUsdClp or settings.exchangeRateUsdVes }}</strong>
       <em>{{ settings.primaryCurrency }} / {{ settings.referenceCurrency }}</em>
     </article>
   </div>
@@ -62,6 +62,15 @@
       <div class="col-12 col-xl-6">
         <div class="section-title">Empresa</div>
         <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label" for="settingsMarketCountry">Pais de operacion</label>
+            <select class="form-select" id="settingsMarketCountry" name="marketCountry">
+              {% for code, label in market_country_options %}
+              <option value="{{ code }}" {% if settings.marketCountry == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Define moneda local, documento fiscal, telefono, zona horaria y precio de plan para la empresa.</div>
+          </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Nombre comercial</label>
             <input class="form-control" name="companyName" value="{{ settings.companyName }}">
@@ -71,12 +80,12 @@
             <input class="form-control" name="companyLegalName" value="{{ settings.companyLegalName }}">
           </div>
           <div class="col-12 col-md-6">
-            <label class="form-label">RIF</label>
-            <input class="form-control" name="taxId" value="{{ settings.taxId }}">
+            <label class="form-label" id="settingsTaxLabel">{{ settings.taxLabel }} empresa</label>
+            <input class="form-control" id="settingsTaxInput" name="taxId" value="{{ settings.taxId }}" placeholder="{{ settings.taxPlaceholder }}">
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Telefono soporte</label>
-            <input class="form-control" name="supportPhone" value="{{ settings.supportPhone }}">
+            <input class="form-control" id="settingsPhoneInput" name="supportPhone" value="{{ settings.supportPhone }}" placeholder="{{ settings.phonePlaceholder }}">
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Email soporte</label>
@@ -93,16 +102,24 @@
         <div class="section-title">Moneda y credito</div>
         <div class="row g-3">
           <div class="col-6 col-md-4">
-            <label class="form-label">Moneda principal</label>
-            <input class="form-control" name="primaryCurrency" value="{{ settings.primaryCurrency }}">
+            <label class="form-label">Moneda de venta</label>
+            <select class="form-select" id="settingsSalesCurrency" name="primaryCurrency">
+              {% for code, label in currency_options %}
+              <option value="{{ code }}" {% if settings.primaryCurrency == code %}selected{% endif %}>{{ code }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="col-6 col-md-4">
-            <label class="form-label">Referencia</label>
-            <input class="form-control" name="referenceCurrency" value="{{ settings.referenceCurrency }}">
+            <label class="form-label">Moneda local</label>
+            <select class="form-select" id="settingsLocalCurrency" name="referenceCurrency">
+              {% for code, label in currency_options %}
+              <option value="{{ code }}" {% if settings.referenceCurrency == code %}selected{% endif %}>{{ code }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="col-12 col-md-4">
-            <label class="form-label">Tasa USD/VES</label>
-            <input class="form-control" name="exchangeRateUsdVes" inputmode="decimal" value="{{ settings.exchangeRateUsdVes }}">
+            <label class="form-label" id="settingsRateLabel">Tasa {{ settings.primaryCurrency }}/{{ settings.referenceCurrency }}</label>
+            <input class="form-control" id="settingsExchangeRate" name="exchangeRateBaseToLocal" inputmode="decimal" value="{{ settings.exchangeRateBaseToLocal or settings.exchangeRateUsdClp or settings.exchangeRateUsdVes }}">
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Plazos permitidos</label>
@@ -165,4 +182,35 @@
     </div>
   </fieldset>
 </form>
+<script>
+  (() => {
+    const profiles = {{ market_profiles|tojson }};
+    const market = document.getElementById("settingsMarketCountry");
+    const taxLabel = document.getElementById("settingsTaxLabel");
+    const taxInput = document.getElementById("settingsTaxInput");
+    const phoneInput = document.getElementById("settingsPhoneInput");
+    const salesCurrency = document.getElementById("settingsSalesCurrency");
+    const localCurrency = document.getElementById("settingsLocalCurrency");
+    const rateLabel = document.getElementById("settingsRateLabel");
+    const exchangeRate = document.getElementById("settingsExchangeRate");
+    const refreshRateLabel = () => {
+      if (rateLabel && salesCurrency && localCurrency) {
+        rateLabel.textContent = `Tasa ${salesCurrency.value}/${localCurrency.value}`;
+      }
+    };
+    const applyMarket = () => {
+      const profile = profiles[market.value] || profiles.CL;
+      if (taxLabel) taxLabel.textContent = `${profile.taxLabel} empresa`;
+      if (taxInput) taxInput.placeholder = profile.taxPlaceholder || "";
+      if (phoneInput) phoneInput.placeholder = profile.phonePlaceholder || "";
+      if (salesCurrency) salesCurrency.value = profile.salesCurrency || salesCurrency.value;
+      if (localCurrency) localCurrency.value = profile.localCurrency || localCurrency.value;
+      if (exchangeRate) exchangeRate.placeholder = String(profile.exchangeRateBaseToLocal || "");
+      refreshRateLabel();
+    };
+    if (market) market.addEventListener("change", applyMarket);
+    if (salesCurrency) salesCurrency.addEventListener("change", refreshRateLabel);
+    if (localCurrency) localCurrency.addEventListener("change", refreshRateLabel);
+  })();
+</script>
 {% endblock %}

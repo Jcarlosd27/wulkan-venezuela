@@ -6,10 +6,10 @@
 <article class="panel order-chart h-100">
   <div class="panel-header">
     <h2>{{ title }}</h2>
-    <span>Graphify</span>
+    <span>FVENTAS Insights</span>
   </div>
   {% if chart.values %}
-  <div class="graphify-bars" data-labels='{{ chart["labels"] | tojson }}' data-values='{{ chart["values"] | tojson }}'></div>
+  <div class="insight-bars" data-labels='{{ chart["labels"] | tojson }}' data-values='{{ chart["values"] | tojson }}'></div>
   {% else %}
   <div class="empty-state compact">
     <div class="empty-icon"><i class="bi bi-kanban"></i></div>
@@ -24,7 +24,7 @@
 <div class="row g-3">
   <div class="col-12 col-lg-6">
     <label class="form-label fw-semibold">Titulo comercial</label>
-    <input class="form-control" name="title" value="{{ record.title if record else '' }}" placeholder="Ej: Reposicion motosierra zona Valencia" required>
+    <input class="form-control" name="title" value="{{ record.title if record else '' }}" placeholder="Ej: Reposicion de producto por zona" required>
   </div>
   <div class="col-6 col-lg-3">
     <label class="form-label fw-semibold">Tipo</label>

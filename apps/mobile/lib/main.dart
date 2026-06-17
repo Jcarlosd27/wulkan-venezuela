@@ -5,28 +5,28 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'src/auth/mobile_auth.dart';
-import 'src/brand/wulkan_logo.dart';
+import 'src/brand/fventas_logo.dart';
 import 'src/bootstrap/mobile_bootstrap.dart';
 import 'src/cart/mobile_cart_service.dart';
 import 'src/config/mobile_environment.dart';
 import 'src/data/mobile_repository.dart';
 import 'src/domain/mobile_models.dart';
-import 'src/domain/venezuela_locations.dart';
+import 'src/domain/chile_locations.dart';
 import 'src/orders/mobile_order_service.dart';
 
-const _wulkanOrange = Color(0xFFFF4B00);
-const _wulkanBlack = Color(0xFF101010);
-const _wulkanInk = Color(0xFF242424);
-const _wulkanMuted = Color(0xFF767676);
-const _wulkanCanvas = Color(0xFFFAF8F6);
-const _wulkanSurface = Color(0xFFFFFFFF);
-const _wulkanLine = Color(0xFFEDE8E4);
+const _fventasBlue = Color(0xFF0D6EFD);
+const _fventasBlack = Color(0xFF0B1220);
+const _fventasInk = Color(0xFF1F2937);
+const _fventasMuted = Color(0xFF667085);
+const _fventasCanvas = Color(0xFFF4F7FB);
+const _fventasSurface = Color(0xFFFFFFFF);
+const _fventasLine = Color(0xFFE6EEF8);
 
 String _newOperationId(String prefix) =>
     '$prefix-${DateTime.now().microsecondsSinceEpoch}';
 
-class _VenezuelanPhoneInputFormatter extends TextInputFormatter {
-  const _VenezuelanPhoneInputFormatter();
+class _ChileanPhoneInputFormatter extends TextInputFormatter {
+  const _ChileanPhoneInputFormatter();
 
   @override
   TextEditingValue formatEditUpdate(
@@ -34,22 +34,27 @@ class _VenezuelanPhoneInputFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     var digits = newValue.text.replaceAll(RegExp(r'\D+'), '');
-    if (digits.startsWith('0058')) {
+    if (digits.startsWith('0056')) {
       digits = digits.substring(4);
-    } else if (digits.startsWith('58')) {
+    } else if (digits.startsWith('56')) {
       digits = digits.substring(2);
     }
     if (digits.startsWith('0')) {
       digits = digits.substring(1);
     }
-    if (digits.length > 10) {
-      digits = digits.substring(0, 10);
+    if (digits.length == 8) {
+      digits = '9$digits';
+    }
+    if (digits.length > 9) {
+      digits = digits.substring(0, 9);
     }
 
     final formatted = switch (digits.length) {
       0 => '',
-      <= 3 => '+58 $digits',
-      _ => '+58 ${digits.substring(0, 3)}-${digits.substring(3)}',
+      1 => '+56 $digits',
+      <= 5 => '+56 ${digits.substring(0, 1)} ${digits.substring(1)}',
+      _ =>
+        '+56 ${digits.substring(0, 1)} ${digits.substring(1, 5)} ${digits.substring(5)}',
     };
     return TextEditingValue(
       text: formatted,
@@ -58,37 +63,39 @@ class _VenezuelanPhoneInputFormatter extends TextInputFormatter {
   }
 }
 
-class _VenezuelanRifInputFormatter extends TextInputFormatter {
-  const _VenezuelanRifInputFormatter();
-
-  static const _validPrefixes = {'V', 'E', 'J', 'G', 'P'};
+class _ChileanTaxIdInputFormatter extends TextInputFormatter {
+  const _ChileanTaxIdInputFormatter();
 
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    final compact =
-        newValue.text.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '');
+    var compact =
+        newValue.text.toUpperCase().replaceAll(RegExp(r'[^0-9K]+'), '');
     if (compact.isEmpty) {
       return const TextEditingValue();
     }
-
-    final prefix = compact.substring(0, 1);
-    if (!_validPrefixes.contains(prefix)) {
-      return oldValue;
+    if (compact.length > 9) {
+      compact = compact.substring(0, 9);
     }
 
-    var digits = compact.substring(1).replaceAll(RegExp(r'\D+'), '');
-    if (digits.length > 9) {
-      digits = digits.substring(0, 9);
+    final body =
+        compact.length > 1 ? compact.substring(0, compact.length - 1) : compact;
+    final verifier =
+        compact.length > 1 ? compact.substring(compact.length - 1) : '';
+    final chunks = <String>[];
+    var remaining = body;
+    while (remaining.length > 3) {
+      chunks.insert(0, remaining.substring(remaining.length - 3));
+      remaining = remaining.substring(0, remaining.length - 3);
     }
+    if (remaining.isNotEmpty) {
+      chunks.insert(0, remaining);
+    }
+    final formatted =
+        verifier.isEmpty ? chunks.join('.') : '${chunks.join('.')}-$verifier';
 
-    final formatted = switch (digits.length) {
-      0 => '$prefix-',
-      <= 8 => '$prefix-$digits',
-      _ => '$prefix-${digits.substring(0, 8)}-${digits.substring(8)}',
-    };
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),
@@ -101,30 +108,30 @@ Future<void> main() async {
   mobileEnvironment.validateRuntime();
   await configureMobileRuntime();
   await mobileCartController.load();
-  runApp(const WulkanApp());
+  runApp(const FVENTASApp());
 }
 
-class WulkanApp extends StatelessWidget {
-  const WulkanApp({super.key});
+class FVENTASApp extends StatelessWidget {
+  const FVENTASApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Wulkan',
+      title: 'FVENTAS',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: _wulkanOrange,
-          primary: _wulkanOrange,
-          secondary: _wulkanBlack,
+          seedColor: _fventasBlue,
+          primary: _fventasBlue,
+          secondary: _fventasBlack,
           error: const Color(0xFFC83232),
-          surface: _wulkanSurface,
-          onSurface: _wulkanInk,
+          surface: _fventasSurface,
+          onSurface: _fventasInk,
         ),
-        scaffoldBackgroundColor: _wulkanCanvas,
+        scaffoldBackgroundColor: _fventasCanvas,
         appBarTheme: const AppBarTheme(
-          backgroundColor: _wulkanCanvas,
-          foregroundColor: _wulkanBlack,
+          backgroundColor: _fventasCanvas,
+          foregroundColor: _fventasBlack,
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: false,
@@ -134,12 +141,12 @@ class WulkanApp extends StatelessWidget {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: _wulkanLine),
+            side: const BorderSide(color: _fventasLine),
           ),
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
-            backgroundColor: _wulkanOrange,
+            backgroundColor: _fventasBlue,
             foregroundColor: Colors.white,
             minimumSize: const Size(48, 48),
             shape: RoundedRectangleBorder(
@@ -149,12 +156,12 @@ class WulkanApp extends StatelessWidget {
         ),
         navigationBarTheme: NavigationBarThemeData(
           backgroundColor: Colors.white,
-          indicatorColor: _wulkanOrange.withValues(alpha: 0.12),
+          indicatorColor: _fventasBlue.withValues(alpha: 0.12),
           labelTextStyle: WidgetStateProperty.resolveWith(
             (states) => TextStyle(
               color: states.contains(WidgetState.selected)
-                  ? _wulkanOrange
-                  : _wulkanMuted,
+                  ? _fventasBlue
+                  : _fventasMuted,
               fontSize: 12,
               fontWeight: FontWeight.w800,
             ),
@@ -162,19 +169,19 @@ class WulkanApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const WulkanSessionGate(),
+      home: const FVENTASSessionGate(),
     );
   }
 }
 
-class WulkanSessionGate extends StatefulWidget {
-  const WulkanSessionGate({super.key});
+class FVENTASSessionGate extends StatefulWidget {
+  const FVENTASSessionGate({super.key});
 
   @override
-  State<WulkanSessionGate> createState() => _WulkanSessionGateState();
+  State<FVENTASSessionGate> createState() => _FVENTASSessionGateState();
 }
 
-class _WulkanSessionGateState extends State<WulkanSessionGate> {
+class _FVENTASSessionGateState extends State<FVENTASSessionGate> {
   late Future<MobileUserSession> _sessionFuture;
 
   @override
@@ -216,10 +223,10 @@ class _WulkanSessionGateState extends State<WulkanSessionGate> {
 
         final session = snapshot.data;
         if (session == null || !session.isAuthenticated) {
-          return WulkanLoginScreen(onAuthenticated: _setSession);
+          return FVENTASLoginScreen(onAuthenticated: _setSession);
         }
 
-        return WulkanShell(
+        return FVENTASShell(
           session: session,
           onSessionChanged: _refreshSession,
           onSignOut: _signOut,
@@ -229,16 +236,16 @@ class _WulkanSessionGateState extends State<WulkanSessionGate> {
   }
 }
 
-class WulkanLoginScreen extends StatefulWidget {
-  const WulkanLoginScreen({super.key, required this.onAuthenticated});
+class FVENTASLoginScreen extends StatefulWidget {
+  const FVENTASLoginScreen({super.key, required this.onAuthenticated});
 
   final ValueChanged<MobileUserSession> onAuthenticated;
 
   @override
-  State<WulkanLoginScreen> createState() => _WulkanLoginScreenState();
+  State<FVENTASLoginScreen> createState() => _FVENTASLoginScreenState();
 }
 
-class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
+class _FVENTASLoginScreenState extends State<FVENTASLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isSigningIn = false;
@@ -302,7 +309,8 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Solicitud recibida. Wulkan validara tu acceso movil.'),
+          content:
+              Text('Solicitud recibida. FVENTAS validara tu acceso movil.'),
         ),
       );
     } catch (error) {
@@ -335,36 +343,36 @@ class _WulkanLoginScreenState extends State<WulkanLoginScreen> {
                 height: 92,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _wulkanBlack,
+                  color: _fventasBlack,
                   borderRadius: BorderRadius.circular(26),
                   boxShadow: [
                     BoxShadow(
-                      color: _wulkanBlack.withValues(alpha: 0.18),
+                      color: _fventasBlack.withValues(alpha: 0.18),
                       blurRadius: 26,
                       offset: const Offset(0, 14),
                     ),
                   ],
                 ),
                 child: const Center(
-                  child: WulkanLogo(compact: true, onDark: true),
+                  child: FVENTASLogo(compact: true, onDark: true),
                 ),
               ),
             ),
             const SizedBox(height: 22),
             Text(
-              'Wulkan B2B',
+              'FVENTAS B2B',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: _wulkanBlack,
+                    color: _fventasBlack,
                   ),
             ),
             const SizedBox(height: 6),
             const Text(
-              'Acceso para ferreteros autorizados',
+              'Acceso para clientes B2B autorizados',
               textAlign: TextAlign.center,
               style:
-                  TextStyle(color: _wulkanMuted, fontWeight: FontWeight.w700),
+                  TextStyle(color: _fventasMuted, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 24),
             _LoginAccessCard(
@@ -427,7 +435,7 @@ class _LoginAccessCard extends StatelessWidget {
               children: [
                 const _SoftIcon(
                   icon: Icons.lock_person_outlined,
-                  color: _wulkanOrange,
+                  color: _fventasBlue,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -557,17 +565,17 @@ class _TrustTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _wulkanLine),
+        border: Border.all(color: _fventasLine),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _SoftIcon(icon: icon, color: _wulkanOrange),
+          _SoftIcon(icon: icon, color: _fventasBlue),
           Text(
             label,
             style: const TextStyle(
-              color: _wulkanBlack,
+              color: _fventasBlack,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -577,8 +585,8 @@ class _TrustTile extends StatelessWidget {
   }
 }
 
-class WulkanShell extends StatefulWidget {
-  const WulkanShell({
+class FVENTASShell extends StatefulWidget {
+  const FVENTASShell({
     super.key,
     required this.session,
     required this.onSessionChanged,
@@ -590,10 +598,10 @@ class WulkanShell extends StatefulWidget {
   final Future<void> Function() onSignOut;
 
   @override
-  State<WulkanShell> createState() => _WulkanShellState();
+  State<FVENTASShell> createState() => _FVENTASShellState();
 }
 
-class _WulkanShellState extends State<WulkanShell> {
+class _FVENTASShellState extends State<FVENTASShell> {
   int _index = 0;
 
   @override
@@ -636,13 +644,13 @@ class _WulkanShellState extends State<WulkanShell> {
       appBar: AppBar(
         title: Row(
           children: [
-            const WulkanLogo(compact: true),
+            const FVENTASLogo(compact: true),
             const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Wulkan',
+                  'FVENTAS',
                   style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                 ),
                 Text(
@@ -650,7 +658,7 @@ class _WulkanShellState extends State<WulkanShell> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
@@ -674,7 +682,7 @@ class _WulkanShellState extends State<WulkanShell> {
                 onPressed: () => setState(() => _index = 2),
                 icon: Badge(
                   isLabelVisible: count > 0,
-                  backgroundColor: _wulkanOrange,
+                  backgroundColor: _fventasBlue,
                   label: Text(count.toString()),
                   child: const Icon(Icons.shopping_cart_outlined),
                 ),
@@ -793,7 +801,7 @@ class _PasswordChangeRequiredScreenState
       appBar: AppBar(
         title: Row(
           children: [
-            const WulkanLogo(compact: true),
+            const FVENTASLogo(compact: true),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -821,7 +829,7 @@ class _PasswordChangeRequiredScreenState
             title: 'Clave temporal obligatoria',
             message:
                 'Antes de comprar, tomar pedidos o ver cartera debes crear una clave privada.',
-            color: _wulkanOrange,
+            color: _fventasBlue,
           ),
           const SizedBox(height: 12),
           _PasswordChangePanel(
@@ -876,14 +884,14 @@ class _SellerShellState extends State<_SellerShell> {
       appBar: AppBar(
         title: Row(
           children: [
-            const WulkanLogo(compact: true),
+            const FVENTASLogo(compact: true),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Ventas Wulkan',
+                    'Ventas FVENTAS',
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                   ),
                   Text(
@@ -891,7 +899,7 @@ class _SellerShellState extends State<_SellerShell> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: _wulkanMuted,
+                      color: _fventasMuted,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                     ),
@@ -915,7 +923,7 @@ class _SellerShellState extends State<_SellerShell> {
                 onPressed: () => setState(() => _index = 2),
                 icon: Badge(
                   isLabelVisible: count > 0,
-                  backgroundColor: _wulkanOrange,
+                  backgroundColor: _fventasBlue,
                   label: Text(count.toString()),
                   child: const Icon(Icons.assignment_add),
                 ),
@@ -969,7 +977,7 @@ class _NotificationsButton extends StatelessWidget {
           ),
           icon: Badge(
             isLabelVisible: count > 0,
-            backgroundColor: _wulkanOrange,
+            backgroundColor: _fventasBlue,
             label: Text(count.toString()),
             child: const Icon(Icons.notifications_none),
           ),
@@ -1088,9 +1096,9 @@ class _NotificationsLoadingState extends StatelessWidget {
           margin: const EdgeInsets.all(18),
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: _wulkanSurface,
+            color: _fventasSurface,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _wulkanLine),
+            border: Border.all(color: _fventasLine),
             boxShadow: const [
               BoxShadow(
                 blurRadius: 24,
@@ -1105,9 +1113,9 @@ class _NotificationsLoadingState extends StatelessWidget {
               SizedBox(width: 14),
               Expanded(
                 child: Text(
-                  'Sincronizando alertas Wulkan',
+                  'Sincronizando alertas FVENTAS',
                   style: TextStyle(
-                    color: _wulkanBlack,
+                    color: _fventasBlack,
                     fontSize: 16,
                     fontWeight: FontWeight.w900,
                   ),
@@ -1143,9 +1151,9 @@ class _NotificationsEmptyState extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
             decoration: BoxDecoration(
-              color: _wulkanSurface,
+              color: _fventasSurface,
               borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: _wulkanLine),
+              border: Border.all(color: _fventasLine),
               boxShadow: const [
                 BoxShadow(
                   blurRadius: 24,
@@ -1162,7 +1170,7 @@ class _NotificationsEmptyState extends StatelessWidget {
                   'Sin alertas por revisar',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: _wulkanBlack,
+                        color: _fventasBlack,
                         fontWeight: FontWeight.w900,
                       ),
                 ),
@@ -1171,7 +1179,7 @@ class _NotificationsEmptyState extends StatelessWidget {
                   'Las notificaciones de pedidos, credito, stock y comisiones apareceran aqui cuando exista una accion pendiente.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     height: 1.35,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1206,12 +1214,12 @@ class _NotificationCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _wulkanSurface,
+        color: _fventasSurface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: notification.isUnread
               ? color.withValues(alpha: .28)
-              : _wulkanLine,
+              : _fventasLine,
         ),
         boxShadow: const [
           BoxShadow(
@@ -1246,7 +1254,7 @@ class _NotificationCard extends StatelessWidget {
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w900,
-                          color: _wulkanBlack,
+                          color: _fventasBlack,
                         ),
                       ),
                     ),
@@ -1255,7 +1263,7 @@ class _NotificationCard extends StatelessWidget {
                         width: 8,
                         height: 8,
                         decoration: const BoxDecoration(
-                          color: _wulkanOrange,
+                          color: _fventasBlue,
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -1267,7 +1275,7 @@ class _NotificationCard extends StatelessWidget {
                       ? notification.typeLabel
                       : notification.body,
                   style: const TextStyle(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     height: 1.35,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1283,12 +1291,12 @@ class _NotificationCard extends StatelessWidget {
                     ),
                     _MiniChip(
                       label: _shortDate(notification.createdAt),
-                      color: _wulkanInk,
+                      color: _fventasInk,
                     ),
                     if (notification.entityId.isNotEmpty)
                       _MiniChip(
                         label: notification.entityId,
-                        color: _wulkanMuted,
+                        color: _fventasMuted,
                       ),
                   ],
                 ),
@@ -1327,7 +1335,7 @@ Color _notificationColor(MobileNotification notification) {
   if (notification.type.contains('credit')) {
     return const Color(0xFF0D6EFD);
   }
-  return _wulkanOrange;
+  return _fventasBlue;
 }
 
 IconData _notificationIcon(MobileNotification notification) {
@@ -1506,10 +1514,10 @@ class _SellerSummaryCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
-            color: _wulkanBlack,
+            color: _fventasBlack,
             boxShadow: [
               BoxShadow(
-                color: _wulkanBlack.withValues(alpha: 0.14),
+                color: _fventasBlack.withValues(alpha: 0.14),
                 blurRadius: 28,
                 offset: const Offset(0, 16),
               ),
@@ -1599,7 +1607,7 @@ class _SellerSummaryCard extends StatelessWidget {
                         value: isLoading ? null : goalProgress,
                         backgroundColor: Colors.white24,
                         valueColor: const AlwaysStoppedAnimation<Color>(
-                          _wulkanOrange,
+                          _fventasBlue,
                         ),
                       ),
                     ),
@@ -1858,7 +1866,7 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Cliente ferretero',
+                            'Cliente B2B',
                             style: Theme.of(context)
                                 .textTheme
                                 .titleMedium
@@ -1957,7 +1965,7 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                           compact: true,
                           lines: [
                             'Total USD ${preview.totalUsd.toStringAsFixed(2)}',
-                            'Referencia VES ${preview.totalVes.toStringAsFixed(2)}',
+                            'Referencia ${mobileEnvironment.secondaryCurrency} ${preview.totalLocal.toStringAsFixed(2)}',
                             'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
                           ],
                         ),
@@ -2047,12 +2055,14 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                   creditController.text.trim().replaceAll(',', '.'),
                 ) ??
                 0;
-            final normalizedPhone = normalizeVenezuelanPhone(
-              phoneController.text.trim(),
-            );
-            final normalizedTaxId = normalizeVenezuelanRif(
-              taxIdController.text.trim(),
-            );
+            final rawPhone = phoneController.text.trim();
+            final rawTaxId = taxIdController.text.trim();
+            final normalizedPhone = mobileEnvironment.usesChileFormat
+                ? normalizeChileanPhone(rawPhone)
+                : rawPhone.replaceAll(RegExp(r'\s+'), ' ').trim();
+            final normalizedTaxId = mobileEnvironment.usesChileFormat
+                ? normalizeChileanRut(rawTaxId)
+                : rawTaxId.toUpperCase().trim();
             setSheetState(() {
               phoneController.text = normalizedPhone;
               taxIdController.text = normalizedTaxId;
@@ -2096,7 +2106,9 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final cityOptions = venezuelanCitiesFor(selectedState);
+            final cityOptions = mobileEnvironment.usesChileFormat
+                ? communesForRegion(selectedState)
+                : const <String>[];
             return Padding(
               padding: EdgeInsets.only(
                 left: 18,
@@ -2116,14 +2128,14 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                           width: 42,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: _wulkanLine,
+                            color: _fventasLine,
                             borderRadius: BorderRadius.circular(99),
                           ),
                         ),
                       ),
                       const SizedBox(height: 18),
                       Text(
-                        'Nuevo cliente ferretero',
+                        'Nuevo cliente B2B',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.w900,
                             ),
@@ -2132,7 +2144,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                       const Text(
                         'Quedara asignado a tu cartera y el credito pasara a aprobacion comercial.',
                         style: TextStyle(
-                          color: _wulkanMuted,
+                          color: _fventasMuted,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -2141,7 +2153,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                         controller: businessNameController,
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
-                          labelText: 'Razon social / ferreteria',
+                          labelText: 'Razon social / empresa',
                           prefixIcon: Icon(Icons.storefront_outlined),
                           border: OutlineInputBorder(),
                         ),
@@ -2170,7 +2182,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                           ).hasMatch(email)) {
                             return 'Correo no valido';
                           }
-                          if (email.endsWith('@wulkan.local')) {
+                          if (email.endsWith('@fventas.local')) {
                             return 'Usa correo real del cliente';
                           }
                           return null;
@@ -2184,22 +2196,37 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: phoneController,
                               keyboardType: TextInputType.phone,
                               textInputAction: TextInputAction.next,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                                const _VenezuelanPhoneInputFormatter(),
-                              ],
-                              decoration: const InputDecoration(
+                              inputFormatters: mobileEnvironment.usesChileFormat
+                                  ? [
+                                      FilteringTextInputFormatter.digitsOnly,
+                                      const _ChileanPhoneInputFormatter(),
+                                    ]
+                                  : [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'[0-9+ -]'),
+                                      ),
+                                      LengthLimitingTextInputFormatter(24),
+                                    ],
+                              decoration: InputDecoration(
                                 labelText: 'Telefono',
-                                hintText: '+58 412-1234567',
-                                border: OutlineInputBorder(),
+                                hintText: mobileEnvironment.phonePlaceholder,
+                                border: const OutlineInputBorder(),
                               ),
                               validator: (value) {
                                 final phone = value?.trim() ?? '';
                                 if (phone.isEmpty) {
                                   return 'Ingresa telefono';
                                 }
-                                if (!isValidVenezuelanPhone(phone)) {
-                                  return 'Formato VE invalido';
+                                if (mobileEnvironment.usesChileFormat &&
+                                    !isValidChileanPhone(phone)) {
+                                  return 'Formato telefonico invalido';
+                                }
+                                if (!mobileEnvironment.usesChileFormat &&
+                                    phone
+                                            .replaceAll(RegExp(r'[^0-9]'), '')
+                                            .length <
+                                        7) {
+                                  return 'Formato telefonico invalido';
                                 }
                                 return null;
                               },
@@ -2211,21 +2238,29 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: taxIdController,
                               textInputAction: TextInputAction.next,
                               textCapitalization: TextCapitalization.characters,
-                              inputFormatters: const [
-                                _VenezuelanRifInputFormatter(),
-                              ],
-                              decoration: const InputDecoration(
-                                labelText: 'RIF',
-                                hintText: 'J-12345678-9',
-                                border: OutlineInputBorder(),
+                              inputFormatters: mobileEnvironment.usesChileFormat
+                                  ? const [
+                                      _ChileanTaxIdInputFormatter(),
+                                    ]
+                                  : [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'[A-Za-z0-9.-]'),
+                                      ),
+                                      LengthLimitingTextInputFormatter(30),
+                                    ],
+                              decoration: InputDecoration(
+                                labelText: mobileEnvironment.taxLabel,
+                                hintText: mobileEnvironment.taxPlaceholder,
+                                border: const OutlineInputBorder(),
                               ),
                               validator: (value) {
                                 final rif = value?.trim() ?? '';
                                 if (rif.isEmpty) {
-                                  return 'Ingresa RIF';
+                                  return 'Ingresa ${mobileEnvironment.taxLabel.toLowerCase()}';
                                 }
-                                if (!isValidVenezuelanRif(rif)) {
-                                  return 'RIF invalido';
+                                if (mobileEnvironment.usesChileFormat &&
+                                    !isValidChileanRut(rif)) {
+                                  return '${mobileEnvironment.taxLabel} invalido';
                                 }
                                 return null;
                               },
@@ -2244,78 +2279,119 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              key: ValueKey(
-                                  'client-state-${selectedState ?? ''}'),
-                              initialValue: selectedState,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Estado',
-                                border: OutlineInputBorder(),
-                              ),
-                              items: venezuelaStates
-                                  .map(
-                                    (state) => DropdownMenuItem<String>(
-                                      value: state,
-                                      child: Text(
-                                        state,
-                                        overflow: TextOverflow.ellipsis,
+                      if (mobileEnvironment.usesChileFormat)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                key: ValueKey(
+                                    'client-state-${selectedState ?? ''}'),
+                                initialValue: selectedState,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Region',
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: chileRegions
+                                    .map(
+                                      (state) => DropdownMenuItem<String>(
+                                        value: state,
+                                        child: Text(
+                                          state,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
-                                    ),
-                                  )
-                                  .toList(growable: false),
-                              onChanged: (value) {
-                                setSheetState(() {
-                                  selectedState = value;
-                                  selectedCity = null;
-                                });
-                              },
-                              validator: (value) =>
-                                  value == null || value.trim().isEmpty
-                                      ? 'Selecciona estado'
-                                      : null,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              key: ValueKey(
-                                  'client-city-${selectedState ?? ''}'),
-                              initialValue: selectedCity,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Ciudad',
-                                border: OutlineInputBorder(),
+                                    )
+                                    .toList(growable: false),
+                                onChanged: (value) {
+                                  setSheetState(() {
+                                    selectedState = value;
+                                    selectedCity = null;
+                                  });
+                                },
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? 'Selecciona region'
+                                        : null,
                               ),
-                              items: cityOptions
-                                  .map(
-                                    (city) => DropdownMenuItem<String>(
-                                      value: city,
-                                      child: Text(
-                                        city,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(growable: false),
-                              onChanged: cityOptions.isEmpty
-                                  ? null
-                                  : (value) {
-                                      setSheetState(() {
-                                        selectedCity = value;
-                                      });
-                                    },
-                              validator: (value) =>
-                                  value == null || value.trim().isEmpty
-                                      ? 'Selecciona ciudad'
-                                      : null,
                             ),
-                          ),
-                        ],
-                      ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                key: ValueKey(
+                                    'client-city-${selectedState ?? ''}'),
+                                initialValue: selectedCity,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Comuna',
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: cityOptions
+                                    .map(
+                                      (city) => DropdownMenuItem<String>(
+                                        value: city,
+                                        child: Text(
+                                          city,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    )
+                                    .toList(growable: false),
+                                onChanged: cityOptions.isEmpty
+                                    ? null
+                                    : (value) {
+                                        setSheetState(() {
+                                          selectedCity = value;
+                                        });
+                                      },
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? 'Selecciona comuna'
+                                        : null,
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: selectedState,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: 'Region / estado',
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: (value) {
+                                  selectedState = value.trim();
+                                },
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? 'Ingresa region o estado'
+                                        : null,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: selectedCity,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: 'Ciudad',
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: (value) {
+                                  selectedCity = value.trim();
+                                },
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? 'Ingresa ciudad'
+                                        : null,
+                              ),
+                            ),
+                          ],
+                        ),
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: addressController,
@@ -2464,7 +2540,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
               title: 'Cartera comercial',
               message:
                   'Los clientes creados aqui quedan asignados a tu usuario vendedor.',
-              color: _wulkanOrange,
+              color: _fventasBlue,
             ),
             const SizedBox(height: 12),
             if (clients.isEmpty)
@@ -2513,10 +2589,10 @@ class _SellerClientsSyncCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _wulkanLine),
+        border: Border.all(color: _fventasLine),
         boxShadow: [
           BoxShadow(
-            color: _wulkanBlack.withValues(alpha: 0.04),
+            color: _fventasBlack.withValues(alpha: 0.04),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -2528,14 +2604,14 @@ class _SellerClientsSyncCard extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: _wulkanOrange.withValues(alpha: 0.1),
+              color: _fventasBlue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Padding(
               padding: EdgeInsets.all(10),
               child: CircularProgressIndicator(
                 strokeWidth: 2.5,
-                color: _wulkanOrange,
+                color: _fventasBlue,
               ),
             ),
           ),
@@ -2547,7 +2623,7 @@ class _SellerClientsSyncCard extends StatelessWidget {
                 Text(
                   'Actualizando cartera',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: _wulkanBlack,
+                        color: _fventasBlack,
                         fontWeight: FontWeight.w900,
                       ),
                 ),
@@ -2555,7 +2631,7 @@ class _SellerClientsSyncCard extends StatelessWidget {
                 const Text(
                   'Sincronizando clientes asignados, cupo y estado comercial.',
                   style: TextStyle(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     fontWeight: FontWeight.w700,
                     height: 1.25,
                   ),
@@ -2671,7 +2747,7 @@ class _SellerClientCard extends StatelessWidget {
                         .where((item) => item.isNotEmpty)
                         .join(' - '),
                     style: const TextStyle(
-                      color: _wulkanMuted,
+                      color: _fventasMuted,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -2682,7 +2758,7 @@ class _SellerClientCard extends StatelessWidget {
                   ),
                   Text(
                     client.email,
-                    style: const TextStyle(color: _wulkanMuted),
+                    style: const TextStyle(color: _fventasMuted),
                   ),
                 ],
               ),
@@ -2700,7 +2776,7 @@ class _SellerClientCard extends StatelessWidget {
     return (label: 'Por aprobar', color: const Color(0xFFFFC107));
   }
   if (!client.creditEnabled) {
-    return (label: 'Contado', color: _wulkanMuted);
+    return (label: 'Contado', color: _fventasMuted);
   }
   if (client.creditAvailableUsd <= 0) {
     return (label: 'Sin cupo', color: const Color(0xFFDC3545));
@@ -2817,7 +2893,7 @@ class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
                 const _EmptyState(
                   title: 'Sin comisiones',
                   message:
-                      'Cuando tus pedidos sean registrados y evaluados por Wulkan, veras aqui el estado de liquidacion.',
+                      'Cuando tus pedidos sean registrados y evaluados por FVENTAS, veras aqui el estado de liquidacion.',
                   icon: Icons.payments_outlined,
                 )
               else if (filteredOrders.isEmpty)
@@ -2868,13 +2944,13 @@ class _SellerCommissionsSyncHero extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
-          colors: [_wulkanBlack, Color(0xFF2C1A12)],
+          colors: [_fventasBlack, Color(0xFF102A43)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         boxShadow: [
           BoxShadow(
-            color: _wulkanBlack.withValues(alpha: 0.14),
+            color: _fventasBlack.withValues(alpha: 0.14),
             blurRadius: 22,
             offset: const Offset(0, 12),
           ),
@@ -2889,14 +2965,14 @@ class _SellerCommissionsSyncHero extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: _wulkanOrange.withValues(alpha: 0.18),
+                  color: _fventasBlue.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: const Padding(
                   padding: EdgeInsets.all(12),
                   child: CircularProgressIndicator(
                     strokeWidth: 2.6,
-                    color: _wulkanOrange,
+                    color: _fventasBlue,
                   ),
                 ),
               ),
@@ -3096,13 +3172,13 @@ class _SellerCommissionHero extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
-          colors: [_wulkanBlack, Color(0xFF2C1A12)],
+          colors: [_fventasBlack, Color(0xFF102A43)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         boxShadow: [
           BoxShadow(
-            color: _wulkanBlack.withValues(alpha: 0.18),
+            color: _fventasBlack.withValues(alpha: 0.18),
             blurRadius: 24,
             offset: const Offset(0, 14),
           ),
@@ -3117,11 +3193,10 @@ class _SellerCommissionHero extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: _wulkanOrange.withValues(alpha: 0.18),
+                  color: _fventasBlue.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child:
-                    const Icon(Icons.payments_outlined, color: _wulkanOrange),
+                child: const Icon(Icons.payments_outlined, color: _fventasBlue),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3151,7 +3226,7 @@ class _SellerCommissionHero extends StatelessWidget {
               ),
               _StatusPill(
                 label: '${summary.commissionRatePercent.toStringAsFixed(1)}%',
-                color: _wulkanOrange,
+                color: _fventasBlue,
               ),
             ],
           ),
@@ -3225,19 +3300,19 @@ class _CommissionFilterBar extends StatelessWidget {
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
                 selected: selected == filter,
-                selectedColor: _wulkanBlack,
+                selectedColor: _fventasBlack,
                 backgroundColor: Colors.white,
                 side: BorderSide(
-                  color: selected == filter ? _wulkanBlack : _wulkanLine,
+                  color: selected == filter ? _fventasBlack : _fventasLine,
                 ),
                 labelStyle: TextStyle(
-                  color: selected == filter ? Colors.white : _wulkanInk,
+                  color: selected == filter ? Colors.white : _fventasInk,
                   fontWeight: FontWeight.w900,
                 ),
                 avatar: Icon(
                   _commissionFilterIcon(filter),
                   size: 16,
-                  color: selected == filter ? Colors.white : _wulkanMuted,
+                  color: selected == filter ? Colors.white : _fventasMuted,
                 ),
                 label: Text(
                   '${_commissionFilterLabel(filter)} ${_commissionFilterCount(orders, filter)}',
@@ -3270,7 +3345,7 @@ class _CommissionPolicyNotice extends StatelessWidget {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'La comision queda trazada por orden y se libera segun validacion comercial, entrega o cobro definido por Wulkan.',
+              'La comision queda trazada por orden y se libera segun validacion comercial, entrega o cobro definido por FVENTAS.',
               style: TextStyle(
                 color: Color(0xFF664D03),
                 fontWeight: FontWeight.w800,
@@ -3329,7 +3404,7 @@ class _SellerCommissionCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: _wulkanMuted,
+                          color: _fventasMuted,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -3354,7 +3429,7 @@ class _SellerCommissionCard extends StatelessWidget {
                   child: _CommissionAmountTile(
                     label: 'Venta',
                     value: 'USD ${order.totalUsd.toStringAsFixed(2)}',
-                    color: _wulkanInk,
+                    color: _fventasInk,
                   ),
                 ),
               ],
@@ -3364,11 +3439,11 @@ class _SellerCommissionCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _MiniChip(label: order.saleTypeLabel, color: _wulkanOrange),
+                _MiniChip(label: order.saleTypeLabel, color: _fventasBlue),
                 _MiniChip(label: orderStatus.label, color: orderStatus.color),
                 _MiniChip(
                   label: '${order.itemsCount} items',
-                  color: _wulkanMuted,
+                  color: _fventasMuted,
                 ),
                 if (rate > 0)
                   _MiniChip(
@@ -3378,7 +3453,7 @@ class _SellerCommissionCard extends StatelessWidget {
                 if (order.dueDate != null)
                   _MiniChip(
                     label: 'Vence ${_formatCustomerDate(order.dueDate!)}',
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                   ),
               ],
             ),
@@ -3424,7 +3499,7 @@ class _CommissionAmountTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFD),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _wulkanLine),
+        border: Border.all(color: _fventasLine),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3432,7 +3507,7 @@ class _CommissionAmountTile extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: _wulkanMuted,
+              color: _fventasMuted,
               fontWeight: FontWeight.w800,
               fontSize: 12,
             ),
@@ -3562,7 +3637,7 @@ String _commissionReleaseReason(
 ) {
   switch (filter) {
     case _CommissionFilter.paid:
-      return 'Liquidada por Wulkan. Esta comision ya forma parte del historial pagado.';
+      return 'Liquidada por FVENTAS. Esta comision ya forma parte del historial pagado.';
     case _CommissionFilter.approved:
       return 'Aprobada comercialmente. Queda lista para liquidacion segun el cierre interno.';
     case _CommissionFilter.blocked:
@@ -3575,7 +3650,7 @@ String _commissionReleaseReason(
       if (order.stockStatus.toLowerCase().contains('reserved')) {
         return 'Pedido con stock reservado. Falta validacion de entrega o cierre comercial.';
       }
-      return 'Pendiente de validacion Wulkan para liberar la comision.';
+      return 'Pendiente de validacion FVENTAS para liberar la comision.';
   }
 }
 
@@ -3614,7 +3689,7 @@ class _SellerOrderCard extends StatelessWidget {
                   Text(
                     '${order.saleTypeLabel} - ${status.label}',
                     style: const TextStyle(
-                      color: _wulkanMuted,
+                      color: _fventasMuted,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -3627,14 +3702,14 @@ class _SellerOrderCard extends StatelessWidget {
                     Text(
                       'Comision USD ${order.commissionUsd.toStringAsFixed(2)} - ${order.commissionStatusLabel}',
                       style: const TextStyle(
-                        color: _wulkanMuted,
+                        color: _fventasMuted,
                         fontWeight: FontWeight.w700,
                       ),
                     )
                   else
                     Text(
                       'Saldo USD ${order.balanceUsd.toStringAsFixed(2)}',
-                      style: const TextStyle(color: _wulkanMuted),
+                      style: const TextStyle(color: _fventasMuted),
                     ),
                 ],
               ),
@@ -3745,10 +3820,10 @@ class _CustomerCommerceCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
             color: Colors.white,
-            border: Border.all(color: _wulkanLine),
+            border: Border.all(color: _fventasLine),
             boxShadow: [
               BoxShadow(
-                color: _wulkanBlack.withValues(alpha: 0.05),
+                color: _fventasBlack.withValues(alpha: 0.05),
                 blurRadius: 22,
                 offset: const Offset(0, 12),
               ),
@@ -3777,7 +3852,7 @@ class _CustomerCommerceCard extends StatelessWidget {
                         Text(
                           enabled ? 'Linea activa' : 'Compra bajo revision',
                           style: const TextStyle(
-                            color: _wulkanMuted,
+                            color: _fventasMuted,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -3787,7 +3862,7 @@ class _CustomerCommerceCard extends StatelessWidget {
                   _StatusPill(
                     label:
                         isLoading ? 'Sync' : (enabled ? 'Credito' : 'Revision'),
-                    color: enabled ? const Color(0xFF198754) : _wulkanOrange,
+                    color: enabled ? const Color(0xFF198754) : _fventasBlue,
                   ),
                 ],
               ),
@@ -3820,7 +3895,7 @@ class _CustomerCommerceCard extends StatelessWidget {
                   minHeight: 8,
                   value: limit <= 0 ? 0 : (exposure / limit).clamp(0, 1),
                   backgroundColor: const Color(0xFFE9ECEF),
-                  color: enabled ? _wulkanOrange : const Color(0xFFADB5BD),
+                  color: enabled ? _fventasBlue : const Color(0xFFADB5BD),
                 ),
               ),
               const SizedBox(height: 12),
@@ -3832,7 +3907,7 @@ class _CustomerCommerceCard extends StatelessWidget {
                           ? 'Clave temporal pendiente'
                           : 'Catalogo sincronizado desde Admin',
                       style: const TextStyle(
-                        color: _wulkanMuted,
+                        color: _fventasMuted,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -3867,7 +3942,7 @@ class _CommerceMetric extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         color: const Color(0xFFF8F9FA),
-        border: Border.all(color: _wulkanLine),
+        border: Border.all(color: _fventasLine),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3875,7 +3950,7 @@ class _CommerceMetric extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: _wulkanMuted,
+              color: _fventasMuted,
               fontSize: 12,
               fontWeight: FontWeight.w800,
             ),
@@ -3923,7 +3998,7 @@ class _CategoryPill extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             color: Colors.white,
-            border: Border.all(color: _wulkanLine),
+            border: Border.all(color: _fventasLine),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3938,8 +4013,8 @@ class _CategoryPill extends StatelessWidget {
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => CircleAvatar(
                       radius: 22,
-                      backgroundColor: _wulkanOrange.withValues(alpha: 0.1),
-                      foregroundColor: _wulkanOrange,
+                      backgroundColor: _fventasBlue.withValues(alpha: 0.1),
+                      foregroundColor: _fventasBlue,
                       child: Icon(icon, size: 20),
                     ),
                   ),
@@ -3947,8 +4022,8 @@ class _CategoryPill extends StatelessWidget {
               else
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor: _wulkanOrange.withValues(alpha: 0.1),
-                  foregroundColor: _wulkanOrange,
+                  backgroundColor: _fventasBlue.withValues(alpha: 0.1),
+                  foregroundColor: _fventasBlue,
                   child: Icon(icon, size: 20),
                 ),
               const Spacer(),
@@ -3962,7 +4037,7 @@ class _CategoryPill extends StatelessWidget {
                 subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _wulkanMuted, fontSize: 12),
+                style: const TextStyle(color: _fventasMuted, fontSize: 12),
               ),
             ],
           ),
@@ -4036,8 +4111,8 @@ class _PromoCarouselState extends State<_PromoCarousel> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(99),
                       color: i == activeIndex
-                          ? _wulkanOrange
-                          : _wulkanOrange.withValues(alpha: 0.18),
+                          ? _fventasBlue
+                          : _fventasBlue.withValues(alpha: 0.18),
                     ),
                   ),
               ],
@@ -4070,7 +4145,7 @@ class _PromoSlide extends StatelessWidget {
           borderRadius: BorderRadius.circular(26),
           boxShadow: [
             BoxShadow(
-              color: _wulkanOrange.withValues(alpha: 0.2),
+              color: _fventasBlue.withValues(alpha: 0.2),
               blurRadius: 22,
               offset: const Offset(0, 12),
             ),
@@ -4174,7 +4249,7 @@ class _PromoFallbackArt extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [_wulkanBlack, Color(0xFF272727)],
+          colors: [_fventasBlack, Color(0xFF102A43)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -4198,7 +4273,7 @@ class _PromoFallbackArt extends StatelessWidget {
               height: 62,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
-                color: _wulkanOrange,
+                color: _fventasBlue,
               ),
               child: const Icon(
                 Icons.campaign_outlined,
@@ -4292,9 +4367,9 @@ class _FeaturedProductGrid extends StatelessWidget {
               subtitle: _productSubtitle(product),
               badge: product.badge,
               imageUrl: product.primaryImageUrl,
-              priceUsd: product.ferreteroPriceUsd,
-              originalPriceUsd: product.ferreteroReferencePriceUsd,
-              discountPercent: product.ferreteroDiscountPercent,
+              priceUsd: product.effectiveB2bPriceUsd,
+              originalPriceUsd: product.b2bReferencePriceUsd,
+              discountPercent: product.b2bDiscountPercent,
               category: product.categoryName,
               variants: product.variants,
               stock: product.availableStock,
@@ -4540,7 +4615,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           const SizedBox(height: 14),
           const _AnnouncementsStrip(placement: 'catalog'),
           const SizedBox(height: 16),
-          const _SectionTitle(title: 'Catalogo Wulkan'),
+          const _SectionTitle(title: 'Catalogo FVENTAS'),
           if (_errorMessage != null)
             _ErrorState(
               title: 'No pudimos cargar el catalogo',
@@ -4548,7 +4623,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
               onRetry: _loadFirstPage,
             )
           else if (_isLoading)
-            const _LoadingState(message: 'Sincronizando catalogo Wulkan')
+            const _LoadingState(message: 'Sincronizando catalogo FVENTAS')
           else if (_products.isEmpty)
             _EmptyState(
               icon: Icons.inventory_2_outlined,
@@ -4586,9 +4661,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   subtitle: _productSubtitle(product),
                   badge: product.badge,
                   imageUrl: product.primaryImageUrl,
-                  priceUsd: product.ferreteroPriceUsd,
-                  originalPriceUsd: product.ferreteroReferencePriceUsd,
-                  discountPercent: product.ferreteroDiscountPercent,
+                  priceUsd: product.effectiveB2bPriceUsd,
+                  originalPriceUsd: product.b2bReferencePriceUsd,
+                  discountPercent: product.b2bDiscountPercent,
                   category: product.categoryName,
                   variants: product.variants,
                   stock: product.availableStock,
@@ -4639,7 +4714,7 @@ class _CatalogSummary extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: Colors.white,
-        border: Border.all(color: _wulkanLine),
+        border: Border.all(color: _fventasLine),
       ),
       child: Row(
         children: [
@@ -4648,11 +4723,11 @@ class _CatalogSummary extends StatelessWidget {
             height: 40,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              color: _wulkanOrange.withValues(alpha: 0.1),
+              color: _fventasBlue.withValues(alpha: 0.1),
             ),
             child: const Icon(
               Icons.inventory_2_outlined,
-              color: _wulkanOrange,
+              color: _fventasBlue,
             ),
           ),
           const SizedBox(width: 12),
@@ -4674,7 +4749,7 @@ class _CatalogSummary extends StatelessWidget {
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: _wulkanMuted),
+                      ?.copyWith(color: _fventasMuted),
                 ),
                 if (categoryLabel != "Todas")
                   Text(
@@ -4682,7 +4757,7 @@ class _CatalogSummary extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: _wulkanOrange,
+                          color: _fventasBlue,
                           fontWeight: FontWeight.w800,
                         ),
                   ),
@@ -4724,14 +4799,14 @@ class _CatalogFilterBar extends StatelessWidget {
                 label: Text(label),
                 selected: selected == filter,
                 onSelected: (_) => onChanged(filter),
-                selectedColor: _wulkanBlack,
+                selectedColor: _fventasBlack,
                 backgroundColor: Colors.white,
                 labelStyle: TextStyle(
-                  color: selected == filter ? Colors.white : _wulkanInk,
+                  color: selected == filter ? Colors.white : _fventasInk,
                   fontWeight: FontWeight.w800,
                 ),
                 side: BorderSide(
-                  color: selected == filter ? _wulkanBlack : _wulkanLine,
+                  color: selected == filter ? _fventasBlack : _fventasLine,
                 ),
               ),
             ),
@@ -4768,7 +4843,7 @@ class _CategoryFilterStrip extends StatelessWidget {
             title: 'Categorias no disponibles',
             message:
                 'El catalogo sigue operativo, pero no pudimos leer las familias desde el admin.',
-            color: _wulkanOrange,
+            color: _fventasBlue,
           );
         }
 
@@ -4783,7 +4858,7 @@ class _CategoryFilterStrip extends StatelessWidget {
             Text(
               'Familias',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     fontWeight: FontWeight.w900,
                   ),
             ),
@@ -4799,18 +4874,18 @@ class _CategoryFilterStrip extends StatelessWidget {
                       avatar: const Icon(Icons.apps_outlined, size: 17),
                       selected: selectedCategoryId == null,
                       onSelected: (_) => onChanged(null),
-                      selectedColor: _wulkanBlack,
+                      selectedColor: _fventasBlack,
                       backgroundColor: Colors.white,
                       labelStyle: TextStyle(
                         color: selectedCategoryId == null
                             ? Colors.white
-                            : _wulkanInk,
+                            : _fventasInk,
                         fontWeight: FontWeight.w800,
                       ),
                       side: BorderSide(
                         color: selectedCategoryId == null
-                            ? _wulkanBlack
-                            : _wulkanLine,
+                            ? _fventasBlack
+                            : _fventasLine,
                       ),
                     ),
                   ),
@@ -4825,18 +4900,18 @@ class _CategoryFilterStrip extends StatelessWidget {
                         ),
                         selected: selectedCategoryId == categories[index].id,
                         onSelected: (_) => onChanged(categories[index]),
-                        selectedColor: _wulkanBlack,
+                        selectedColor: _fventasBlack,
                         backgroundColor: Colors.white,
                         labelStyle: TextStyle(
                           color: selectedCategoryId == categories[index].id
                               ? Colors.white
-                              : _wulkanInk,
+                              : _fventasInk,
                           fontWeight: FontWeight.w800,
                         ),
                         side: BorderSide(
                           color: selectedCategoryId == categories[index].id
-                              ? _wulkanBlack
-                              : _wulkanLine,
+                              ? _fventasBlack
+                              : _fventasLine,
                         ),
                       ),
                     ),
@@ -4898,8 +4973,8 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
-    final ferreteroPrice = product.ferreteroPriceUsd;
-    final referencePrice = product.ferreteroReferencePriceUsd;
+    final b2bPrice = product.effectiveB2bPriceUsd;
+    final referencePrice = product.b2bReferencePriceUsd;
     final accentColor = _productAccentColor(product.categoryName);
     final canAdd = product.requiresQuote || product.availableStock > 0;
     final galleryImages = product.galleryImageUrls;
@@ -4959,19 +5034,18 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
             children: [
               _InfoChip(
                 icon: Icons.payments_outlined,
-                label: 'Ferretero USD ${ferreteroPrice.toStringAsFixed(2)}',
+                label: 'B2B USD ${b2bPrice.toStringAsFixed(2)}',
               ),
-              if (product.ferreteroDiscountPercent > 0)
+              if (product.b2bDiscountPercent > 0)
                 _InfoChip(
                   icon: Icons.local_offer_outlined,
-                  label: product.ferreteroDiscountPercent > 0
-                      ? '${product.ferreteroDiscountPercent.toStringAsFixed(0)}% ahorro'
+                  label: product.b2bDiscountPercent > 0
+                      ? '${product.b2bDiscountPercent.toStringAsFixed(0)}% ahorro'
                       : 'Oferta',
                 ),
               _InfoChip(
                 icon: Icons.currency_exchange,
-                label:
-                    'VES ${(ferreteroPrice * mobileEnvironment.exchangeRateUsdVes).toStringAsFixed(2)}',
+                label: mobileEnvironment.localMoney(b2bPrice),
               ),
               if (referencePrice != null)
                 _InfoChip(
@@ -5070,17 +5144,17 @@ class _InfoChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: _wulkanOrange.withValues(alpha: 0.1),
+        color: _fventasBlue.withValues(alpha: 0.1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: _wulkanOrange),
+          Icon(icon, size: 15, color: _fventasBlue),
           const SizedBox(width: 6),
           Text(
             label,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: _wulkanOrange,
+                  color: _fventasBlue,
                   fontWeight: FontWeight.w800,
                 ),
           ),
@@ -5098,7 +5172,7 @@ class _StockBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isOut = stock <= 0;
-    final color = isOut ? const Color(0xFFC83232) : _wulkanBlack;
+    final color = isOut ? const Color(0xFFC83232) : _fventasBlack;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -5183,7 +5257,7 @@ class CartScreen extends StatelessWidget {
                 icon: Icons.shield_outlined,
                 title: 'Clave temporal pendiente',
                 message: 'Cambia la clave temporal antes de crear ordenes B2B.',
-                color: _wulkanOrange,
+                color: _fventasBlue,
               ),
             const _AnnouncementsStrip(placement: 'checkout'),
             _CheckoutCommercePanel(
@@ -5298,12 +5372,12 @@ class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
                           ),
                           Text(
                             sellerName.isEmpty
-                                ? 'Orden revisada por Wulkan'
+                                ? 'Orden revisada por FVENTAS'
                                 : 'Vendedor asignado: $sellerName',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: _wulkanMuted,
+                              color: _fventasMuted,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -5350,8 +5424,8 @@ class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
                     icon: Icons.cloud_off_outlined,
                     title: 'Credito no sincronizado',
                     message:
-                        'Puedes enviar la solicitud como efectivo o revision. Wulkan validara credito, saldo y condiciones en el admin.',
-                    color: _wulkanOrange,
+                        'Puedes enviar la solicitud como efectivo o revision. FVENTAS validara credito, saldo y condiciones en el admin.',
+                    color: _fventasBlue,
                   ),
                 ],
                 if (_saleType == "term_credit" && terms.isNotEmpty) ...[
@@ -5376,13 +5450,13 @@ class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
                   compact: true,
                   lines: [
                     'Subtotal: USD ${widget.preview.subtotalUsd.toStringAsFixed(2)}',
-                    'Total referencial: ${widget.preview.totalVes.toStringAsFixed(2)} VES',
+                    'Total referencial: ${widget.preview.totalLocal.toStringAsFixed(2)} ${mobileEnvironment.secondaryCurrency}',
                     'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
                     if (credit != null && _saleType == "credit_line")
                       'Credito disponible: USD ${credit.creditAvailableUsd.toStringAsFixed(2)}',
                     widget.preview.requiresOperatorReview
                         ? 'Requiere revision operativa antes de confirmar.'
-                        : 'Validacion operativa Wulkan antes del despacho.',
+                        : 'Validacion operativa FVENTAS antes del despacho.',
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -5415,16 +5489,16 @@ class _SaleTypeChip extends StatelessWidget {
       label: Text(label),
       selected: selected,
       onSelected: enabled ? (_) => onSelected() : null,
-      selectedColor: _wulkanBlack,
+      selectedColor: _fventasBlack,
       backgroundColor: enabled ? Colors.white : const Color(0xFFF1F3F5),
       labelStyle: TextStyle(
         color: selected
             ? Colors.white
-            : (enabled ? _wulkanInk : const Color(0xFFADB5BD)),
+            : (enabled ? _fventasInk : const Color(0xFFADB5BD)),
         fontWeight: FontWeight.w900,
       ),
       side: BorderSide(
-        color: selected ? _wulkanBlack : _wulkanLine,
+        color: selected ? _fventasBlack : _fventasLine,
       ),
     );
   }
@@ -5472,7 +5546,7 @@ class _CreateOrderButtonState extends State<_CreateOrderButton> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Orden $orderId registrada en Wulkan Admin')),
+        SnackBar(content: Text('Orden $orderId registrada en FVENTAS Admin')),
       );
     } catch (error) {
       if (!mounted) {
@@ -5526,7 +5600,7 @@ class LocationsScreen extends StatelessWidget {
           children: [
             FilterChip(label: Text('Retiro'), selected: true, onSelected: null),
             FilterChip(
-                label: Text('Ferreteros'), selected: false, onSelected: null),
+                label: Text('Clientes B2B'), selected: false, onSelected: null),
             FilterChip(
                 label: Text('Servicio tecnico'),
                 selected: false,
@@ -5546,14 +5620,14 @@ class LocationsScreen extends StatelessWidget {
 
 String _productSubtitle(MobileProduct product) {
   if (product.requiresQuote) {
-    return "Cotizacion asistida por Wulkan";
+    return "Cotizacion asistida por FVENTAS";
   }
 
   if (product.requiresTechnicalValidation) {
-    return "${product.availableStock} disp. - validar Wulkan";
+    return "${product.availableStock} disp. - validar FVENTAS";
   }
 
-  return "${product.availableStock} disp. - ferretero USD ${product.ferreteroPriceUsd.toStringAsFixed(0)}";
+  return "${product.availableStock} disp. - B2B USD ${product.effectiveB2bPriceUsd.toStringAsFixed(0)}";
 }
 
 int _cartQuantityForProduct(String productId) {
@@ -5679,7 +5753,7 @@ class _CustomerOrderHistoryCard extends StatelessWidget {
                   Text(
                     '${order.saleTypeLabel} - ${status.label}',
                     style: const TextStyle(
-                      color: _wulkanMuted,
+                      color: _fventasMuted,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -5690,7 +5764,7 @@ class _CustomerOrderHistoryCard extends StatelessWidget {
                   ),
                   Text(
                     'Saldo USD ${order.balanceUsd.toStringAsFixed(2)} - $dueLabel',
-                    style: const TextStyle(color: _wulkanMuted),
+                    style: const TextStyle(color: _fventasMuted),
                   ),
                 ],
               ),
@@ -5725,6 +5799,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _confirmPasswordController = TextEditingController();
   bool _isChangingPassword = false;
   bool _isPasswordSheetOpen = false;
+  bool _isRequestingDeletion = false;
 
   @override
   void dispose() {
@@ -5810,7 +5885,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     width: 42,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: _wulkanLine,
+                      color: _fventasLine,
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),
@@ -5831,6 +5906,66 @@ class _ProfileScreenState extends State<ProfileScreen> {
       },
     );
     _isPasswordSheetOpen = false;
+  }
+
+  Future<void> _requestAccountDeletion() async {
+    if (_isRequestingDeletion) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Eliminar cuenta movil'),
+          content: const Text(
+            'FVENTAS bloqueara tu acceso movil y revisara la solicitud. '
+            'Las ordenes, pagos, auditoria y registros comerciales se '
+            'conservaran cuando sean necesarios para trazabilidad legal u '
+            'operativa.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Solicitar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() => _isRequestingDeletion = true);
+
+    try {
+      await mobileAuthRepository.requestAccountDeletion(
+        reason: 'Solicitud desde app movil',
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Solicitud registrada. Acceso movil bloqueado.'),
+        ),
+      );
+      await widget.onSessionChanged();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isRequestingDeletion = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
   }
 
   @override
@@ -5863,10 +5998,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
           lines: [
             'Moneda principal: ${mobileEnvironment.primaryCurrency}',
             'Referencia: ${mobileEnvironment.secondaryCurrency}',
-            'Tasa referencial: ${mobileEnvironment.exchangeRateUsdVes} VES/USD',
-            'Soporte: validacion operativa Wulkan',
+            'Tasa referencial: ${mobileEnvironment.exchangeRateUsdLocal} ${mobileEnvironment.exchangeRateLabel}',
+            'Soporte: validacion operativa FVENTAS',
           ],
         ),
+        OutlinedButton.icon(
+          onPressed: _isRequestingDeletion ? null : _requestAccountDeletion,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.error,
+            side: BorderSide(
+              color: Theme.of(context).colorScheme.error.withValues(
+                    alpha: 0.45,
+                  ),
+            ),
+          ),
+          icon: _isRequestingDeletion
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                )
+              : const Icon(Icons.delete_outline),
+          label: Text(
+            _isRequestingDeletion
+                ? 'Solicitando...'
+                : 'Solicitar eliminacion de cuenta',
+          ),
+        ),
+        const SizedBox(height: 8),
         OutlinedButton.icon(
           onPressed: widget.onSignOut,
           icon: const Icon(Icons.logout_outlined),
@@ -5917,7 +6079,7 @@ class _AccountHeaderCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: _wulkanMuted,
+                          color: _fventasMuted,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -5933,7 +6095,7 @@ class _AccountHeaderCard extends StatelessWidget {
               children: [
                 _StatusPill(
                   label: session.roleLabel,
-                  color: _wulkanBlack,
+                  color: _fventasBlack,
                 ),
                 _StatusPill(
                   label: mobileEnvironment.defaultCountry,
@@ -5942,7 +6104,7 @@ class _AccountHeaderCard extends StatelessWidget {
                 if (session.mustChangePassword)
                   const _StatusPill(
                     label: 'Clave temporal',
-                    color: _wulkanOrange,
+                    color: _fventasBlue,
                   )
                 else
                   const _StatusPill(
@@ -5971,13 +6133,13 @@ class _AccountHeaderCard extends StatelessWidget {
             ],
             Row(
               children: [
-                const Icon(Icons.sync_outlined, color: _wulkanMuted, size: 18),
+                const Icon(Icons.sync_outlined, color: _fventasMuted, size: 18),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
-                    'Cuenta sincronizada con Wulkan Admin.',
+                    'Cuenta sincronizada con FVENTAS Admin.',
                     style: TextStyle(
-                      color: _wulkanMuted,
+                      color: _fventasMuted,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -6012,12 +6174,12 @@ class _AccountMetaLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: _wulkanMuted),
+        Icon(icon, size: 18, color: _fventasMuted),
         const SizedBox(width: 8),
         Text(
           '$label: ',
           style: const TextStyle(
-            color: _wulkanMuted,
+            color: _fventasMuted,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -6027,7 +6189,7 @@ class _AccountMetaLine extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: _wulkanBlack,
+              color: _fventasBlack,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -6094,7 +6256,7 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
         children: [
           Row(
             children: [
-              const Icon(Icons.security_outlined, color: _wulkanOrange),
+              const Icon(Icons.security_outlined, color: _fventasBlue),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -6112,7 +6274,7 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
           const SizedBox(height: 10),
           const Text(
             'Usa una contrasena privada de al menos 10 caracteres con letras y numeros.',
-            style: TextStyle(color: _wulkanMuted),
+            style: TextStyle(color: _fventasMuted),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -6228,7 +6390,7 @@ class _CreditDashboardCard extends StatelessWidget {
     final usedRatio = credit.creditLimitUsd <= 0
         ? 0.0
         : (credit.creditExposureUsd / credit.creditLimitUsd).clamp(0.0, 1.0);
-    final statusColor = enabled ? const Color(0xFF198754) : _wulkanOrange;
+    final statusColor = enabled ? const Color(0xFF198754) : _fventasBlue;
     final terms = _positiveTerms(credit.allowedPaymentTermsDays);
 
     return Card(
@@ -6255,10 +6417,10 @@ class _CreditDashboardCard extends StatelessWidget {
                       ),
                       Text(
                         enabled
-                            ? 'Aprobada por Wulkan'
+                            ? 'Aprobada por FVENTAS'
                             : 'Compra bajo revision',
                         style: const TextStyle(
-                          color: _wulkanMuted,
+                          color: _fventasMuted,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -6297,7 +6459,7 @@ class _CreditDashboardCard extends StatelessWidget {
                 minHeight: 8,
                 value: usedRatio,
                 backgroundColor: const Color(0xFFE9ECEF),
-                color: _wulkanOrange,
+                color: _fventasBlue,
               ),
             ),
             const SizedBox(height: 10),
@@ -6306,7 +6468,7 @@ class _CreditDashboardCard extends StatelessWidget {
                   ? 'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)}'
                   : 'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)} - plazos ${terms.join(", ")} dias',
               style: const TextStyle(
-                color: _wulkanMuted,
+                color: _fventasMuted,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -6315,7 +6477,7 @@ class _CreditDashboardCard extends StatelessWidget {
               Text(
                 'Vendedor: ${credit.assignedSeller.name}',
                 style: const TextStyle(
-                  color: _wulkanMuted,
+                  color: _fventasMuted,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -6364,7 +6526,7 @@ class _OrderSummaryPanel extends StatelessWidget {
                   'Ordenes recientes',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w900,
-                        color: _wulkanBlack,
+                        color: _fventasBlack,
                       ),
                 ),
                 const SizedBox(height: 12),
@@ -6415,7 +6577,7 @@ class _CustomerOrderRow extends StatelessWidget {
                 Text(
                   '${status.label} - $stock',
                   style: const TextStyle(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -6461,7 +6623,7 @@ class _CustomerOrderRow extends StatelessWidget {
     return (
       label: 'Pago parcial',
       icon: Icons.payments_outlined,
-      color: _wulkanOrange
+      color: _fventasBlue
     );
   }
   if (payment.contains('paid')) {
@@ -6472,9 +6634,9 @@ class _CustomerOrderRow extends StatelessWidget {
     );
   }
   return (
-    label: 'En revision Wulkan',
+    label: 'En revision FVENTAS',
     icon: Icons.schedule_outlined,
-    color: _wulkanOrange
+    color: _fventasBlue
   );
 }
 
@@ -6533,7 +6695,7 @@ class _InfoPanel extends StatelessWidget {
             style: Theme.of(context)
                 .textTheme
                 .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w900, color: _wulkanBlack),
+                ?.copyWith(fontWeight: FontWeight.w900, color: _fventasBlack),
           ),
           const SizedBox(height: 8),
           for (final line in lines)
@@ -6541,7 +6703,7 @@ class _InfoPanel extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
                 line,
-                style: const TextStyle(color: _wulkanMuted),
+                style: const TextStyle(color: _fventasMuted),
               ),
             ),
         ],
@@ -6554,7 +6716,7 @@ class _InfoPanel extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           color: const Color(0xFFF8F9FA),
-          border: Border.all(color: _wulkanLine),
+          border: Border.all(color: _fventasLine),
         ),
         child: content,
       );
@@ -6611,7 +6773,7 @@ class _DocumentLinksPanel extends StatelessWidget {
               children: [
                 const _SoftIcon(
                   icon: Icons.description_outlined,
-                  color: _wulkanBlack,
+                  color: _fventasBlack,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -6619,7 +6781,7 @@ class _DocumentLinksPanel extends StatelessWidget {
                     title,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w900,
-                          color: _wulkanBlack,
+                          color: _fventasBlack,
                         ),
                   ),
                 ),
@@ -6646,7 +6808,7 @@ class _DocumentLinksPanel extends StatelessWidget {
 class _SoftIcon extends StatelessWidget {
   const _SoftIcon({
     required this.icon,
-    this.color = _wulkanOrange,
+    this.color = _fventasBlue,
   });
 
   final IconData icon;
@@ -6738,7 +6900,7 @@ class _InlineNotice extends StatelessWidget {
                 Text(
                   message,
                   style: const TextStyle(
-                    color: _wulkanMuted,
+                    color: _fventasMuted,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -6811,8 +6973,8 @@ class _AnnouncementsStripState extends State<_AnnouncementsStrip> {
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     decoration: BoxDecoration(
                       color: _index == index
-                          ? _wulkanOrange
-                          : _wulkanMuted.withValues(alpha: 0.22),
+                          ? _fventasBlue
+                          : _fventasMuted.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),
@@ -6840,10 +7002,10 @@ class _AnnouncementCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
-          color: _wulkanBlack,
+          color: _fventasBlack,
           boxShadow: [
             BoxShadow(
-              color: _wulkanBlack.withValues(alpha: 0.12),
+              color: _fventasBlack.withValues(alpha: 0.12),
               blurRadius: 22,
               offset: const Offset(0, 12),
             ),
@@ -6882,7 +7044,7 @@ class _AnnouncementCard extends StatelessWidget {
                     _StatusPill(
                       label: announcement.ctaLabel?.isNotEmpty == true
                           ? announcement.ctaLabel!
-                          : 'Wulkan',
+                          : 'FVENTAS',
                       color: Colors.white,
                     ),
                     const SizedBox(height: 10),
@@ -6956,7 +7118,7 @@ class _AnnouncementFallbackArt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const ColoredBox(
-      color: _wulkanBlack,
+      color: _fventasBlack,
       child: Align(
         alignment: Alignment.centerRight,
         child: Padding(
@@ -6964,7 +7126,7 @@ class _AnnouncementFallbackArt extends StatelessWidget {
           child: Icon(
             Icons.campaign_outlined,
             size: 74,
-            color: _wulkanOrange,
+            color: _fventasBlue,
           ),
         ),
       ),
@@ -7098,10 +7260,10 @@ class _HeroPanel extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        color: _wulkanBlack,
+        color: _fventasBlack,
         boxShadow: [
           BoxShadow(
-            color: _wulkanBlack.withValues(alpha: 0.18),
+            color: _fventasBlack.withValues(alpha: 0.18),
             blurRadius: 28,
             offset: const Offset(0, 14),
           ),
@@ -7125,11 +7287,11 @@ class _HeroPanel extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(999),
-                color: _wulkanOrange,
+                color: _fventasBlue,
               ),
-              child: const Text(
-                'USD / VES',
-                style: TextStyle(
+              child: Text(
+                mobileEnvironment.currencyPairLabel,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
                   fontSize: 12,
@@ -7142,7 +7304,7 @@ class _HeroPanel extends StatelessWidget {
             children: [
               const _HeroChip(
                 icon: Icons.local_fire_department,
-                label: 'Wulkan ecommerce',
+                label: 'FVENTAS ecommerce',
               ),
               const SizedBox(height: 34),
               Text(
@@ -7168,7 +7330,7 @@ class _HeroPanel extends StatelessWidget {
                 label: const Text('Explorar catalogo'),
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.white,
-                  foregroundColor: _wulkanBlack,
+                  foregroundColor: _fventasBlack,
                 ),
               ),
             ],
@@ -7196,7 +7358,7 @@ class _HeroChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: _wulkanOrange, size: 16),
+          Icon(icon, color: _fventasBlue, size: 16),
           const SizedBox(width: 6),
           Text(label, style: const TextStyle(color: Colors.white)),
         ],
@@ -7332,7 +7494,7 @@ class _ServiceLocationCard extends StatelessWidget {
                         Text(
                           location.subtitle,
                           style: const TextStyle(
-                            color: _wulkanMuted,
+                            color: _fventasMuted,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -7359,7 +7521,7 @@ class _ServiceLocationCard extends StatelessWidget {
                   for (final specialty in location.specialties)
                     _StatusPill(
                       label: specialty,
-                      color: _wulkanOrange,
+                      color: _fventasBlue,
                     ),
                 ],
               ),
@@ -7397,7 +7559,7 @@ class _ServiceLocationCard extends StatelessWidget {
 
 class _LoadingState extends StatelessWidget {
   const _LoadingState({
-    this.message = 'Sincronizando con Wulkan',
+    this.message = 'Sincronizando con FVENTAS',
     this.compact = false,
   });
 
@@ -7421,7 +7583,7 @@ class _LoadingState extends StatelessWidget {
             Text(
               message,
               style: const TextStyle(
-                color: _wulkanMuted,
+                color: _fventasMuted,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -7452,7 +7614,7 @@ class _LoadingState extends StatelessWidget {
                   const Text(
                     'Leyendo datos publicados desde el admin.',
                     style: TextStyle(
-                      color: _wulkanMuted,
+                      color: _fventasMuted,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -7509,7 +7671,7 @@ class _EmptyState extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: _wulkanMuted,
+                color: _fventasMuted,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -7571,7 +7733,7 @@ class _ErrorState extends StatelessWidget {
                       Text(
                         message,
                         style: const TextStyle(
-                          color: _wulkanMuted,
+                          color: _fventasMuted,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -7615,8 +7777,8 @@ class _MapPreview extends StatelessWidget {
       height: 180,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: _wulkanBlack,
-        border: Border.all(color: _wulkanBlack),
+        color: _fventasBlack,
+        border: Border.all(color: _fventasBlack),
       ),
       child: Stack(
         children: [
@@ -7633,10 +7795,10 @@ class _MapPreview extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.map_outlined, size: 42, color: _wulkanOrange),
+                Icon(Icons.map_outlined, size: 42, color: _fventasBlue),
                 SizedBox(height: 10),
                 Text(
-                  'Red autorizada Wulkan',
+                  'Red autorizada FVENTAS',
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w900,
@@ -7679,7 +7841,7 @@ class _SearchBox extends StatelessWidget {
       readOnly: readOnly,
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        prefixIcon: const Icon(Icons.search, color: _wulkanMuted),
+        prefixIcon: const Icon(Icons.search, color: _fventasMuted),
         hintText: labelText,
         filled: true,
         fillColor: Colors.white,
@@ -7687,15 +7849,15 @@ class _SearchBox extends StatelessWidget {
             const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: const BorderSide(color: _wulkanLine),
+          borderSide: const BorderSide(color: _fventasLine),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: const BorderSide(color: _wulkanLine),
+          borderSide: const BorderSide(color: _fventasLine),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: const BorderSide(color: _wulkanOrange, width: 1.5),
+          borderSide: const BorderSide(color: _fventasBlue, width: 1.5),
         ),
       ),
     );
@@ -7724,7 +7886,7 @@ class _SectionTitle extends StatelessWidget {
               title,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: _wulkanBlack,
+                    color: _fventasBlack,
                   ),
             ),
           ),
@@ -7734,7 +7896,7 @@ class _SectionTitle extends StatelessWidget {
               child: Text(
                 actionLabel!,
                 style: const TextStyle(
-                  color: _wulkanOrange,
+                  color: _fventasBlue,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -7884,7 +8046,7 @@ class _ProductDetailMedia extends StatelessWidget {
             gradient: LinearGradient(
               colors: [
                 accentColor.withValues(alpha: 0.22),
-                _wulkanOrange.withValues(alpha: 0.12),
+                _fventasBlue.withValues(alpha: 0.12),
                 Colors.white,
               ],
               begin: Alignment.topLeft,
@@ -7936,7 +8098,7 @@ class _ProductDetailMedia extends StatelessWidget {
                           size: 15, color: accentColor),
                       const SizedBox(width: 6),
                       Text(
-                        'Wulkan stock',
+                        'FVENTAS stock',
                         style: TextStyle(
                           color: accentColor,
                           fontSize: 12,
@@ -7980,7 +8142,7 @@ class _ProductFallbackMark extends StatelessWidget {
         ),
         child: const Icon(
           Icons.inventory_2_outlined,
-          color: _wulkanBlack,
+          color: _fventasBlack,
           size: 48,
         ),
       ),
@@ -8059,7 +8221,7 @@ class _ProductTile extends StatelessWidget {
                   child: CircleAvatar(
                     radius: 17,
                     backgroundColor: Colors.white,
-                    foregroundColor: _wulkanBlack,
+                    foregroundColor: _fventasBlack,
                     child: IconButton(
                       tooltip: 'Ver detalle',
                       padding: EdgeInsets.zero,
@@ -8101,7 +8263,7 @@ class _ProductTile extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: _wulkanBlack,
+                            color: _fventasBlack,
                             fontWeight: FontWeight.w900,
                             height: 1.08,
                           ),
@@ -8112,7 +8274,7 @@ class _ProductTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: _wulkanMuted,
+                            color: _fventasMuted,
                           ),
                     ),
                     const SizedBox(height: 8),
@@ -8121,7 +8283,7 @@ class _ProductTile extends StatelessWidget {
                         'USD ${originalPriceUsd!.toStringAsFixed(2)}',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               decoration: TextDecoration.lineThrough,
-                              color: _wulkanMuted,
+                              color: _fventasMuted,
                             ),
                       ),
                     Row(
@@ -8137,7 +8299,7 @@ class _ProductTile extends StatelessWidget {
                                 .textTheme
                                 .titleMedium
                                 ?.copyWith(
-                                  color: _wulkanBlack,
+                                  color: _fventasBlack,
                                   fontWeight: FontWeight.w900,
                                 ),
                           ),
@@ -8243,8 +8405,8 @@ class _ProductCardActionsState extends State<_ProductCardActions> {
             style: IconButton.styleFrom(
               backgroundColor: widget.accentColor,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: _wulkanLine,
-              disabledForegroundColor: _wulkanMuted,
+              disabledBackgroundColor: _fventasLine,
+              disabledForegroundColor: _fventasMuted,
             ),
           ),
         ),
@@ -8281,8 +8443,8 @@ class _QuantitySelectorButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         minimumSize: const Size.fromHeight(46),
         alignment: Alignment.centerLeft,
-        foregroundColor: _wulkanBlack,
-        side: const BorderSide(color: _wulkanLine),
+        foregroundColor: _fventasBlack,
+        side: const BorderSide(color: _fventasLine),
       ),
     );
   }
@@ -8336,7 +8498,7 @@ Future<int?> _showQuantityPicker(
                   allowBeyondStock
                       ? 'Ingresa la cantidad para cotizar.'
                       : 'Maximo disponible: $limit uds.',
-                  style: const TextStyle(color: _wulkanMuted),
+                  style: const TextStyle(color: _fventasMuted),
                 ),
                 const SizedBox(height: 14),
                 Row(
@@ -8402,20 +8564,20 @@ Color _productAccentColor(String value) {
     return const Color(0xFFFF6A1A);
   }
   if (normalized.contains('industrial')) {
-    return _wulkanBlack;
+    return _fventasBlack;
   }
   if (normalized.contains('maquinaria') ||
       normalized.contains('jardin') ||
       normalized.contains('bosque')) {
     return const Color(0xFFD83B00);
   }
-  return _wulkanOrange;
+  return _fventasBlue;
 }
 
 class _ProductImageFrame extends StatelessWidget {
   const _ProductImageFrame({
     this.imageUrl,
-    this.accentColor = _wulkanOrange,
+    this.accentColor = _fventasBlue,
   });
 
   final String? imageUrl;
@@ -8428,7 +8590,7 @@ class _ProductImageFrame extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(0),
         child: imageUrl == null || imageUrl!.isEmpty
-            ? _WulkanProductPlaceholder(accentColor: accentColor)
+            ? _FVENTASProductPlaceholder(accentColor: accentColor)
             : ColoredBox(
                 color: accentColor.withValues(alpha: 0.08),
                 child: Padding(
@@ -8447,9 +8609,9 @@ class _ProductImageFrame extends StatelessWidget {
   }
 }
 
-class _WulkanProductPlaceholder extends StatelessWidget {
-  const _WulkanProductPlaceholder({
-    this.accentColor = _wulkanOrange,
+class _FVENTASProductPlaceholder extends StatelessWidget {
+  const _FVENTASProductPlaceholder({
+    this.accentColor = _fventasBlue,
   });
 
   final Color accentColor;
@@ -8461,7 +8623,7 @@ class _WulkanProductPlaceholder extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             accentColor.withValues(alpha: 0.16),
-            _wulkanOrange.withValues(alpha: 0.08),
+            _fventasBlue.withValues(alpha: 0.08),
             const Color(0xFFF8FAFD),
           ],
           begin: Alignment.topLeft,
@@ -8498,7 +8660,7 @@ class _WulkanProductPlaceholder extends StatelessWidget {
               child: const Icon(
                 Icons.inventory_2_outlined,
                 size: 40,
-                color: _wulkanBlack,
+                color: _fventasBlack,
               ),
             ),
           ),
@@ -8522,7 +8684,7 @@ class _SaleBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: _wulkanOrange,
+        color: _fventasBlue,
       ),
       child: Text(
         label,
@@ -8540,7 +8702,7 @@ class _ProductThumb extends StatelessWidget {
   const _ProductThumb({
     this.imageUrl,
     this.selected = false,
-    this.accentColor = _wulkanOrange,
+    this.accentColor = _fventasBlue,
   });
 
   final String? imageUrl;

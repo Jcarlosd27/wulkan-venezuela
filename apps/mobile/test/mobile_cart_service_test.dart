@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wulkan_mobile/src/cart/mobile_cart_service.dart';
-import 'package:wulkan_mobile/src/data/mobile_repository.dart';
-import 'package:wulkan_mobile/src/domain/mobile_models.dart';
-import 'package:wulkan_mobile/src/orders/mobile_order_service.dart';
+import 'package:fventas_mobile/src/cart/mobile_cart_service.dart';
+import 'package:fventas_mobile/src/data/mobile_repository.dart';
+import 'package:fventas_mobile/src/domain/mobile_models.dart';
+import 'package:fventas_mobile/src/orders/mobile_order_service.dart';
 
 void main() {
   group('MobileCartService', () {
@@ -16,12 +16,12 @@ void main() {
       expect(items, isEmpty);
     });
 
-    test('calculates checkout preview in USD and VES', () {
+    test('calculates checkout preview in base and local currencies', () {
       final preview = service.calculatePreview(
         const [
           MobileCartItem(
             productId: 'prod-motosierra-45cc',
-            sku: 'WUL-MOT-45CC',
+            sku: 'FVT-MOT-45CC',
             title: 'Motosierra 45cc',
             quantity: 2,
             unitPriceUsd: 185,
@@ -30,11 +30,11 @@ void main() {
             imageUrl: null,
           ),
         ],
-        exchangeRateUsdVes: 38.5,
+        exchangeRateUsdLocal: 950,
       );
 
       expect(preview.subtotalUsd, 370);
-      expect(preview.totalVes, 14245);
+      expect(preview.totalLocal, 351500);
       expect(preview.requiresOperatorReview, isFalse);
     });
 
@@ -43,7 +43,7 @@ void main() {
         const [
           MobileCartItem(
             productId: 'prod-cadena-18',
-            sku: 'WUL-REP-CAD18',
+            sku: 'FVT-REP-CAD18',
             title: 'Cadena 18 pulgadas compatible',
             quantity: 1,
             unitPriceUsd: 18,
@@ -64,7 +64,7 @@ void main() {
       final controller = MobileCartController();
       const product = MobileProduct(
         id: 'prod-motosierra-45cc',
-        sku: 'WUL-MOT-45CC',
+        sku: 'FVT-MOT-45CC',
         name: 'Motosierra 45cc',
         verticalName: 'Maquinaria y jardin',
         description: 'Equipo de corte',
@@ -99,7 +99,7 @@ void main() {
       final storage = _MemoryCartStorage();
       const seedItem = MobileCartItem(
         productId: 'prod-motosierra-45cc',
-        sku: 'WUL-MOT-45CC',
+        sku: 'FVT-MOT-45CC',
         title: 'Motosierra 45cc',
         quantity: 2,
         unitPriceUsd: 162,
@@ -137,7 +137,7 @@ void main() {
       items: [
         MobileCartItem(
           productId: 'prod-motosierra-45cc',
-          sku: 'WUL-MOT-45CC',
+          sku: 'FVT-MOT-45CC',
           title: 'Motosierra 45cc',
           quantity: 1,
           unitPriceUsd: 185,
@@ -149,8 +149,8 @@ void main() {
       preview: MobileCheckoutPreview(
         subtotalUsd: 185,
         totalUsd: 185,
-        totalVes: 7122.5,
-        exchangeRateUsdVes: 38.5,
+        totalLocal: 175750,
+        exchangeRateUsdLocal: 950,
         requiresOperatorReview: false,
         blockingReasons: [],
       ),
@@ -162,11 +162,13 @@ void main() {
       'items': [
         {
           'productId': 'prod-motosierra-45cc',
-          'sku': 'WUL-MOT-45CC',
+          'sku': 'FVT-MOT-45CC',
           'quantity': 1,
         },
       ],
-      'exchangeRateUsdVes': 38.5,
+      'exchangeRateUsdLocal': 950,
+      'exchangeRateUsdClp': 950,
+      'exchangeRateUsdVes': 950,
       'saleType': 'term_credit',
       'paymentTermDays': 15,
     });
@@ -177,7 +179,7 @@ void main() {
       items: [
         MobileCartItem(
           productId: 'prod-motosierra-45cc',
-          sku: 'WUL-MOT-45CC',
+          sku: 'FVT-MOT-45CC',
           title: 'Motosierra 45cc',
           quantity: 1,
           unitPriceUsd: 185,
@@ -189,8 +191,8 @@ void main() {
       preview: MobileCheckoutPreview(
         subtotalUsd: 185,
         totalUsd: 185,
-        totalVes: 7122.5,
-        exchangeRateUsdVes: 38.5,
+        totalLocal: 175750,
+        exchangeRateUsdLocal: 950,
         requiresOperatorReview: false,
         blockingReasons: [],
       ),
@@ -202,7 +204,7 @@ void main() {
         isA<StateError>().having(
           (error) => error.message,
           'message',
-          contains('WULKAN_MOBILE_ORDER_API_URL'),
+          contains('FVENTAS_MOBILE_ORDER_API_URL'),
         ),
       ),
     );

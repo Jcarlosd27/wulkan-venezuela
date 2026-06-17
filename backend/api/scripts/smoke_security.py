@@ -8,8 +8,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import app as wulkan_app
-from store import utc_now
+import app as FVENTAS_app
+from store import DEFAULT_COMPANY_ID, SAAS_PLAN_ID, SAAS_PLAN_NAME, SAAS_PLAN_PRICE_CLP, utc_now
 from werkzeug.security import generate_password_hash
 
 
@@ -19,6 +19,7 @@ def base_store() -> dict:
         "categories": [
             {
                 "id": "cat-sec",
+                "companyId": DEFAULT_COMPANY_ID,
                 "name": "Seguridad",
                 "slug": "seguridad",
                 "status": "active",
@@ -30,7 +31,8 @@ def base_store() -> dict:
         "products": [
             {
                 "id": "prod-sec",
-                "sku": "WUL-SEC-01",
+                "companyId": DEFAULT_COMPANY_ID,
+                "sku": "FVT-SEC-01",
                 "title": "Producto Seguridad",
                 "description": "Producto visible para validar token.",
                 "categoryId": "cat-sec",
@@ -52,13 +54,14 @@ def base_store() -> dict:
         "media_assets": [
             {
                 "id": "doc-sec",
+                "companyId": DEFAULT_COMPANY_ID,
                 "title": "Contrato Seguridad",
                 "assetType": "document",
                 "type": "document",
                 "documentType": "contract",
                 "subjectType": "client",
                 "subjectId": "client-sec",
-                "subjectLabel": "Ferreteria Seguridad",
+                "subjectLabel": "Cliente Seguridad",
                 "visibility": "internal",
                 "url": "/static/uploads/documents/security.pdf",
                 "status": "active",
@@ -73,8 +76,9 @@ def base_store() -> dict:
         "admin_users": [
             {
                 "id": "admin-sec",
+                "companyId": DEFAULT_COMPANY_ID,
                 "name": "Admin Seguridad",
-                "email": "admin.security@wulkan.test",
+                "email": "admin.security@FVENTAS.test",
                 "passwordHash": generate_password_hash("AdminSecurity2026"),
                 "role": "super_admin",
                 "status": "active",
@@ -86,8 +90,9 @@ def base_store() -> dict:
             },
             {
                 "id": "readonly-sec",
+                "companyId": DEFAULT_COMPANY_ID,
                 "name": "Solo Lectura",
-                "email": "readonly.security@wulkan.test",
+                "email": "readonly.security@FVENTAS.test",
                 "passwordHash": generate_password_hash("Readonly2026"),
                 "role": "readonly",
                 "status": "active",
@@ -101,16 +106,17 @@ def base_store() -> dict:
         "clients": [
             {
                 "id": "client-sec",
-                "businessName": "Ferreteria Seguridad",
-                "email": "cliente.security@wulkan.test",
+                "companyId": DEFAULT_COMPANY_ID,
+                "businessName": "Cliente Seguridad",
+                "email": "cliente.security@FVENTAS.test",
                 "passwordHash": generate_password_hash("ClienteSecurity2026"),
                 "status": "active",
-                "clientType": "ferretero",
-                "taxId": "J-00000000-0",
-                "phone": "+580000000000",
+                "clientType": "b2b",
+                "taxId": "11.111.111-1",
+                "phone": "+56 9 1000 0000",
                 "address": "Direccion seguridad",
-                "city": "Caracas",
-                "state": "Distrito Capital",
+                "city": "Santiago",
+                "state": "Metropolitana",
                 "creditEnabled": False,
                 "creditLimitUsd": 0,
                 "paymentTermsDays": 0,
@@ -125,6 +131,40 @@ def base_store() -> dict:
             }
         ],
         "audit_events": [],
+        "companies": [
+            {
+                "id": DEFAULT_COMPANY_ID,
+                "name": "FVENTAS",
+                "legalName": "FVENTAS",
+                "taxId": "76.000.000-0",
+                "country": "CL",
+                "status": "active",
+                "ownerEmail": "admin.security@FVENTAS.test",
+                "supportEmail": "soporte@fventas.cl",
+                "supportPhone": "+56 9 1000 0000",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
+        "subscriptions": [
+            {
+                "id": f"sub-{DEFAULT_COMPANY_ID}",
+                "companyId": DEFAULT_COMPANY_ID,
+                "planId": SAAS_PLAN_ID,
+                "planName": SAAS_PLAN_NAME,
+                "priceClp": SAAS_PLAN_PRICE_CLP,
+                "billingCycle": "monthly",
+                "status": "active",
+                "currentPeriodStart": now,
+                "currentPeriodEnd": "",
+                "paymentMethod": "external",
+                "lastPaymentAt": now,
+                "nextBillingAt": "",
+                "notes": "Smoke security subscription.",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
     }
 
 
@@ -140,9 +180,9 @@ def assert_status(response, expected: int, label: str):
 
 def main() -> int:
     state = base_store()
-    wulkan_app.load_store = lambda: state
-    wulkan_app.save_store = lambda store: None
-    app = wulkan_app.app
+    FVENTAS_app.load_store = lambda: state
+    FVENTAS_app.save_store = lambda store: None
+    app = FVENTAS_app.app
     app.config.update(
         TESTING=True,
         SECRET_KEY="security-smoke-secret",
@@ -165,7 +205,7 @@ def main() -> int:
                 "/login",
                 data={
                     "_csrf_token": csrf,
-                    "email": "readonly.security@wulkan.test",
+                    "email": "readonly.security@FVENTAS.test",
                     "password": "Readonly2026",
                 },
             ),
@@ -176,7 +216,7 @@ def main() -> int:
         assert readonly_user["activeSessions"], "login admin debe registrar sesion activa"
         assert_status(client.get("/products"), 200, "readonly puede ver productos")
         assert_status(
-            client.post("/products/new", data={"_csrf_token": csrf, "sku": "WUL-NO"}),
+            client.post("/products/new", data={"_csrf_token": csrf, "sku": "FVT-NO"}),
             403,
             "readonly no puede crear productos por URL manual",
         )
@@ -189,7 +229,7 @@ def main() -> int:
                 "/login",
                 data={
                     "_csrf_token": csrf,
-                    "email": "admin.security@wulkan.test",
+                    "email": "admin.security@FVENTAS.test",
                     "password": "AdminSecurity2026",
                 },
             ),
@@ -243,9 +283,9 @@ def main() -> int:
         mobile_login = assert_status(
             client.post(
                 "/api/v1/mobile/auth/login",
-                headers={"X-Wulkan-Device-Id": "device-security"},
+                headers={"X-FVENTAS-Device-Id": "device-security"},
                 json={
-                    "email": "cliente.security@wulkan.test",
+                    "email": "cliente.security@FVENTAS.test",
                     "password": "ClienteSecurity2026",
                     "deviceId": "device-security",
                 },
@@ -257,7 +297,7 @@ def main() -> int:
         assert_status(
             client.get(
                 "/api/v1/mobile/products",
-                headers={"Authorization": f"Bearer {token}", "X-Wulkan-Device-Id": "device-security"},
+                headers={"Authorization": f"Bearer {token}", "X-FVENTAS-Device-Id": "device-security"},
             ),
             200,
             "token vigente puede leer catalogo",
@@ -266,13 +306,13 @@ def main() -> int:
         assert_status(
             client.get(
                 "/api/v1/mobile/products",
-                headers={"Authorization": f"Bearer {token}", "X-Wulkan-Device-Id": "device-security"},
+                headers={"Authorization": f"Bearer {token}", "X-FVENTAS-Device-Id": "device-security"},
             ),
             401,
             "token movil viejo invalidado por version",
         )
 
-    print("Graphify smoke seguridad")
+    print("FVENTAS Insights smoke seguridad")
     print("------------------------")
     print("OK headers de seguridad y cache sensible")
     print("OK sesiones activas con dispositivo")

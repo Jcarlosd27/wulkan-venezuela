@@ -17,7 +17,7 @@
       </div>
       <div class="col-12 col-md-6 col-lg-3">
         <label class="form-label fw-semibold">Codigo vendedor</label>
-        <input class="form-control" name="sellerCode" value="{{ seller.sellerCode if seller is defined else '' }}" placeholder="VEN-CENTRO-01">
+        <input class="form-control" name="sellerCode" value="{{ seller.sellerCode if seller is defined else '' }}" placeholder="CL-CENTRO-01">
       </div>
       <div class="col-12 col-md-6 col-lg-3">
         <label class="form-label fw-semibold">Fecha ingreso</label>
@@ -25,7 +25,7 @@
       </div>
       <div class="col-12 col-md-7">
         <label class="form-label fw-semibold">Email de acceso</label>
-        <input class="form-control" name="email" type="email" required value="{{ seller.email if seller is defined else '' }}" placeholder="vendedor@wulkanvenezuela.com">
+        <input class="form-control" name="email" type="email" required value="{{ seller.email if seller is defined else '' }}" placeholder="vendedor@fventas.cl">
       </div>
       <div class="col-12 col-md-5">
         <label class="form-label fw-semibold">Contrasena</label>
@@ -39,7 +39,7 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Telefono / WhatsApp</label>
-        <input class="form-control" name="phone" value="{{ seller.phone if seller is defined else '' }}" placeholder="+58...">
+        <input class="form-control" name="phone" value="{{ seller.phone if seller is defined else '' }}" placeholder="+56 9 1234 5678">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Estado</label>
@@ -71,7 +71,7 @@
     <div class="row g-3">
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Zona</label>
-        <input class="form-control" name="sellerZone" value="{{ seller.sellerZone if seller is defined else '' }}" placeholder="Caracas, Centro, Oriente">
+        <input class="form-control" name="sellerZone" value="{{ seller.sellerZone if seller is defined else '' }}" placeholder="Zona centro, norte o sur">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold">Territorio / ruta</label>

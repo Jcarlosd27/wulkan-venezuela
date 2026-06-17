@@ -1,17 +1,19 @@
 {% extends "base.html" %}
 {% set heading = "Productos" %}
-{% set description = "Catalogo ecommerce sincronizado con Android: precios, stock, media, PDFs y publicacion." %}
+{% set description = "Catalogo ecommerce sincronizado con la app movil: precios, stock, media, PDFs y publicacion." %}
 {% set stock_label_map = {"available": "Disponible", "low": "Bajo", "out": "Agotado", "replenishment": "Reposicion"} %}
+{% set product_type_label_map = {"machine": "Maquina", "spare_part": "Repuesto", "accessory": "Accesorio", "service": "Servicio", "consumable": "Consumible"} %}
+{% set money_context = currency_context() %}
 
 {% macro product_graph(title, chart) -%}
 <article class="panel product-chart">
   <div class="panel-header">
     <h2>{{ title }}</h2>
-    <span>Graphify</span>
+    <span>FVENTAS Insights</span>
   </div>
   {% if chart.values %}
   <div
-    class="graphify-bars"
+    class="insight-bars"
     data-labels='{{ chart["labels"] | tojson }}'
     data-values='{{ chart["values"] | tojson }}'
   ></div>
@@ -38,10 +40,10 @@
   </button>
   {% endif %}
   {% if can_create_products %}
-  <form method="post" action="{{ url_for('products_starter_wulkan') }}">
+  <form method="post" action="{{ url_for('products_starter_fventas') }}">
     {{ csrf_field() }}
-    <button class="btn btn-light" type="submit" data-confirm="Se cargaran productos base Wulkan sin duplicar SKU existentes." aria-label="Crear productos base Wulkan">
-      <i class="bi bi-boxes"></i> Productos base Wulkan
+    <button class="btn btn-light" type="submit" data-confirm="Se cargaran productos base FVENTAS sin duplicar SKU existentes." aria-label="Crear productos base FVENTAS">
+      <i class="bi bi-boxes"></i> Productos base FVENTAS
     </button>
   </form>
   <a class="btn btn-primary" href="{{ url_for('product_new') }}" aria-label="Crear producto"><i class="bi bi-plus-lg"></i> Crear producto</a>
@@ -176,7 +178,7 @@
 <section class="panel product-panel">
   <div class="panel-header">
     <div>
-      <h2>Catalogo Wulkan</h2>
+      <h2>Catalogo FVENTAS</h2>
       <span>Productos que alimentan app movil, ordenes, stock y cotizacion comercial.</span>
     </div>
     <span>{{ products | length }} registros</span>
@@ -200,11 +202,29 @@
         <tr>
           <td>
             <div class="catalog-product">
-              <span class="sku-badge">{{ product.sku }}</span>
-              <div>
-                <strong>{{ product.title }}</strong>
-                <small>{{ product.internalCode or product.brand }}{% if product.model %} - {{ product.model }}{% endif %}</small>
-                <small>{{ product.shortDescription or product.description or 'Sin descripcion comercial' }}</small>
+              <div class="product-thumb">
+                {% if product.imageUrl %}
+                <img src="{{ product.imageUrl }}" alt="Imagen de {{ product.title }}">
+                {% else %}
+                <i class="bi bi-box-seam"></i>
+                {% endif %}
+              </div>
+              <div class="catalog-product-copy">
+                <div class="product-title-row">
+                  <span class="sku-badge">{{ product.sku }}</span>
+                  <strong>{{ product.title }}</strong>
+                </div>
+                {% set product_meta = product_type_label_map.get(product.productType, product.productType) %}
+                {% if product.model and product.model != product.sku and product.model != product.internalCode %}
+                  {% set product_meta = (product_meta ~ ' / ' if product_meta else '') ~ product.model %}
+                {% endif %}
+                {% if product.internalCode and product.internalCode != product.sku and product.internalCode != product.model %}
+                  {% set product_meta = (product_meta ~ ' / Cod. ' if product_meta else 'Cod. ') ~ product.internalCode %}
+                {% endif %}
+                {% if product_meta %}
+                <small class="product-meta">{{ product_meta }}</small>
+                {% endif %}
+                <small class="product-description">{{ product.shortDescription or product.description or 'Sin descripcion comercial' }}</small>
               </div>
             </div>
           </td>
@@ -215,7 +235,7 @@
           <td>
             <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
             <small class="d-block text-secondary">B2B {{ money_usd(product.b2bPriceUsd) }}</small>
-            <small class="d-block text-secondary">{{ usd_to_ves(product.publicPriceUsd, product.exchangeRateUsdVes) }}</small>
+            <small class="d-block text-secondary">{{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
           </td>
           <td>
             <span class="badge {{ product.stockStatus | badge_class }}">{{ stock_label_map.get(product.stockStatus, product.stockStatus) }}</span>
@@ -251,7 +271,7 @@
             {% endif %}
           </td>
           <td class="text-end">
-            <div class="d-flex justify-content-end gap-2">
+            <div class="d-flex justify-content-end gap-2 product-actions">
               <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#productDetail{{ loop.index }}" aria-label="Ver detalle de {{ product.title }}" title="Ver detalle">
                 <i class="bi bi-eye"></i>
               </button>
@@ -312,7 +332,7 @@
           <div class="product-detail-card">
             <span>Precios</span>
             <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
-            <small>B2B {{ money_usd(product.b2bPriceUsd) }} / {{ usd_to_ves(product.publicPriceUsd, product.exchangeRateUsdVes) }}</small>
+            <small>B2B {{ money_usd(product.b2bPriceUsd) }} / {{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
           </div>
           <div class="product-detail-card">
             <span>Inventario</span>

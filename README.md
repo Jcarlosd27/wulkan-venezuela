@@ -1,53 +1,42 @@
-# Wulkan Venezuela
+# FVENTAS
 
-Plataforma ecommerce B2B para Wulkan Venezuela. El sistema permite administrar catalogo, categorias, stock, fotos, PDFs, anuncios moviles, clientes ferreteros, vendedores, credito B2B, ordenes, comisiones, servicios tecnicos, usuarios admin y auditoria.
+FVENTAS es una plataforma comercial B2B multi-pais con panel administrativo Flask, app movil Android/Flutter y configuracion comercial por mercado. Chile queda como mercado inicial por defecto, pero cada empresa puede configurar pais, moneda local, documento fiscal, telefono, regiones/ciudades y condiciones comerciales antes de activar su suscripcion.
 
-## Arquitectura Actual
+## Componentes
 
-- `backend/api`: admin web Flask, API movil, modelos SQL, migraciones Alembic, storage S3 compatible y scripts operativos.
-- `apps/mobile`: app Android Flutter para clientes ferreteros y vendedores, conectada al backend Flask.
-- `.do/app.yaml`: spec de DigitalOcean App Platform para desplegar el backend.
-- `infra/digitalocean`: guia y variables de produccion para App Platform, PostgreSQL y Spaces.
-- `infra/docker`: archivos opcionales para operacion con Docker.
-- `docs`: documentacion comercial, operativa y de avance.
+- `backend/api`: panel administrativo, API movil, base de datos SQL y scripts operativos.
+- `apps/mobile`: app movil para vendedores y clientes B2B.
+- `docs/architecture`: estructura tecnica y reglas de mantenimiento.
+- `docs/product`: documentacion comercial y funcional.
+- `docs/operations`: guias operativas, publicacion y escritorio Windows.
+- `infra/digitalocean`: guia y variables para DigitalOcean App Platform.
+- `store_assets/google_play`: recursos graficos para publicar la app en Google Play.
 
-## Stack Productivo
-
-- Flask + Bootstrap 5.3 + UIX + Graphify.
-- PostgreSQL en DigitalOcean Managed Database.
-- DigitalOcean Spaces para fotos, banners y PDFs.
-- Flutter Android consumiendo `https://crmwulky.com.ve/api/v1/mobile`.
-
-El proyecto ya no usa Next.js, Firebase, Firestore, Cloud Functions ni monorepo Node/pnpm.
-
-## Comandos Principales
-
-Backend:
+## Arranque local del admin
 
 ```powershell
 cd backend/api
-python -m compileall .
-python scripts/readiness_check.py --strict
-python scripts/smoke_production.py --base-url https://crmwulky.com.ve
+$env:FVENTAS_ENV='development'
+$env:FVENTAS_DATA_BACKEND='sql'
+$env:FVENTAS_DATABASE_URL='sqlite:///data/fventas.db'
+$env:FVENTAS_SQL_FALLBACK_TO_JSON='0'
+python -m flask --app app run --host 127.0.0.1 --port 5000
 ```
 
-App movil:
+Luego abre `http://127.0.0.1:5000`.
+
+## Verificacion rapida
 
 ```powershell
-cd apps/mobile
-flutter pub get
-flutter analyze
-flutter test
-flutter build apk --release --dart-define-from-file=dart_defines.digitalocean.example.json
+cd backend/api
+python scripts/smoke_production.py --base-url http://127.0.0.1:5000
+python scripts/readiness_check.py
 ```
 
-## Produccion DigitalOcean
+## Notas de datos
 
-La guia de despliegue esta en `infra/digitalocean/README.md`.
+La base limpia queda preparada para carga real. El catalogo base FVENTAS puede poblar categorias y productos iniciales desde los botones del panel, y los clientes, vendedores, ordenes, credito y comisiones deben cargarse desde el admin o la app movil segun el rol.
 
-La app movil debe compilarse con:
+## Estructura mantenible
 
-- `WULKAN_MOBILE_DATA_SOURCE=api`
-- `WULKAN_MOBILE_AUTH_MODE=api`
-- `WULKAN_ADMIN_API_URL=https://crmwulky.com.ve/api/v1/mobile`
-- `WULKAN_MOBILE_ORDER_API_URL=https://crmwulky.com.ve/api/v1/mobile/orders`
+La guia tecnica de carpetas y responsabilidades esta en `docs/architecture/PROJECT_STRUCTURE.md`.

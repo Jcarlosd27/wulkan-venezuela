@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set heading = "Credito B2B" %}
-{% set description = "Controla limites, exposicion, saldo disponible y decisiones de riesgo para clientes ferreteros." %}
+{% set description = "Controla limites, exposicion, saldo disponible y decisiones de riesgo para clientes B2B." %}
 
 {% block page_actions %}
 {% if can_export_credit %}
@@ -23,7 +23,7 @@
   <div class="row g-2 align-items-end">
     <div class="col-12 col-lg-3">
       <label class="form-label">Buscar</label>
-      <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Cliente, RIF, email o vendedor">
+      <input class="form-control" name="q" value="{{ filters.q }}" placeholder="Cliente, {{ market_profile.taxLabel }}, email o vendedor">
     </div>
     <div class="col-6 col-lg-2">
       <label class="form-label">Estado credito</label>
@@ -107,7 +107,7 @@
     <article class="panel h-100">
       <div class="panel-header">
         <div>
-          <h2>Graphify credito</h2>
+          <h2>Insight de credito</h2>
           <span>Distribucion por estado y riesgo comercial.</span>
         </div>
         <span>Score prom. {{ metrics.average_score }}</span>
@@ -115,11 +115,11 @@
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <h3 class="small text-secondary fw-bold mb-2">{{ status_graph.title }}</h3>
-          <div class="graphify-bars">
+          <div class="insight-bars">
             {% for item in status_graph["items"] %}
-            <div class="graphify-row">
-              <span class="graphify-label">{{ item.label }}</span>
-              <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
+            <div class="insight-row">
+              <span class="insight-label">{{ item.label }}</span>
+              <span class="insight-track"><span class="insight-value" style="width: {{ (item.value / status_graph.max * 100) if status_graph.max else 0 }}%"></span></span>
               <strong>{{ item.value }}</strong>
             </div>
             {% else %}
@@ -129,11 +129,11 @@
         </div>
         <div class="col-12 col-md-6">
           <h3 class="small text-secondary fw-bold mb-2">{{ risk_graph.title }}</h3>
-          <div class="graphify-bars">
+          <div class="insight-bars">
             {% for item in risk_graph["items"] %}
-            <div class="graphify-row">
-              <span class="graphify-label">{{ item.label }}</span>
-              <span class="graphify-track"><span class="graphify-value" style="width: {{ (item.value / risk_graph.max * 100) if risk_graph.max else 0 }}%"></span></span>
+            <div class="insight-row">
+              <span class="insight-label">{{ item.label }}</span>
+              <span class="insight-track"><span class="insight-value" style="width: {{ (item.value / risk_graph.max * 100) if risk_graph.max else 0 }}%"></span></span>
               <strong>{{ item.value }}</strong>
             </div>
             {% else %}
@@ -193,7 +193,7 @@
               <div class="category-thumb"><i class="bi bi-shop"></i></div>
               <div>
                 <strong>{{ client.businessName }}</strong>
-                <small>{{ client.taxId or 'Sin RIF' }} - {{ client.email }}</small>
+                <small>{{ client.taxId or ('Sin ' ~ market_profile.taxLabel) }} - {{ client.email }}</small>
               </div>
             </div>
           </td>
@@ -244,7 +244,7 @@
             <div class="empty-state compact">
               <div class="empty-icon"><i class="bi bi-credit-card-2-front"></i></div>
               <strong>Sin clientes con credito</strong>
-              <span>Registra clientes ferreteros o importa la plantilla oficial para evaluar cupos.</span>
+              <span>Registra clientes B2B o importa la plantilla oficial para evaluar cupos.</span>
             </div>
           </td>
         </tr>

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set heading = "Servicios tecnicos" %}
-{% set description = "Administra talleres, contactos y cobertura visible para clientes ferreteros en la app." %}
+{% set description = "Administra talleres, contactos y cobertura visible para clientes B2B en la app." %}
 
 {% block top_action %}
 {% if current_admin_role() in ['super_admin', 'commercial_manager', 'operator'] %}
@@ -141,7 +141,7 @@
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Nuevo servicio tecnico</h2>
-          <p class="mb-0 text-secondary">Publica soporte autorizado para clientes Wulkan.</p>
+          <p class="mb-0 text-secondary">Publica soporte autorizado para clientes FVENTAS.</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>

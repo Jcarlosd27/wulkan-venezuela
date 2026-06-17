@@ -2,10 +2,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="Wulkan"
+        android:label="FVENTAS"
         android:name="${applicationName}"
-        android:icon="@drawable/ic_wulkan_logo"
-        android:roundIcon="@drawable/ic_wulkan_logo">
+        android:icon="@drawable/ic_fventas_logo"
+        android:roundIcon="@drawable/ic_fventas_logo">
         <activity
             android:name=".MainActivity"
             android:exported="true"

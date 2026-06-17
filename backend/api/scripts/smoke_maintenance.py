@@ -9,19 +9,46 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import app as wulkan_app
+import app as FVENTAS_app
 from store import utc_now
 from werkzeug.security import generate_password_hash
 
 
 def base_store() -> dict:
     now = utc_now()
+    company_id = "company-fventas-chile"
     return {
+        "companies": [
+            {
+                "id": company_id,
+                "name": "FVENTAS",
+                "country": "CL",
+                "currency": "CLP",
+                "status": "active",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
+        "subscriptions": [
+            {
+                "id": "sub-maintenance",
+                "companyId": company_id,
+                "planId": "plan-fventas-pro",
+                "status": "active",
+                "amountClp": 69990,
+                "startedAt": now,
+                "currentPeriodStart": now,
+                "currentPeriodEnd": "2099-12-31T23:59:59Z",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        ],
         "admin_users": [
             {
                 "id": "admin-maintenance",
+                "companyId": company_id,
                 "name": "Admin Mantenimiento",
-                "email": "admin.maintenance@wulkan.test",
+                "email": "admin.maintenance@FVENTAS.test",
                 "passwordHash": generate_password_hash("AdminMaintenance2026"),
                 "role": "super_admin",
                 "status": "active",
@@ -63,9 +90,9 @@ def main() -> int:
         state.clear()
         state.update(snapshot)
 
-    wulkan_app.load_store = lambda: state
-    wulkan_app.save_store = save_store_override
-    wulkan_app.app.config.update(
+    FVENTAS_app.load_store = lambda: state
+    FVENTAS_app.save_store = save_store_override
+    FVENTAS_app.app.config.update(
         TESTING=True,
         SECRET_KEY="maintenance-smoke-secret",
         APP_VERSION="9.0.0-test",
@@ -77,7 +104,7 @@ def main() -> int:
         WTF_CSRF_ENABLED=False,
     )
 
-    with wulkan_app.app.test_client() as client:
+    with FVENTAS_app.app.test_client() as client:
         with client.session_transaction() as session:
             session["admin_authenticated"] = True
             session["admin_user_id"] = "admin-maintenance"
@@ -89,7 +116,7 @@ def main() -> int:
         page_html = page.get_data(as_text=True)
         assert "Mantenimiento" in page_html
         assert "Checklist de produccion" in page_html
-        assert "20260611_0010_performance_indexes" in page_html
+        assert "20260615_0011_tenant_scoped_client_product_indexes" in page_html
 
         export = assert_status(client.get("/maintenance/export"), 200, "export mantenimiento")
         assert "text/csv" in export.mimetype

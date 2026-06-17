@@ -6,6 +6,7 @@ import os
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 
 CHECKS = [
@@ -18,24 +19,31 @@ CHECKS = [
 ]
 
 
+def validated_base_url(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("La URL base debe usar http(s), por ejemplo https://fventas.cl")
+    return base_url.rstrip("/")
+
+
 def fetch_json(base_url: str, path: str, token: str = "") -> tuple[int, dict]:
-    url = base_url.rstrip("/") + path
+    url = validated_base_url(base_url) + path
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(url, headers=headers)
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=20) as response:  # nosec B310
         payload = response.read().decode("utf-8")
         return response.status, json.loads(payload or "{}")
 
 
 def fetch_mobile_token(base_url: str) -> str:
-    email = os.environ.get("WULKAN_SMOKE_MOBILE_EMAIL", "").strip()
-    password = os.environ.get("WULKAN_SMOKE_MOBILE_PASSWORD", "").strip()
+    email = os.environ.get("FVENTAS_SMOKE_MOBILE_EMAIL", "").strip()
+    password = os.environ.get("FVENTAS_SMOKE_MOBILE_PASSWORD", "").strip()
     if not email or not password:
         return ""
 
-    url = base_url.rstrip("/") + "/api/v1/mobile/auth/login"
+    url = validated_base_url(base_url) + "/api/v1/mobile/auth/login"
     body = json.dumps({"email": email, "password": password}).encode("utf-8")
     request = Request(
         url,
@@ -43,19 +51,19 @@ def fetch_mobile_token(base_url: str) -> str:
         headers={"Accept": "application/json", "Content-Type": "application/json"},
         method="POST",
     )
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=20) as response:  # nosec B310
         payload = json.loads(response.read().decode("utf-8") or "{}")
         return payload.get("accessToken", "")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run production smoke checks against Wulkan Flask.")
+    parser = argparse.ArgumentParser(description="Run production smoke checks against FVENTAS Flask.")
     parser.add_argument("--base-url", default="http://localhost:5000")
     args = parser.parse_args()
     token = fetch_mobile_token(args.base_url)
 
     failures: list[str] = []
-    print("Graphify production smoke")
+    print("FVENTAS Insights production smoke")
     print("-------------------------")
     for path, label, require_items, protected in CHECKS:
         try:
@@ -83,7 +91,7 @@ def main() -> None:
         print(f"Checks fallidos: {', '.join(failures)}")
         sys.exit(1)
 
-    print("Wulkan listo para recibir trafico.")
+    print("FVENTAS listo para recibir trafico.")
 
 
 if __name__ == "__main__":
