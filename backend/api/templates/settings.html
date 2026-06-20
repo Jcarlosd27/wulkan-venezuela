@@ -107,7 +107,7 @@
           </div>
           <div class="col-6 col-md-4">
             <label class="form-label">Moneda de venta</label>
-            <select class="form-select" id="settingsSalesCurrency" name="primaryCurrency">
+            <select class="form-select" id="settingsSalesCurrency" name="primaryCurrency" disabled>
               {% for code, label in currency_options %}
               <option value="{{ code }}" {% if settings.primaryCurrency == code %}selected{% endif %}>{{ code }}</option>
               {% endfor %}
@@ -115,7 +115,7 @@
           </div>
           <div class="col-6 col-md-4">
             <label class="form-label">Moneda local</label>
-            <select class="form-select" id="settingsLocalCurrency" name="referenceCurrency">
+            <select class="form-select" id="settingsLocalCurrency" name="referenceCurrency" disabled>
               {% for code, label in currency_options %}
               <option value="{{ code }}" {% if settings.referenceCurrency == code %}selected{% endif %}>{{ code }}</option>
               {% endfor %}
@@ -123,7 +123,7 @@
           </div>
           <div class="col-12 col-md-4">
             <label class="form-label" id="settingsRateLabel">Tasa {{ settings.primaryCurrency }}/{{ settings.referenceCurrency }}</label>
-            <input class="form-control" id="settingsExchangeRate" name="exchangeRateBaseToLocal" inputmode="decimal" value="{{ settings.exchangeRateBaseToLocal or settings.exchangeRateUsdClp or settings.exchangeRateUsdVes }}">
+            <input class="form-control" id="settingsExchangeRate" name="exchangeRateBaseToLocal" inputmode="decimal" value="{{ settings.exchangeRateBaseToLocal or settings.exchangeRateUsdClp or settings.exchangeRateUsdVes }}" readonly>
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Plazos visibles para compra</label>
@@ -226,12 +226,14 @@
       if (phoneInput) phoneInput.placeholder = profile.phonePlaceholder || "";
       if (salesCurrency) salesCurrency.value = profile.salesCurrency || salesCurrency.value;
       if (localCurrency) localCurrency.value = profile.localCurrency || localCurrency.value;
-      if (exchangeRate) exchangeRate.placeholder = String(profile.exchangeRateBaseToLocal || "");
+      if (exchangeRate) {
+        exchangeRate.placeholder = String(profile.exchangeRateBaseToLocal || "");
+        exchangeRate.value = String(profile.exchangeRateBaseToLocal || "");
+      }
       refreshRateLabel();
     };
     if (market) market.addEventListener("change", applyMarket);
-    if (salesCurrency) salesCurrency.addEventListener("change", refreshRateLabel);
-    if (localCurrency) localCurrency.addEventListener("change", refreshRateLabel);
+    applyMarket();
   })();
 </script>
 {% endblock %}

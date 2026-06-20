@@ -100,24 +100,18 @@ void main() {
     expect(chileRegionCommunes['Aysen'], contains("O'Higgins"));
   });
 
-  test('ships country location catalogs for active LATAM markets', () async {
+  test('ships Chile and Venezuela country location catalogs', () async {
     await countryLocations.load();
 
+    expect(countryLocations.profileFor('CL').states.length, 16);
+    expect(countryLocations.profileFor('CL').citiesFor('Metropolitana'),
+        contains('Santiago'));
     expect(countryLocations.profileFor('VE').states.length, 25);
     expect(countryLocations.profileFor('VE').citiesFor('Miranda'),
         contains('Baruta'));
-    expect(countryLocations.profileFor('PE').citiesFor('Lima'),
-        contains('Lima / Miraflores'));
-    expect(countryLocations.profileFor('AR').citiesFor('Buenos Aires'),
-        contains('La Plata'));
-    expect(
-        countryLocations
-            .profileFor('CO')
-            .citiesFor('Departamento de Cundinamarca'),
-        isEmpty);
-    expect(countryLocations.profileFor('CO').citiesFor('Cundinamarca'),
-        contains('Zipaquir\u00e1'));
-    expect(countryLocations.profileFor('EC').citiesFor('Pichincha'),
-        contains('Quito'));
+    expect(countryLocations.profileFor('PE').hasLocations, isFalse);
+    expect(countryLocations.profileFor('AR').hasLocations, isFalse);
+    expect(countryLocations.profileFor('CO').hasLocations, isFalse);
+    expect(countryLocations.profileFor('EC').hasLocations, isFalse);
   });
 }

@@ -7,7 +7,7 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
 
 ## Alcance
 
-- Mercados objetivo: Chile, Venezuela, Peru, Argentina, Colombia y Ecuador.
+- Mercados objetivo de esta version: Chile y Venezuela.
 - Perfiles cubiertos: super administrador de plataforma, administradores de empresa suscriptora,
   vendedores, clientes B2B y usuarios moviles.
 - Datos protegidos: credenciales, datos de contacto, empresa, RUT/documentos locales, direcciones,
@@ -23,17 +23,6 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
   2026-12-01.
   - https://www.leychile.cl/leychile/Navegar/imprimir?idNorma=1209272&idParte=10527468&idVersion=2026-12-01
   - https://digital.gob.cl/biblioteca/regulacion/ley-n-19628-sobre-proteccion-de-la-vida-privada/
-- Peru: Ley 29733 y autoridad nacional de datos personales.
-  - https://www.leyes.congreso.gob.pe/documentos/leyes/29733.pdf
-  - https://www.gob.pe/anpd
-- Argentina: Ley 25.326 y AAIP.
-  - https://servicios.infoleg.gob.ar/infolegInternet/anexos/60000-64999/64790/texact.htm
-  - https://www.argentina.gob.ar/aaip/datospersonales
-- Colombia: Ley 1581 de 2012 y SIC.
-  - https://www.sic.gov.co/proteccion-de-datos-personales
-  - https://sedeelectronica.sic.gov.co/noticias/abc-del-proyecto-de-ley-de-proteccion-de-datos-personales-en-colombia
-- Ecuador: Ley Organica de Proteccion de Datos Personales y reglamento.
-  - https://www.telecomunicaciones.gob.ec/ley-y-reglamento-de-la-ley-de-proteccion-de-datos-personales/
 - Venezuela: validar con asesoria local por no existir un regimen unico equivalente a las leyes modernas
   de proteccion de datos de otros paises. El proyecto debe aplicar controles equivalentes de transparencia,
   minimizacion, acceso, rectificacion, eliminacion, confidencialidad y seguridad.
@@ -100,6 +89,8 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
 12. Confirmar que documentos internos no queden publicados por URL directa de storage; deben abrirse con enlace firmado y auditoria.
 13. Confirmar que las empresas suscriptoras solo vean modulos de lanzamiento movil y reciban 403 al intentar abrir modulos archivados por URL.
 14. Confirmar que los roles `sales` y `client` no puedan iniciar sesion en el panel web y que `platform_admin` no pueda entrar como vendedor movil.
+15. Confirmar que landing, signup, configuracion, panel plataforma y app movil solo permitan Chile y Venezuela en esta version.
+16. Confirmar que Chile opere visualmente en CLP y Venezuela en USD, segun la empresa suscriptora autenticada.
 
 ## Alcance de permisos para lanzamiento movil
 
@@ -112,6 +103,13 @@ Modulos archivados para empresas suscriptoras:
 - CRM, cotizaciones web, cobranza dedicada, despacho dedicado, reportes avanzados, mantenimiento y permisos granulares.
 
 `platform_admin` conserva herramientas internas de plataforma y mantenimiento. Ningun rol de empresa debe acceder a modulos de plataforma ni a modulos archivados.
+
+## Alcance geografico y moneda
+
+- Chile: documento fiscal RUT, regiones/comunas completas, moneda visible CLP con simbolo `$`.
+- Venezuela: documento fiscal RIF, estados/municipios completos, moneda visible USD con simbolo `$`.
+- Otros paises no forman parte del lanzamiento comercial. No deben aparecer como opcion de alta, configuracion, panel plataforma ni biblioteca movil.
+- El valor que ve la app movil debe venir de la empresa suscriptora autenticada; no se debe mezclar moneda, catalogo, vendedores, clientes ni condiciones de compra entre empresas.
 
 ## Riesgos residuales que requieren decision operativa/legal
 

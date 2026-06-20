@@ -108,6 +108,19 @@ def assert_role_boundaries_are_enforced() -> None:
             )
 
 
+def assert_market_scope_is_cl_ve_only() -> None:
+    assert FVENTAS_app.ACTIVE_MARKET_COUNTRIES == ("CL", "VE")
+    assert [code for code, _label in FVENTAS_app.MARKET_COUNTRY_OPTIONS] == ["CL", "VE"]
+    assert [code for code, _label in FVENTAS_app.CURRENCY_OPTIONS] == ["USD", "CLP"]
+    assert FVENTAS_app.normalize_market_country("CL") == "CL"
+    assert FVENTAS_app.normalize_market_country("VE") == "VE"
+    assert FVENTAS_app.normalize_market_country("PE") == "CL"
+    assert FVENTAS_app.market_profile("CL")["salesCurrency"] == "CLP"
+    assert FVENTAS_app.market_profile("CL")["localCurrency"] == "CLP"
+    assert FVENTAS_app.market_profile("VE")["salesCurrency"] == "USD"
+    assert FVENTAS_app.market_profile("VE")["localCurrency"] == "USD"
+
+
 def assert_admin_routes_have_permission_coverage() -> None:
     public_endpoints = {
         "account_deletion_page",
@@ -394,9 +407,9 @@ def base_store() -> dict:
         "mobile_write_rate_events": [],
         "business_settings": {
             "marketCountry": "CL",
-            "salesCurrency": "USD",
+            "salesCurrency": "CLP",
             "localCurrency": "CLP",
-            "exchangeRateBaseToLocal": 950,
+            "exchangeRateBaseToLocal": 1,
             "defaultPaymentTermsDays": [0, 15, 30],
             "purchaseConditionsTitle": "Condiciones de compra",
             "purchaseDefaultSaleType": "cash",
@@ -422,6 +435,7 @@ def main() -> int:
     assert_download_filenames_are_safe()
     assert_temporary_passwords_follow_policy()
     assert_role_boundaries_are_enforced()
+    assert_market_scope_is_cl_ve_only()
     assert_admin_routes_have_permission_coverage()
 
     state = base_store()

@@ -175,7 +175,7 @@
         const formatMoney = (amount, currency, locale) => new Intl.NumberFormat(locale || "es-CL", {
           style: "currency",
           currency,
-          maximumFractionDigits: currency === "CLP" || currency === "COP" || currency === "ARS" ? 0 : 2
+          maximumFractionDigits: currency === "CLP" ? 0 : 2
         }).format(Number(amount || 0));
 
         const selectedCountry = () => marketSelect?.value || "{{ selected_market_country }}";

@@ -15,6 +15,8 @@ El alcance de lanzamiento se concentra en catalogo, clientes, vendedores, credit
 
 Los modulos de CRM, cotizaciones web, cobranza dedicada, despacho dedicado, reportes avanzados, mantenimiento y matriz granular de permisos quedan archivados para empresas en esta version. El codigo puede existir para evolucion futura, pero no forma parte del panel comercial entregado al cliente suscriptor.
 
+El lanzamiento comercial queda acotado a Chile y Venezuela. Chile opera con RUT, regiones/comunas y CLP; Venezuela opera con RIF, estados/municipios y USD. Ninguna empresa suscriptora debe ver catalogo, clientes, vendedores, condiciones de compra, pedidos, monedas o datos administrativos de otra empresa.
+
 ## Modulos activos del Admin Panel
 
 ### Dashboard

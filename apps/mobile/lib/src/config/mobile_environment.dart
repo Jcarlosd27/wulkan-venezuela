@@ -24,7 +24,7 @@ enum MobileAuthMode {
   }
 }
 
-const _zeroDecimalCurrencies = {"CLP", "COP", "PYG"};
+const _zeroDecimalCurrencies = {"CLP"};
 
 String _currencyCode(String value, String fallback) {
   final normalized = value.trim().toUpperCase().replaceAll(
@@ -155,12 +155,7 @@ class MobileEnvironment {
   String taxLabelForMarket({String countryCode = ""}) {
     return switch (_countryCode(countryCode, defaultCountry)) {
       "CL" => "RUT",
-      "PE" || "EC" => "RUC",
-      "CO" => "NIT",
-      "MX" => "RFC",
-      "AR" => "CUIT",
       "VE" => "RIF",
-      "US" => "EIN",
       _ => "Documento fiscal",
     };
   }
@@ -168,13 +163,7 @@ class MobileEnvironment {
   String taxPlaceholderForMarket({String countryCode = ""}) {
     return switch (_countryCode(countryCode, defaultCountry)) {
       "CL" => "76.123.456-7",
-      "PE" => "20123456789",
-      "EC" => "1790012345001",
-      "CO" => "900123456-7",
-      "MX" => "XAXX010101000",
-      "AR" => "30-71234567-8",
       "VE" => "J-12345678-9",
-      "US" => "12-3456789",
       _ => "Documento fiscal",
     };
   }
@@ -182,13 +171,7 @@ class MobileEnvironment {
   String phonePlaceholderForMarket({String countryCode = ""}) {
     return switch (_countryCode(countryCode, defaultCountry)) {
       "CL" => "+56 9 1234 5678",
-      "PE" => "+51 987 654 321",
-      "EC" => "+593 99 123 4567",
-      "CO" => "+57 300 123 4567",
-      "MX" => "+52 55 1234 5678",
-      "AR" => "+54 9 11 2345 6789",
       "VE" => "+58 412 123 4567",
-      "US" => "+1 305 555 0123",
       _ => "+00 000 000 000",
     };
   }
@@ -212,12 +195,7 @@ class MobileEnvironment {
         primaryCurrencyForMarket(primaryCurrency: primaryCurrency);
     return switch (effectiveCountry) {
       "CL" => "CLP",
-      "PE" => "PEN",
-      "CO" => "COP",
-      "EC" => "USD",
-      "MX" => "MXN",
-      "AR" => "ARS",
-      "VE" || "US" => "USD",
+      "VE" => "USD",
       _ => effectivePrimaryCurrency,
     };
   }
@@ -273,8 +251,7 @@ class MobileEnvironment {
 
   String currencySymbolForCurrency(String currency) {
     return switch (_currencyCode(currency, primaryCurrency)) {
-      "USD" || "CLP" || "COP" || "MXN" || "ARS" => r"$",
-      "PEN" => "S/ ",
+      "USD" || "CLP" => r"$",
       _ => "${_currencyCode(currency, primaryCurrency)} ",
     };
   }

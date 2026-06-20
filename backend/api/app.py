@@ -448,102 +448,6 @@ MARKET_PROFILES = {
         "locale": "es-CL",
         "timezone": "America/Santiago",
     },
-    "PE": {
-        "code": "PE",
-        "label": "Peru",
-        "companyNoun": "empresa",
-        "taxLabel": "RUC",
-        "taxPlaceholder": "20123456789",
-        "phonePrefix": "+51",
-        "phonePlaceholder": "+51 987 654 321",
-        "salesCurrency": "PEN",
-        "localCurrency": "PEN",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "PEN",
-        "planPrice": 299,
-        "locale": "es-PE",
-        "timezone": "America/Lima",
-    },
-    "CO": {
-        "code": "CO",
-        "label": "Colombia",
-        "companyNoun": "empresa",
-        "taxLabel": "NIT",
-        "taxPlaceholder": "900123456-7",
-        "phonePrefix": "+57",
-        "phonePlaceholder": "+57 300 123 4567",
-        "salesCurrency": "COP",
-        "localCurrency": "COP",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "COP",
-        "planPrice": 299000,
-        "locale": "es-CO",
-        "timezone": "America/Bogota",
-    },
-    "EC": {
-        "code": "EC",
-        "label": "Ecuador",
-        "companyNoun": "empresa",
-        "taxLabel": "RUC",
-        "taxPlaceholder": "1790012345001",
-        "phonePrefix": "+593",
-        "phonePlaceholder": "+593 99 123 4567",
-        "salesCurrency": "USD",
-        "localCurrency": "USD",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "USD",
-        "planPrice": 79,
-        "locale": "es-EC",
-        "timezone": "America/Guayaquil",
-    },
-    "MX": {
-        "code": "MX",
-        "label": "Mexico",
-        "companyNoun": "empresa",
-        "taxLabel": "RFC",
-        "taxPlaceholder": "XAXX010101000",
-        "phonePrefix": "+52",
-        "phonePlaceholder": "+52 55 1234 5678",
-        "salesCurrency": "MXN",
-        "localCurrency": "MXN",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "MXN",
-        "planPrice": 1299,
-        "locale": "es-MX",
-        "timezone": "America/Mexico_City",
-    },
-    "AR": {
-        "code": "AR",
-        "label": "Argentina",
-        "companyNoun": "empresa",
-        "taxLabel": "CUIT",
-        "taxPlaceholder": "30-71234567-8",
-        "phonePrefix": "+54",
-        "phonePlaceholder": "+54 9 11 2345 6789",
-        "salesCurrency": "ARS",
-        "localCurrency": "ARS",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "ARS",
-        "planPrice": 79900,
-        "locale": "es-AR",
-        "timezone": "America/Argentina/Buenos_Aires",
-    },
-    "US": {
-        "code": "US",
-        "label": "Estados Unidos",
-        "companyNoun": "company",
-        "taxLabel": "EIN",
-        "taxPlaceholder": "12-3456789",
-        "phonePrefix": "+1",
-        "phonePlaceholder": "+1 305 555 0123",
-        "salesCurrency": "USD",
-        "localCurrency": "USD",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "USD",
-        "planPrice": 79,
-        "locale": "en-US",
-        "timezone": "America/New_York",
-    },
     "VE": {
         "code": "VE",
         "label": "Venezuela",
@@ -560,33 +464,15 @@ MARKET_PROFILES = {
         "locale": "es-VE",
         "timezone": "America/Caracas",
     },
-    "OTHER": {
-        "code": "OTHER",
-        "label": "Otro mercado",
-        "companyNoun": "empresa",
-        "taxLabel": "Documento fiscal",
-        "taxPlaceholder": "ID fiscal de la empresa",
-        "phonePrefix": "",
-        "phonePlaceholder": "+ codigo pais telefono",
-        "salesCurrency": "USD",
-        "localCurrency": "USD",
-        "exchangeRateBaseToLocal": 1,
-        "planCurrency": "USD",
-        "planPrice": 79,
-        "locale": "es",
-        "timezone": "UTC",
-    },
 }
-MARKET_COUNTRY_OPTIONS = [(code, profile["label"]) for code, profile in MARKET_PROFILES.items()]
+ACTIVE_MARKET_COUNTRIES = ("CL", "VE")
+ACTIVE_MARKET_PROFILES = {code: MARKET_PROFILES[code] for code in ACTIVE_MARKET_COUNTRIES}
+MARKET_COUNTRY_OPTIONS = [(code, MARKET_PROFILES[code]["label"]) for code in ACTIVE_MARKET_COUNTRIES]
 LEGAL_TERMS_VERSION = "2026-06-17"
 LEGAL_PRIVACY_VERSION = "2026-06-17"
 CURRENCY_OPTIONS = [
     ("USD", "USD - Dolar estadounidense"),
     ("CLP", "CLP - Peso chileno"),
-    ("PEN", "PEN - Sol peruano"),
-    ("COP", "COP - Peso colombiano"),
-    ("MXN", "MXN - Peso mexicano"),
-    ("ARS", "ARS - Peso argentino"),
 ]
 CLIENT_STATUS_OPTIONS = [
     ("prospect", "Prospecto"),
@@ -3954,7 +3840,7 @@ def signup():
         selected_market_country=selected_market_country,
         selected_market_profile=selected_market_profile,
         market_country_options=MARKET_COUNTRY_OPTIONS,
-        market_profiles=MARKET_PROFILES,
+        market_profiles=ACTIVE_MARKET_PROFILES,
         desktop_access_preference=desktop_access_preference,
         legal_terms_version=LEGAL_TERMS_VERSION,
         legal_privacy_version=LEGAL_PRIVACY_VERSION,
@@ -4116,7 +4002,7 @@ def landing():
         selected_market_country=selected_market_country,
         selected_market_profile=market_profile(selected_market_country),
         market_country_options=MARKET_COUNTRY_OPTIONS,
-        market_profiles=MARKET_PROFILES,
+        market_profiles=ACTIVE_MARKET_PROFILES,
         desktop_download_available=installer_info["available"],
         desktop_installer=installer_info,
         desktop_download_unavailable=request.args.get("desktop") == "unavailable",
@@ -4357,7 +4243,10 @@ def normalize_currency_code(value: str | None, default: str = "USD") -> str:
 
 def normalize_market_country(value: str | None, default: str = "CL") -> str:
     code = sanitize_text(value or default, max_length=10, allow_newlines=False).upper()
-    return code if code in MARKET_PROFILES else "OTHER"
+    if code in ACTIVE_MARKET_COUNTRIES:
+        return code
+    fallback = sanitize_text(default or "CL", max_length=10, allow_newlines=False).upper()
+    return fallback if fallback in ACTIVE_MARKET_COUNTRIES else "CL"
 
 
 def market_profile(country_code: str | None = None) -> dict:
@@ -5650,14 +5539,14 @@ def mobile_market_payload(store: dict, company_id: str | None = None) -> dict:
         company_profile = {}
 
     sales_currency = normalize_currency_code(
-        (company or {}).get("baseCurrency")
-        or (company or {}).get("salesCurrency")
+        (company or {}).get("salesCurrency")
+        or (company or {}).get("baseCurrency")
         or company_profile.get("salesCurrency"),
         profile.get("salesCurrency", "USD"),
     )
     local_currency = normalize_currency_code(
-        (company or {}).get("currency")
-        or (company or {}).get("localCurrency")
+        (company or {}).get("localCurrency")
+        or (company or {}).get("currency")
         or company_profile.get("localCurrency"),
         profile.get("localCurrency", "USD"),
     )
@@ -13876,7 +13765,7 @@ def platform_companies_page_context(
         "plan_name": SAAS_PLAN_NAME,
         "default_plan": plan_pricing_for_country("CL"),
         "market_country_options": MARKET_COUNTRY_OPTIONS,
-        "market_profiles": MARKET_PROFILES,
+        "market_profiles": ACTIVE_MARKET_PROFILES,
     }
 
 
@@ -17713,20 +17602,9 @@ def settings_payload_from_form(existing: dict) -> dict:
     now = utc_now()
     market_country = normalize_market_country(request.form.get("marketCountry") or existing.get("marketCountry") or "CL")
     profile = market_profile(market_country)
-    exchange_rate = safe_float(
-        request.form.get("exchangeRateBaseToLocal")
-        or request.form.get("exchangeRateUsdClp")
-        or request.form.get("exchangeRateUsdVes"),
-        profile.get("exchangeRateBaseToLocal", 950),
-    )
-    sales_currency = normalize_currency_code(
-        request.form.get("salesCurrency") or request.form.get("primaryCurrency"),
-        profile.get("salesCurrency", "USD"),
-    )
-    local_currency = normalize_currency_code(
-        request.form.get("localCurrency") or request.form.get("referenceCurrency"),
-        profile.get("localCurrency", "CLP"),
-    )
+    sales_currency = normalize_currency_code(profile.get("salesCurrency"), "USD")
+    local_currency = normalize_currency_code(profile.get("localCurrency"), sales_currency)
+    exchange_rate = safe_float(profile.get("exchangeRateBaseToLocal"), 1)
     pricing = plan_pricing_for_country(market_country)
     payload = dict(existing or {})
     payload.update(
@@ -17865,7 +17743,7 @@ def settings_page_context(store: dict, error: str = "", success: str = "") -> di
         "notification_emails_text": "\n".join(settings_data.get("notificationEmails", [])),
         "commission_rule_options": COMMISSION_RULE_OPTIONS,
         "market_country_options": MARKET_COUNTRY_OPTIONS,
-        "market_profiles": MARKET_PROFILES,
+        "market_profiles": ACTIVE_MARKET_PROFILES,
         "market_profile": profile,
         "currency_options": CURRENCY_OPTIONS,
         "sale_type_options": SALE_TYPE_OPTIONS,

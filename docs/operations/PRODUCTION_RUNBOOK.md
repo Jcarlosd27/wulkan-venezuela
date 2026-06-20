@@ -30,6 +30,12 @@ El panel entregado a empresas suscriptoras debe concentrarse solo en los modulos
 
 Los modulos CRM, cotizaciones web, cobranza dedicada, despacho dedicado, reportes avanzados, mantenimiento y permisos granulares quedan archivados para empresas en esta version. Si un rol de empresa intenta abrirlos por URL, debe recibir 403. `Mantenimiento` queda reservado para `platform_admin`.
 
+El alcance geografico comercial de esta version queda limitado a Chile y Venezuela:
+
+- Chile: RUT, regiones/comunas, precios visibles en CLP con simbolo `$`.
+- Venezuela: RIF, estados/municipios, precios visibles en USD con simbolo `$`.
+- Otros paises no deben aparecer en landing, signup, configuracion, panel plataforma ni app movil hasta que se active un nuevo mercado con su biblioteca territorial, moneda, textos legales y smokes.
+
 ## Estado actual
 
 No subir trafico real hasta que `scripts/readiness_check.py --strict` finalice sin errores.
