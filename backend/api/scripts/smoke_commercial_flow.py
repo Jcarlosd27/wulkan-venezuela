@@ -590,6 +590,8 @@ def main() -> int:
     assert seller_meta["counts"]["categories"] == 1
     assert seller_meta["purchaseConditions"]["paymentTermsLabel"] == "Contado / 15, 30 dias"
     assert seller_meta["purchaseConditions"]["scopeLabel"] == "Solo datos de tu empresa"
+    assert "quotes" not in seller_meta["capabilities"]["seller"], "cotizaciones moviles archivadas no deben publicitarse"
+    assert "activities" not in seller_meta["capabilities"]["seller"], "CRM movil archivado no debe publicitarse"
     assert seller_login["customer"]["purchaseConditions"]["note"].startswith("Pedidos sujetos")
     seller_login_v1 = assert_status(
         client.post(
@@ -1277,6 +1279,29 @@ def main() -> int:
         401,
         "token vendedor con empresa ajena bloqueado",
     )
+    other_seller_login = assert_status(
+        client.post(
+            "/api/v1/mobile/auth/login",
+            json={"email": "vendedor.ajeno@FVENTAS.test", "password": "Ajeno2026"},
+        ),
+        200,
+        "login vendedor empresa secundaria",
+    )
+    other_seller_payload = mobile_token_payload(other_seller_login["accessToken"])
+    assert other_seller_payload["companyId"] == OTHER_COMPANY_ID
+    other_seller_summary = assert_status(
+        client.get(
+            "/api/v1/mobile/seller/summary",
+            headers={"Authorization": f"Bearer {other_seller_login['accessToken']}"},
+        ),
+        200,
+        "resumen vendedor empresa secundaria",
+    )["summary"]
+    assert other_seller_summary["clientsCount"] == 1
+    assert other_seller_summary["activeClientsCount"] == 1
+    assert other_seller_summary["ordersCount"] == 1
+    assert other_seller_summary["salesMonthUsd"] == 900.0 * CLP_RATE
+    assert other_seller_summary["goalProgressPercent"] == 90.0
 
     forged_quote = {
         "id": "quote-cross-company-flow",

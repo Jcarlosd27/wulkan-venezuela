@@ -162,7 +162,14 @@ def assert_admin_routes_have_permission_coverage() -> None:
         "account_profile_alias",
         "logout",
     }
+    critical_role_guard_endpoints = {
+        "dashboard",
+        "admin_search",
+        "platform_companies",
+        "platform_privacy",
+    }
     unprotected: list[tuple[str, str, str]] = []
+    missing_critical_guards: list[str] = []
     post_as_view: list[tuple[str, str]] = []
 
     for rule in FVENTAS_app.app.url_map.iter_rules():
@@ -178,6 +185,8 @@ def assert_admin_routes_have_permission_coverage() -> None:
         has_role_guard = bool(getattr(view, "_required_roles", ()))
         if not has_permission_map and not has_role_guard:
             unprotected.append((rule.rule, endpoint, ",".join(sorted(methods))))
+        if endpoint in critical_role_guard_endpoints and not has_role_guard:
+            missing_critical_guards.append(endpoint)
 
         if "POST" in methods and has_permission_map:
             permission = FVENTAS_app.endpoint_permission(endpoint, "POST")
@@ -185,6 +194,7 @@ def assert_admin_routes_have_permission_coverage() -> None:
                 post_as_view.append((rule.rule, endpoint))
 
     assert not unprotected, f"Rutas privadas sin modulo ni rol explicito: {unprotected}"
+    assert not missing_critical_guards, f"Rutas criticas sin guard explicito por rol: {sorted(missing_critical_guards)}"
     assert not post_as_view, f"Rutas POST administrativas no deben mapearse como solo view: {post_as_view}"
 
 

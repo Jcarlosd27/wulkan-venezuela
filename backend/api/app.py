@@ -2458,6 +2458,14 @@ def insights_from_pairs(pairs: list[tuple[str, float]], limit: int = 6) -> dict:
     }
 
 
+def dashboard_date_keys(value: str | None) -> tuple[str, str]:
+    text = str(value or "")
+    if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+        return f"{text[8:10]}/{text[5:7]}", text[:7]
+    created_at = parse_utc_datetime(text)
+    return f"{created_at.day:02d}/{created_at.month:02d}", f"{created_at.year:04d}-{created_at.month:02d}"
+
+
 def dashboard_order_metrics(
     orders: list[dict],
     clients: list[dict],
@@ -2531,9 +2539,7 @@ def dashboard_charts(
     client_names = {client.get("id", ""): client.get("businessName", "Cliente FVENTAS") for client in clients}
 
     for order in orders:
-        created_at = parse_utc_datetime(order.get("createdAt", ""))
-        day_key = created_at.strftime("%d/%m")
-        month_key = created_at.strftime("%Y-%m")
+        day_key, month_key = dashboard_date_keys(order.get("createdAt", ""))
         total = float(order.get("totalUsd") or 0)
         sales_by_day[day_key] = sales_by_day.get(day_key, 0) + total
         sales_by_month[month_key] = sales_by_month.get(month_key, 0) + total
@@ -10147,6 +10153,38 @@ def enrich_clients(
     return enriched_clients
 
 
+def dashboard_client_summaries(clients: list[dict], orders: list[dict]) -> list[dict]:
+    credit_orders_by_client: dict[str, float] = {}
+    for order in orders:
+        client_id = order.get("customerId", "")
+        if (
+            client_id
+            and order.get("saleType") == "credit_line"
+            and order.get("status") in ORDER_CREDIT_RESERVING_STATUSES
+        ):
+            credit_orders_by_client[client_id] = credit_orders_by_client.get(client_id, 0.0) + float(order.get("balanceUsd") or 0)
+
+    summaries: list[dict] = []
+    for client in clients:
+        summary = dict(client)
+        summary["businessName"] = summary.get("businessName") or summary.get("commercialName") or summary.get("legalName") or "Cliente FVENTAS"
+        summary["status"] = summary.get("status") or "inactive"
+        summary["creditEnabled"] = bool(summary.get("creditEnabled"))
+        summary["creditLimitUsd"] = float(summary.get("creditLimitUsd") or 0)
+        summary["creditUsedUsd"] = float(summary.get("creditUsedUsd") or 0)
+        summary["creditOrdersUsd"] = round(credit_orders_by_client.get(summary.get("id", ""), 0.0), 2)
+        summary["creditExposureUsd"] = round(summary["creditUsedUsd"] + summary["creditOrdersUsd"], 2)
+        summary["creditAvailableUsd"] = (
+            max(0.0, round(summary["creditLimitUsd"] - summary["creditExposureUsd"], 2))
+            if summary["creditEnabled"]
+            else 0.0
+        )
+        if summary.get("creditRequestStatus") not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
+            summary["creditRequestStatus"] = "none"
+        summaries.append(summary)
+    return summaries
+
+
 def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched = dict(order)
     order_id = enriched.get("orderId") or enriched.get("id", "")
@@ -10335,6 +10373,18 @@ def latest_stock_movement_for(product_id: str, movements: list[dict]) -> dict:
     return sorted(related, key=lambda item: item.get("createdAt", ""), reverse=True)[0]
 
 
+def latest_stock_movements_by_product(movements: list[dict] | None) -> dict[str, dict]:
+    latest_by_product: dict[str, dict] = {}
+    for movement in movements or []:
+        product_id = movement.get("productId", "")
+        if not product_id:
+            continue
+        current = latest_by_product.get(product_id)
+        if not current or movement.get("createdAt", "") > current.get("createdAt", ""):
+            latest_by_product[product_id] = movement
+    return latest_by_product
+
+
 def enrich_stock_movement(movement: dict) -> dict:
     enriched = dict(movement)
     movement_type = enriched.get("type") or enriched.get("movementType") or ""
@@ -10398,6 +10448,7 @@ def enrich_inventory_product(
     orders: list[dict],
     movements: list[dict] | None = None,
     reserved_by_product: dict[str, int] | None = None,
+    latest_movement_by_product: dict[str, dict] | None = None,
 ) -> dict:
     if reserved_by_product is None:
         reserved_by_product = stock_reserved_quantities(orders)
@@ -10408,7 +10459,10 @@ def enrich_inventory_product(
     minimum_stock = max(0, safe_int(enriched.get("minimumStock"), 0))
     maximum_stock = max(0, safe_int(enriched.get("maximumStock"), 0))
     replenishment_qty = max(0, safe_int(enriched.get("replenishmentQty"), 0))
-    last_movement = latest_stock_movement_for(enriched["id"], movements or [])
+    if latest_movement_by_product is not None:
+        last_movement = latest_movement_by_product.get(enriched["id"], {})
+    else:
+        last_movement = latest_stock_movement_for(enriched["id"], movements or [])
     if last_movement:
         last_movement = enrich_stock_movement(last_movement)
     enriched["physicalStock"] = physical_stock
@@ -10445,12 +10499,14 @@ def enrich_inventory_products(
     movements: list[dict] | None = None,
 ) -> list[dict]:
     reserved_by_product = stock_reserved_quantities(orders)
+    latest_movement_by_product = latest_stock_movements_by_product(movements)
     return [
         enrich_inventory_product(
             product,
             orders,
             movements,
             reserved_by_product=reserved_by_product,
+            latest_movement_by_product=latest_movement_by_product,
         )
         for product in products
     ]
@@ -11931,21 +11987,9 @@ def enrich_seller(store: dict, seller: dict) -> dict:
     enriched = dict(seller)
     seller_id = enriched.get("id", "")
     seller_company_id = record_company_id(seller, store)
-    movements = [
-        movement
-        for movement in visible_records_for_current_company(store, "credit_movements")
-        if record_company_id(movement, store) == seller_company_id
-    ]
-    scoped_orders = [
-        order
-        for order in visible_records_for_current_company(store, "orders")
-        if record_company_id(order, store) == seller_company_id
-    ]
-    scoped_clients = [
-        client
-        for client in visible_records_for_current_company(store, "clients")
-        if record_company_id(client, store) == seller_company_id
-    ]
+    movements = records_for_company_id(store, "credit_movements", seller_company_id)
+    scoped_orders = records_for_company_id(store, "orders", seller_company_id)
+    scoped_clients = records_for_company_id(store, "clients", seller_company_id)
     seller_orders = [
         enrich_order(order, movements)
         for order in scoped_orders
@@ -13483,6 +13527,7 @@ def active_announcements(
 
 
 @app.get("/dashboard")
+@require_roles(*roles_for_action("dashboard", "view"))
 def dashboard():
     store = load_store()
     orders = visible_orders_for_current_user(store)
@@ -13492,7 +13537,7 @@ def dashboard():
     products_by_id, products_by_sku = product_lookup_maps(products_source)
     movements = visible_records_for_current_company(store, "credit_movements")
     enriched_orders = enrich_orders(orders, movements)
-    clients_list = enrich_clients(visible_clients_for_current_user(store), orders, movements)
+    clients_list = dashboard_client_summaries(visible_clients_for_current_user(store), enriched_orders)
     announcements = visible_records_for_current_company(store, "announcements")
     filters = dashboard_filters_from_request()
     filtered_orders = [
@@ -20345,7 +20390,7 @@ def api_mobile_meta():
         "capabilities": {
             "auth": ["login", "logout", "refresh", "change_password", "recover_password", "request_account_deletion"],
             "mobile": ["home", "products", "product_detail", "categories", "banners", "cart", "orders", "credit", "profile"],
-            "seller": ["summary", "clients", "orders", "quotes", "activities", "commissions"],
+            "seller": ["summary", "clients", "orders", "commissions"],
             "storage": app.config.get("STORAGE_BACKEND"),
             "data": app.config.get("DATA_BACKEND"),
             "tokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
