@@ -4,6 +4,32 @@ Fecha base: 2026-06-18
 
 Este runbook deja el flujo minimo para pasar FVENTAS a produccion sin exponer datos demo, sin saltar controles de seguridad y con la app movil apuntando al backend real.
 
+## Alcance comercial de lanzamiento
+
+El panel entregado a empresas suscriptoras debe concentrarse solo en los modulos necesarios para operar la app movil:
+
+- Dashboard.
+- Vendedores.
+- Clientes B2B.
+- Credito B2B.
+- Ordenes.
+- Comisiones.
+- Productos.
+- Categorias.
+- Biblioteca tecnica.
+- Stock.
+- Anuncios app.
+- Servicios tecnicos/puntos.
+- Notificaciones.
+- Reglas de negocio.
+- Configuracion.
+- Usuarios admin.
+- Documentos.
+- Plantillas.
+- Auditoria.
+
+Los modulos CRM, cotizaciones web, cobranza dedicada, despacho dedicado, reportes avanzados, mantenimiento y permisos granulares quedan archivados para empresas en esta version. Si un rol de empresa intenta abrirlos por URL, debe recibir 403. `Mantenimiento` queda reservado para `platform_admin`.
+
 ## Estado actual
 
 No subir trafico real hasta que `scripts/readiness_check.py --strict` finalice sin errores.
@@ -119,6 +145,15 @@ cd infra/docker
 docker compose -f docker-compose.production.yml --env-file .env.production exec api python scripts/readiness_check.py --strict
 docker compose -f docker-compose.production.yml --env-file .env.production exec api python scripts/smoke_production.py --base-url https://TU_DOMINIO
 ```
+
+Antes de enviar a App Store o TestFlight externo, confirmar:
+
+- Backend/API productivo accesible por HTTPS publico.
+- Cuenta demo de cliente B2B activa con catalogo, carrito, pedido e historial visibles.
+- Cuenta demo de vendedor activa con catalogo, creacion de cliente, pedido asistido y comisiones visibles.
+- Notas de revision con credenciales demo, pais/moneda configurada y explicacion de que es una app B2B privada para empresas suscriptoras.
+- Politica de privacidad, terminos y eliminacion publicados desde URLs publicas.
+- La app no contiene datos demo sensibles ni permite navegar datos de otra empresa.
 
 Para probar endpoints protegidos de la app movil:
 

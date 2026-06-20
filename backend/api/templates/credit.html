@@ -73,7 +73,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-credit-card-2-front"></i></div>
       <span>Linea otorgada</span>
-      <strong>{{ money_usd(metrics.limit) }}</strong>
+      <strong>{{ money_currency(metrics.limit, sales_currency) }}</strong>
       <em>Total aprobado</em>
     </article>
   </div>
@@ -81,7 +81,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-activity"></i></div>
       <span>Comprometido</span>
-      <strong>{{ money_usd(metrics.exposure) }}</strong>
+      <strong>{{ money_currency(metrics.exposure, sales_currency) }}</strong>
       <em>Ordenes abiertas</em>
     </article>
   </div>
@@ -89,7 +89,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
       <span>Disponible</span>
-      <strong>{{ money_usd(metrics.available) }}</strong>
+      <strong>{{ money_currency(metrics.available, sales_currency) }}</strong>
       <em>Credito utilizable</em>
     </article>
   </div>
@@ -97,7 +97,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
       <span>Vencido</span>
-      <strong>{{ money_usd(metrics.overdue) }}</strong>
+      <strong>{{ money_currency(metrics.overdue, sales_currency) }}</strong>
       <em>Riesgo cobranza</em>
     </article>
   </div>
@@ -154,10 +154,10 @@
         </div>
       </div>
       <dl class="detail-list">
-        <div><dt>Deuda vigente</dt><dd>{{ money_usd(metrics.current_debt) }}</dd></div>
-        <div><dt>Solicitado</dt><dd>{{ money_usd(metrics.requested) }}</dd></div>
+        <div><dt>Deuda vigente</dt><dd>{{ money_currency(metrics.current_debt, sales_currency) }}</dd></div>
+        <div><dt>Solicitado</dt><dd>{{ money_currency(metrics.requested, sales_currency) }}</dd></div>
         <div><dt>Ordenes abiertas</dt><dd>{{ metrics.open_orders }}</dd></div>
-        <div><dt>Pagos registrados</dt><dd>{{ money_usd(metrics.payments) }}</dd></div>
+        <div><dt>Pagos registrados</dt><dd>{{ money_currency(metrics.payments, sales_currency) }}</dd></div>
       </dl>
     </article>
   </div>

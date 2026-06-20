@@ -440,9 +440,9 @@ MARKET_PROFILES = {
         "taxPlaceholder": "76.123.456-7",
         "phonePrefix": "+56",
         "phonePlaceholder": "+56 9 1234 5678",
-        "salesCurrency": "USD",
+        "salesCurrency": "CLP",
         "localCurrency": "CLP",
-        "exchangeRateBaseToLocal": 950,
+        "exchangeRateBaseToLocal": 1,
         "planCurrency": "CLP",
         "planPrice": 69990,
         "locale": "es-CL",
@@ -456,9 +456,9 @@ MARKET_PROFILES = {
         "taxPlaceholder": "20123456789",
         "phonePrefix": "+51",
         "phonePlaceholder": "+51 987 654 321",
-        "salesCurrency": "USD",
+        "salesCurrency": "PEN",
         "localCurrency": "PEN",
-        "exchangeRateBaseToLocal": 3.75,
+        "exchangeRateBaseToLocal": 1,
         "planCurrency": "PEN",
         "planPrice": 299,
         "locale": "es-PE",
@@ -472,9 +472,9 @@ MARKET_PROFILES = {
         "taxPlaceholder": "900123456-7",
         "phonePrefix": "+57",
         "phonePlaceholder": "+57 300 123 4567",
-        "salesCurrency": "USD",
+        "salesCurrency": "COP",
         "localCurrency": "COP",
-        "exchangeRateBaseToLocal": 4100,
+        "exchangeRateBaseToLocal": 1,
         "planCurrency": "COP",
         "planPrice": 299000,
         "locale": "es-CO",
@@ -504,9 +504,9 @@ MARKET_PROFILES = {
         "taxPlaceholder": "XAXX010101000",
         "phonePrefix": "+52",
         "phonePlaceholder": "+52 55 1234 5678",
-        "salesCurrency": "USD",
+        "salesCurrency": "MXN",
         "localCurrency": "MXN",
-        "exchangeRateBaseToLocal": 18,
+        "exchangeRateBaseToLocal": 1,
         "planCurrency": "MXN",
         "planPrice": 1299,
         "locale": "es-MX",
@@ -520,9 +520,9 @@ MARKET_PROFILES = {
         "taxPlaceholder": "30-71234567-8",
         "phonePrefix": "+54",
         "phonePlaceholder": "+54 9 11 2345 6789",
-        "salesCurrency": "USD",
+        "salesCurrency": "ARS",
         "localCurrency": "ARS",
-        "exchangeRateBaseToLocal": 1150,
+        "exchangeRateBaseToLocal": 1,
         "planCurrency": "ARS",
         "planPrice": 79900,
         "locale": "es-AR",
@@ -1322,8 +1322,6 @@ ROLE_LABELS = {
     "general_manager": "Gerente general",
     "commercial_manager": "Gerente comercial",
     "operator": "Operador",
-    "collections": "Cobranza",
-    "dispatch": "Despacho",
     "auditor": "Auditor",
     "sales": "Vendedor app movil",
     "inventory": "Inventario",
@@ -1332,8 +1330,8 @@ ROLE_LABELS = {
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 PASSWORD_MIN_LENGTH = 10
 IMPORT_DRAFT_TTL_SECONDS = 60 * 60
-WEB_ADMIN_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"}
-WEB_ADMIN_ROLE_ORDER = ["platform_admin", "super_admin", "general_manager", "commercial_manager", "operator", "inventory", "collections", "dispatch", "auditor", "readonly"]
+WEB_ADMIN_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager", "operator", "inventory", "auditor", "readonly"}
+WEB_ADMIN_ROLE_ORDER = ["platform_admin", "super_admin", "general_manager", "commercial_manager", "operator", "inventory", "auditor", "readonly"]
 WRITE_ROLES = {"platform_admin", "super_admin", "general_manager", "commercial_manager", "operator"}
 SALES_ROLES = {"platform_admin", "super_admin", "commercial_manager", "operator"}
 INVENTORY_ROLES = {"platform_admin", "super_admin", "commercial_manager", "operator", "inventory"}
@@ -1394,17 +1392,42 @@ ACTION_FULL_NO_DELETE = {"view", "create", "edit", "annul", "approve", "reject",
 ALL_ACTION_KEYS = {key for key, _label, _icon in PERMISSION_ACTIONS}
 ACTION_ORDER = [key for key, _label, _icon in PERMISSION_ACTIONS]
 ALL_MODULE_KEYS = [key for key, _label, _icon, _description in PERMISSION_MODULES]
+PLATFORM_MODULES = {"platform_companies", "platform_privacy"}
+TENANT_MODULE_KEYS = [module for module in ALL_MODULE_KEYS if module not in PLATFORM_MODULES]
+MOBILE_LAUNCH_TENANT_MODULES = {
+    "dashboard",
+    "sellers",
+    "clients",
+    "credit",
+    "orders",
+    "commissions",
+    "products",
+    "categories",
+    "media_library",
+    "stock",
+    "announcements",
+    "service_technicians",
+    "notifications",
+    "business_rules",
+    "admin_users",
+    "settings",
+    "audit",
+    "import_templates",
+    "documents",
+}
+ARCHIVED_TENANT_MODULES = set(TENANT_MODULE_KEYS) - MOBILE_LAUNCH_TENANT_MODULES
 ROLE_MODULE_PERMISSIONS = {
     "platform_admin": {module: set(ALL_ACTION_KEYS) for module in ALL_MODULE_KEYS},
-    "super_admin": {module: set(ALL_ACTION_KEYS) for module in ALL_MODULE_KEYS},
+    "super_admin": {module: set(ALL_ACTION_KEYS) for module in MOBILE_LAUNCH_TENANT_MODULES},
     "general_manager": {
-        module: set(ACTION_AUDIT) for module in ALL_MODULE_KEYS if module not in {"admin_users", "permissions", "settings"}
+        module: set(ACTION_AUDIT)
+        for module in MOBILE_LAUNCH_TENANT_MODULES
+        if module not in {"admin_users", "settings"}
     },
     "commercial_manager": {
         "dashboard": set(ACTION_AUDIT),
         "sellers": set(ACTION_WORK),
         "clients": set(ACTION_WORK | {"approve", "reject"}),
-        "crm": set(ACTION_WORK | {"approve", "reject"}),
         "credit": set(ACTION_APPROVE),
         "orders": set(ACTION_FULL_NO_DELETE),
         "commissions": set(ACTION_APPROVE),
@@ -1414,13 +1437,8 @@ ROLE_MODULE_PERMISSIONS = {
         "stock": set(ACTION_READ),
         "announcements": set(ACTION_WORK),
         "service_technicians": set(ACTION_WORK),
-        "quotes": set(ACTION_FULL_NO_DELETE),
-        "collections": set(ACTION_READ | {"edit"}),
-        "dispatch": set(ACTION_READ),
-        "reports": set(ACTION_AUDIT),
         "notifications": set(ACTION_READ | {"edit"}),
         "business_rules": set(ACTION_AUDIT),
-        "maintenance": set(ACTION_AUDIT),
         "import_templates": set(ACTION_READ),
         "audit": set(ACTION_AUDIT),
         "documents": set(ACTION_READ),
@@ -1429,7 +1447,6 @@ ROLE_MODULE_PERMISSIONS = {
         "dashboard": set(ACTION_READ),
         "sellers": set(ACTION_WORK),
         "clients": set(ACTION_WORK),
-        "crm": set(ACTION_WORK),
         "credit": {"view", "export", "audit"},
         "orders": {"view", "create", "edit", "annul", "export", "audit"},
         "commissions": set(ACTION_READ),
@@ -1439,10 +1456,6 @@ ROLE_MODULE_PERMISSIONS = {
         "stock": {"view", "create", "edit", "export", "import", "audit"},
         "announcements": set(ACTION_WORK),
         "service_technicians": set(ACTION_WORK),
-        "quotes": {"view", "create", "edit", "export", "audit"},
-        "collections": set(ACTION_READ),
-        "dispatch": set(ACTION_READ | {"edit"}),
-        "reports": set(ACTION_READ),
         "notifications": set(ACTION_READ | {"edit"}),
         "business_rules": set(ACTION_READ),
         "import_templates": set(ACTION_READ),
@@ -1455,45 +1468,21 @@ ROLE_MODULE_PERMISSIONS = {
         "media_library": set(ACTION_WORK),
         "stock": {"view", "create", "edit", "annul", "export", "import", "audit"},
         "orders": set(ACTION_READ),
-        "dispatch": set(ACTION_READ),
         "notifications": set(ACTION_READ | {"edit"}),
         "business_rules": set(ACTION_READ),
         "import_templates": set(ACTION_READ),
         "documents": set(ACTION_WORK),
     },
-    "collections": {
-        "dashboard": set(ACTION_READ),
-        "clients": set(ACTION_READ),
-        "crm": set(ACTION_READ | {"edit"}),
-        "credit": set(ACTION_READ | {"edit"}),
-        "orders": set(ACTION_READ | {"edit"}),
-        "collections": {"view", "create", "edit", "export", "audit"},
-        "reports": set(ACTION_READ),
-        "notifications": set(ACTION_READ | {"edit"}),
-        "business_rules": set(ACTION_READ),
-        "import_templates": set(ACTION_READ),
-        "documents": set(ACTION_READ),
-    },
-    "dispatch": {
-        "dashboard": set(ACTION_READ),
-        "orders": set(ACTION_READ | {"edit"}),
-        "stock": set(ACTION_READ),
-        "dispatch": {"view", "create", "edit", "annul", "export", "audit"},
-        "service_technicians": set(ACTION_READ),
-        "reports": set(ACTION_READ),
-        "notifications": set(ACTION_READ | {"edit"}),
-        "business_rules": set(ACTION_READ),
-        "documents": set(ACTION_READ),
-    },
     "auditor": {
-        module: set(ACTION_AUDIT) for module in ALL_MODULE_KEYS if module not in {"admin_users", "permissions", "settings"}
+        module: set(ACTION_AUDIT)
+        for module in MOBILE_LAUNCH_TENANT_MODULES
+        if module not in {"admin_users", "settings"}
     },
     "readonly": {
         module: set(ACTION_VIEW) for module in [
             "dashboard",
             "sellers",
             "clients",
-            "crm",
             "credit",
             "orders",
             "commissions",
@@ -1503,13 +1492,8 @@ ROLE_MODULE_PERMISSIONS = {
             "stock",
             "announcements",
             "service_technicians",
-            "quotes",
-            "collections",
-            "dispatch",
-            "reports",
             "notifications",
             "business_rules",
-            "maintenance",
             "import_templates",
             "documents",
         ]
@@ -1520,8 +1504,11 @@ ROLE_MODULE_PERMISSIONS["general_manager"].update({
     "orders": set(ACTION_FULL_NO_DELETE),
     "commissions": set(ACTION_APPROVE),
 })
-ROLE_MODULE_PERMISSIONS["super_admin"]["platform_companies"] = set()
-ROLE_MODULE_PERMISSIONS["super_admin"]["platform_privacy"] = set()
+for role, permissions in ROLE_MODULE_PERMISSIONS.items():
+    if role == "platform_admin":
+        continue
+    for module in PLATFORM_MODULES | ARCHIVED_TENANT_MODULES:
+        permissions[module] = set()
 MODULE_ACCESS = {
     module: {
         role
@@ -1560,7 +1547,7 @@ ADMIN_MENU_GROUPS = [
         "icon": "bi-briefcase",
         "items": [
             {"module": "sellers", "endpoint": "sellers", "label": "Vendedores", "icon": "bi-person-badge", "active": ["sellers", "seller_edit", "sellers_import", "seller_delete"]},
-            {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "client_status_update", "clients_import", "client_delete"]},
+            {"module": "clients", "endpoint": "clients", "label": "Clientes", "icon": "bi-shop", "active": ["clients", "client_edit", "client_status_update", "clients_import", "client_account_deletion_complete", "client_delete"]},
             {"module": "crm", "endpoint": "crm", "label": "CRM Comercial", "icon": "bi-kanban", "active": ["crm", "crm_export", "crm_update", "crm_activity_create", "crm_delete"]},
             {"module": "credit", "endpoint": "credit", "label": "Credito B2B", "icon": "bi-credit-card-2-front", "active": ["credit", "credit_decision", "credit_due", "credit_history"]},
             {"module": "collections", "endpoint": "collections", "label": "Cobranza", "icon": "bi-cash-coin", "active": ["collections", "collections_export", "collection_action", "collection_statement"]},
@@ -1657,6 +1644,7 @@ ENDPOINT_UI_LABELS = {
     "clients_import": "Importar clientes",
     "credit_due": "Vencimientos",
     "credit_history": "Historial credito",
+    "client_account_deletion_complete": "Completar eliminacion cliente",
     "order_new": "Nueva orden",
     "orders_export": "Exportar ordenes",
     "quote_new": "Nueva cotizacion",
@@ -1694,6 +1682,7 @@ ENDPOINT_ACTION_OVERRIDES = {
     "clients_import": "import",
     "client_edit": "edit",
     "client_status_update": "edit",
+    "client_account_deletion_complete": "delete",
     "client_delete": "delete",
     "crm": {"GET": "view", "POST": "create"},
     "crm_export": "export",
@@ -1875,7 +1864,7 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "unidad_venta", "required": False, "example": "unidad", "help": "Unidad, kit, caja, metro, litro, etc."},
                     {"name": "descripcion_corta", "required": False, "example": "Equipo de corte para jardin y finca.", "help": "Resumen corto para listados."},
                     {"name": "descripcion_larga", "required": False, "example": "Incluye espada, cadena y garantia FVENTAS.", "help": "Detalle ampliado para ficha de producto."},
-                    {"name": "precio_publico_usd", "required": True, "example": "185", "help": "Precio PVP en dolares."},
+                    {"name": "precio_publico_usd", "required": True, "example": "185", "help": "Precio PVP en moneda de venta configurada."},
                     {"name": "precio_b2b_usd", "required": False, "example": "162", "help": "Precio B2B."},
                     {"name": "costo_referencial_usd", "required": False, "example": "120", "help": "Costo interno referencial. No se publica en app."},
                     {"name": "margen_porcentaje", "required": False, "example": "25", "help": "Margen estimado administrativo."},
@@ -1894,7 +1883,7 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "especificaciones", "required": False, "example": "Motor:45cc|Garantia:6 meses", "help": "Formato clave:valor."},
                     {"name": "skus_relacionados", "required": False, "example": "FVT-REP-CAD18|FVT-ACE-2T", "help": "Productos relacionados por SKU."},
                     {"name": "notas_compatibilidad", "required": False, "example": "Compatible con FVT-REP-CAD18|Validar serie antes de despacho", "help": "Notas visibles en app movil para compatibilidad o validacion."},
-                    {"name": "requiere_cotizacion", "required": False, "example": "no", "help": "si/no."},
+                    {"name": "requiere_revision", "required": False, "example": "no", "help": "si/no para pedido sujeto a revision comercial."},
                     {"name": "requiere_validacion_tecnica", "required": False, "example": "si", "help": "si/no."},
                     {"name": "visible_app", "required": False, "example": "si", "help": "si/no para publicar en app movil."},
                     {"name": "destacado", "required": False, "example": "si", "help": "si/no para destacar en app."},
@@ -3226,6 +3215,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
     products = visible_records_for_current_company(store, "products")
     stock_movements = visible_records_for_current_company(store, "stock_movements")
     movements = visible_records_for_current_company(store, "credit_movements")
+    search_currency = sales_currency_for_company(store, current_company_id(store))
     sellers = [
         user
         for user in visible_records_for_current_company(store, "admin_users")
@@ -3247,7 +3237,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                     "group_icon": "bi-box-seam",
                     "title": product.get("title") or product.get("sku"),
                     "subtitle": f"{product.get('sku', '')} - {product.get('categoryName') or 'Sin categoria'}",
-                    "meta": f"{product.get('availableStock', 0)} disp. / {money_usd(product.get('publicPriceUsd', 0))}",
+                    "meta": f"{product.get('availableStock', 0)} disp. / {money_currency(product.get('publicPriceUsd', 0), search_currency)}",
                     "badge": product.get("statusLabel", product.get("status", "")),
                     "href": href,
                     "icon": "bi-box-seam",
@@ -3262,7 +3252,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                     "group_icon": "bi-shop",
                     "title": client.get("businessName") or client.get("email"),
                     "subtitle": f"{client.get('taxId') or 'Sin ' + client_profile.get('taxLabel', 'documento fiscal')} - {client.get('assignedSellerName') or 'Sin vendedor'}",
-                    "meta": f"Credito {money_usd(client.get('creditAvailableUsd', 0))}",
+                    "meta": f"Credito {money_currency(client.get('creditAvailableUsd', 0), search_currency)}",
                     "badge": client.get("statusLabel", client.get("status", "")),
                     "href": url_for("clients", q=client.get("businessName", "")),
                     "icon": "bi-shop",
@@ -3290,7 +3280,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                     "group_icon": "bi-receipt",
                     "title": order.get("orderId") or order.get("id"),
                     "subtitle": f"{order.get('customerName')} - {order.get('sellerName')}",
-                    "meta": f"{money_usd(order.get('totalUsd', 0))} / saldo {money_usd(order.get('balanceUsd', 0))}",
+                    "meta": f"{money_currency(order.get('totalUsd', 0), search_currency)} / saldo {money_currency(order.get('balanceUsd', 0), search_currency)}",
                     "badge": order.get("statusLabel", order.get("status", "")),
                     "href": url_for("orders", q=order.get("orderId", "")),
                     "icon": "bi-receipt",
@@ -3305,7 +3295,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                     "group_icon": "bi-file-earmark-text",
                     "title": quote.get("quoteId") or quote.get("title") or quote.get("id"),
                     "subtitle": f"{quote.get('clientName') or 'Sin cliente'} - {quote.get('sellerName') or 'Sin vendedor'}",
-                    "meta": money_usd(quote.get("totalUsd", 0)),
+                    "meta": money_currency(quote.get("totalUsd", 0), search_currency),
                     "badge": quote_status_label(quote.get("status", "")),
                     "href": href,
                     "icon": "bi-file-earmark-text",
@@ -3362,6 +3352,7 @@ def require_roles(*roles: str):
                 return forbidden_response()
             return view(*args, **kwargs)
 
+        wrapped._required_roles = tuple(sorted(allowed_roles))
         return wrapped
 
     return decorator
@@ -4003,7 +3994,7 @@ def signup_success(company_id: str):
     )
 
 
-@app.get("/logout")
+@app.post("/logout")
 def logout():
     if session.get("admin_authenticated"):
         store = load_store()
@@ -4415,6 +4406,24 @@ def currency_context(store: dict | None = None) -> dict:
         "local_currency": local_currency,
         "exchange_rate": rate,
     }
+
+
+def sales_currency_for_company(store: dict | None = None, company_id: str | None = None) -> str:
+    source_store = store or load_store()
+    settings = business_settings(source_store)
+    company = get_company(source_store, company_id) if company_id else None
+    profile = active_market_profile_for_store(source_store, company_id)
+    return normalize_currency_code(
+        (company or {}).get("salesCurrency")
+        or (company or {}).get("primaryCurrency")
+        or settings.get("salesCurrency")
+        or settings.get("primaryCurrency"),
+        profile.get("salesCurrency", "USD"),
+    )
+
+
+def money_sales(value: float | int | str | None, store: dict | None = None, company_id: str | None = None) -> str:
+    return money_currency(value, sales_currency_for_company(store, company_id))
 
 
 def active_market_profile_for_store(store: dict | None = None, company_id: str | None = None) -> dict:
@@ -6348,7 +6357,7 @@ def mobile_product_payload(product: dict) -> dict:
         "stock": int(product.get("physicalStock") or product.get("stock") or 0),
         "reservedStock": int(product.get("committedStock") or 0),
         "stockStatus": product.get("stockStatus", "available"),
-        "badge": "Cotizar" if product.get("requiresQuote") else "Comprar",
+        "badge": "Revision" if product.get("requiresQuote") else "Comprar",
         "requiresQuote": bool(product.get("requiresQuote")),
         "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
         "compatibilityNotes": compatibility_notes,
@@ -7527,7 +7536,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             "specifications": parse_import_specs(row_value(row, "specifications", "especificaciones")) or dict(current.get("specifications") or {}),
             "relatedSkus": parse_import_list(row_value(row, "relatedSkus", "skus_relacionados", "relacionados")) or list(current.get("relatedSkus") or []),
             "compatibilityNotes": parse_import_list(row_value(row, "compatibilityNotes", "notas_compatibilidad", "compatibilidad")) or list(current.get("compatibilityNotes") or []),
-            "requiresQuote": parse_import_bool(row_value(row, "requiresQuote", "requiere_cotizacion"), bool(current.get("requiresQuote", False))),
+            "requiresQuote": parse_import_bool(row_value(row, "requiresQuote", "requiere_revision", "requiere_cotizacion"), bool(current.get("requiresQuote", False))),
             "requiresTechnicalValidation": parse_import_bool(
                 row_value(row, "requiresTechnicalValidation", "requiere_validacion_tecnica"),
                 bool(current.get("requiresTechnicalValidation", False)),
@@ -9627,7 +9636,7 @@ def generate_mobile_subject_notifications(
                 store,
                 subject_id,
                 "Meta pendiente",
-                f"Avance {seller_snapshot.get('goalProgressPercent', 0)}% de meta mensual {money_usd(seller_snapshot.get('salesGoalUsd', 0))}.",
+                f"Avance {seller_snapshot.get('goalProgressPercent', 0)}% de meta mensual {money_sales(seller_snapshot.get('salesGoalUsd', 0), store, subject_company_id)}.",
                 notification_type="goal_pending",
                 priority="low",
                 module="sellers",
@@ -9651,7 +9660,7 @@ def generate_mobile_subject_notifications(
                     store,
                     subject_id,
                     "Cliente con deuda",
-                    f"{client_name} mantiene {money_usd(overdue)} vencidos.",
+                    f"{client_name} mantiene {money_sales(overdue, store, subject_company_id)} vencidos.",
                     notification_type="client_debt",
                     priority="high",
                     module="clients",
@@ -9690,7 +9699,7 @@ def generate_mobile_subject_notifications(
                     store,
                     subject_id,
                     "Saldo vencido",
-                    f"Tienes {money_usd(overdue)} vencidos. Contacta a tu vendedor FVENTAS.",
+                    f"Tienes {money_sales(overdue, store, subject_company_id)} vencidos. Contacta a tu vendedor FVENTAS.",
                     notification_type="overdue_balance",
                     priority="high",
                     module="credit",
@@ -9709,7 +9718,7 @@ def notify_order_created(store: dict, order: dict) -> None:
     company_id = record_company_id(order, store)
     customer = order.get("customer") or {}
     customer_name = customer.get("name") or customer.get("businessName") or "Cliente FVENTAS"
-    total = money_usd(order.get("totalUsd") or order.get("netUsd") or 0)
+    total = money_sales(order.get("totalUsd") or order.get("netUsd") or 0, store, company_id)
     sale_label = sale_type_label(order.get("saleType", "cash"))
     status = order.get("status", "credit_review")
     notification_type = "order_pending_approval" if status in {"credit_review", "payment_under_review"} else "order_created"
@@ -9764,7 +9773,7 @@ def notify_order_status_change(store: dict, order: dict, before_status: str) -> 
         return
     order_id = order.get("orderId") or order.get("id", "")
     company_id = record_company_id(order, store)
-    total = money_usd(order.get("totalUsd") or 0)
+    total = money_sales(order.get("totalUsd") or 0, store, company_id)
     status_label = order_status_label(after_status)
     type_by_status = {
         "approved_with_credit": "order_approved",
@@ -9823,7 +9832,7 @@ def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
     notification_type = "credit_approved" if approved else "credit_rejected"
     title = "Credito aprobado" if approved else "Credito no aprobado"
     body = (
-        f"Linea disponible por {money_usd(client.get('creditLimitUsd', 0))} a {client.get('paymentTermsDays', 0)} dias."
+        f"Linea disponible por {money_sales(client.get('creditLimitUsd', 0), store, company_id)} a {client.get('paymentTermsDays', 0)} dias."
         if approved
         else "La solicitud de credito requiere revision o fue rechazada por gerencia."
     )
@@ -9878,7 +9887,7 @@ def notify_credit_requested(store: dict, client: dict) -> None:
     if amount <= 0:
         return
     title = "Credito solicitado"
-    body = f"{client.get('businessName') or client.get('commercialName') or 'Cliente'} solicito {money_usd(amount)}."
+    body = f"{client.get('businessName') or client.get('commercialName') or 'Cliente'} solicito {money_sales(amount, store, company_id)}."
     notify_admin(
         store,
         title,
@@ -9897,7 +9906,7 @@ def notify_credit_requested(store: dict, client: dict) -> None:
 def notify_payment_registered(store: dict, order: dict, movement: dict) -> None:
     order_id = order.get("orderId") or order.get("id", "")
     company_id = record_company_id(order, store)
-    amount = money_usd(movement.get("amountUsd") or 0)
+    amount = money_sales(movement.get("amountUsd") or 0, store, company_id)
     notify_admin(
         store,
         "Abono registrado",
@@ -9938,7 +9947,7 @@ def notify_commission_status(store: dict, order: dict, status: str) -> None:
         store,
         order.get("sellerId", ""),
         title,
-        f"{commission_status_label(status)} por {money_usd(order.get('commissionUsd', 0))} en orden {order_id}.",
+        f"{commission_status_label(status)} por {money_sales(order.get('commissionUsd', 0), store, company_id)} en orden {order_id}.",
         notification_type=notification_type,
         priority="normal",
         module="commissions",
@@ -10024,10 +10033,15 @@ def order_balance_usd(order: dict, movements: list[dict] | None = None) -> float
     return max(0.0, round(total - paid, 2))
 
 
-def order_release_block_reason(order: dict, movements: list[dict] | None = None) -> str:
+def order_release_block_reason(
+    order: dict,
+    movements: list[dict] | None = None,
+    store: dict | None = None,
+) -> str:
     balance = order_balance_usd(order, movements)
     if balance > ORDER_PAYMENT_TOLERANCE_USD:
-        return f"Entrega bloqueada: saldo pendiente USD {balance:,.2f}. El cliente debe cancelar antes de recibir producto."
+        company_id = record_company_id(order, store) if store else str(order.get("companyId") or "")
+        return f"Entrega bloqueada: saldo pendiente {money_sales(balance, store, company_id)}. El cliente debe cancelar antes de recibir producto."
     return ""
 
 
@@ -10676,7 +10690,7 @@ def release_stock_for_order(store: dict, order: dict) -> None:
 def deliver_stock_for_order(store: dict, order: dict) -> bool:
     if order.get("inventoryStatus") == "delivered":
         return True
-    payment_block_reason = order_release_block_reason(order, inventory_movements_for_order(store, order))
+    payment_block_reason = order_release_block_reason(order, inventory_movements_for_order(store, order), store)
     if payment_block_reason:
         order["dispatchStatus"] = "payment_hold"
         order["stockStatus"] = "payment_hold"
@@ -10917,9 +10931,9 @@ def product_form_error(store: dict, existing: dict | None = None) -> str:
     if product_type not in {key for key, _label in PRODUCT_TYPE_OPTIONS}:
         return "El tipo de producto no es valido."
     if public_price <= 0:
-        return "El precio publico USD debe ser mayor a 0."
+        return "El precio publico debe ser mayor a 0."
     if original_price < 0:
-        return "El precio anterior USD no puede ser negativo."
+        return "El precio anterior no puede ser negativo."
     if b2b_price < 0:
         return "El precio B2B no puede ser negativo."
     if cost < 0:
@@ -13292,9 +13306,9 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
             ("tipo_venta", "Tipo venta"),
             ("estado", "Estado"),
             ("items", "Items"),
-            ("total_usd", "Total USD"),
-            ("abonado_usd", "Abonado USD"),
-            ("saldo_usd", "Saldo USD"),
+            ("total_usd", "Total moneda venta"),
+            ("abonado_usd", "Abonado moneda venta"),
+            ("saldo_usd", "Saldo moneda venta"),
         ],
         "finance": [
             ("vence", "Vence"),
@@ -13303,9 +13317,9 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
             ("vendedor", "Vendedor"),
             ("condicion", "Condicion"),
             ("estado_cobranza", "Cobranza"),
-            ("total_usd", "Total USD"),
-            ("abonado_usd", "Abonado USD"),
-            ("saldo_usd", "Saldo USD"),
+            ("total_usd", "Total moneda venta"),
+            ("abonado_usd", "Abonado moneda venta"),
+            ("saldo_usd", "Saldo moneda venta"),
             ("ultimo_abono", "Ultimo abono"),
         ],
         "inventory": [
@@ -13317,20 +13331,20 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
             ("reservado", "Reservado"),
             ("disponible", "Disponible"),
             ("rotacion", "Rotacion"),
-            ("precio_usd", "Precio USD"),
-            ("valor_stock_usd", "Valor stock USD"),
+            ("precio_usd", "Precio moneda venta"),
+            ("valor_stock_usd", "Valor stock moneda venta"),
         ],
         "sellers": [
             ("vendedor", "Vendedor"),
             ("zona", "Zona"),
             ("clientes", "Clientes"),
             ("ordenes", "Ordenes"),
-            ("ventas_usd", "Ventas USD"),
-            ("ticket_promedio_usd", "Ticket promedio USD"),
-            ("meta_usd", "Meta USD"),
+            ("ventas_usd", "Ventas moneda venta"),
+            ("ticket_promedio_usd", "Ticket promedio moneda venta"),
+            ("meta_usd", "Meta moneda venta"),
             ("avance_meta", "Avance meta"),
-            ("comision_pendiente_usd", "Comision pendiente USD"),
-            ("comision_pagada_usd", "Comision pagada USD"),
+            ("comision_pendiente_usd", "Comision pendiente moneda venta"),
+            ("comision_pagada_usd", "Comision pagada moneda venta"),
         ],
     }
     return columns.get(report_type, columns["commercial"])
@@ -16712,7 +16726,7 @@ def credit_decision(client_id: str):
             client["status"] = "active"
         if client.get("collectionStatus") == "blocked":
             client["collectionStatus"] = "current"
-        detail = f"Credito {credit_status_label(client['creditRequestStatus']).lower()} por {money_usd(client['creditLimitUsd'])} a {payment_terms} dias."
+        detail = f"Credito {credit_status_label(client['creditRequestStatus']).lower()} por {money_sales(client['creditLimitUsd'], store, record_company_id(client, store))} a {payment_terms} dias."
     elif decision == "review":
         client["creditEnabled"] = False
         client["creditRequestStatus"] = "review"
@@ -17038,7 +17052,8 @@ def business_rules_page_context(store: dict) -> dict:
         limit = safe_float(client.get("creditLimitUsd"), 0)
         exposure = safe_float(client.get("creditUsedUsd"), 0) + client_order_credit_used(orders, client.get("id", ""), movements)
         if client.get("creditEnabled") and limit >= 0 and exposure > limit + 0.01:
-            over_limit_clients.append(f"{client.get('businessName', client.get('id', 'Cliente'))}: {money_usd(exposure)} / {money_usd(limit)}")
+            company_id = record_company_id(client, store)
+            over_limit_clients.append(f"{client.get('businessName', client.get('id', 'Cliente'))}: {money_sales(exposure, store, company_id)} / {money_sales(limit, store, company_id)}")
     add_business_rule(
         rules,
         code="credit.limit.exceeded",
@@ -18499,7 +18514,7 @@ def order_status_update(order_id: str):
 
     sale_type = order.get("saleType", "cash")
     if target_status == "delivered":
-        delivery_block_reason = order_release_block_reason(order, movements)
+        delivery_block_reason = order_release_block_reason(order, movements, store)
         if delivery_block_reason:
             order["dispatchStatus"] = "payment_hold"
             order["stockStatus"] = "payment_hold"
@@ -18653,13 +18668,14 @@ def order_payment_create(order_id: str):
     order["managedBy"] = session.get("admin_name", "Admin")
     order["managedAt"] = utc_now()
     order["updatedAt"] = utc_now()
-    append_order_history(order, order["status"], f"Abono externo registrado por {money_usd(amount_usd)}.")
+    amount_display = money_sales(amount_usd, store, record_company_id(order, store))
+    append_order_history(order, order["status"], f"Abono externo registrado por {amount_display}.")
     record_change_event(
         store,
         "payment",
         "order",
         order_id,
-        f"Abono registrado por {money_usd(amount_usd)}.",
+        f"Abono registrado por {amount_display}.",
         before,
         order,
     )
@@ -19101,7 +19117,7 @@ def dispatch_update(order_id: str):
         order["dispatchedAt"] = order.get("dispatchedAt") or now
         order["currentOwner"] = "Despacho"
     elif target_status == "delivered":
-        delivery_block_reason = order_release_block_reason(order, movements)
+        delivery_block_reason = order_release_block_reason(order, movements, store)
         if delivery_block_reason:
             target_status = "payment_hold"
             order["dispatchStatus"] = target_status
@@ -20095,6 +20111,13 @@ def api_mobile_seller_quotes():
     user, auth_error = require_mobile_sales_user(store)
     if auth_error:
         return auth_error, 401
+    return jsonify(
+        {
+            "error": "Cotizaciones moviles archivadas para el lanzamiento. Usa pedidos asistidos.",
+            "code": "mobile_feature_archived",
+            "feature": "seller_quotes",
+        }
+    ), 410
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
@@ -20245,6 +20268,13 @@ def api_mobile_seller_activities():
     user, auth_error = require_mobile_sales_user(store)
     if auth_error:
         return auth_error, 401
+    return jsonify(
+        {
+            "error": "Seguimiento CRM movil archivado para el lanzamiento. Usa clientes y pedidos asistidos.",
+            "code": "mobile_feature_archived",
+            "feature": "seller_activities",
+        }
+    ), 410
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}

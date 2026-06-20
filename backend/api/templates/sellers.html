@@ -70,7 +70,7 @@
     <article class="metric-card metric-active">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
       <span>Venta mes</span>
-      <strong>{{ money_usd(metrics.sales_month) }}</strong>
+      <strong>{{ money_currency(metrics.sales_month, sales_currency) }}</strong>
       <em>{{ metrics.goal_progress }}% meta</em>
     </article>
   </div>
@@ -78,7 +78,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-bullseye"></i></div>
       <span>Meta total</span>
-      <strong>{{ money_usd(metrics.goal_total) }}</strong>
+      <strong>{{ money_currency(metrics.goal_total, sales_currency) }}</strong>
       <em>Mensual</em>
     </article>
   </div>
@@ -86,7 +86,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-receipt"></i></div>
       <span>Ticket prom.</span>
-      <strong>{{ money_usd(metrics.ticket_average) }}</strong>
+      <strong>{{ money_currency(metrics.ticket_average, sales_currency) }}</strong>
       <em>Por orden</em>
     </article>
   </div>
@@ -94,7 +94,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-cash-stack"></i></div>
       <span>Comision pend.</span>
-      <strong>{{ money_usd(metrics.commission_pending) }}</strong>
+      <strong>{{ money_currency(metrics.commission_pending, sales_currency) }}</strong>
       <em>{{ metrics.pending_credit }} creditos</em>
     </article>
   </div>
@@ -188,15 +188,15 @@
             <small class="d-block text-secondary">{{ seller.activeClientsCount }} activos / {{ seller.newClientsMonth }} nuevos</small>
           </td>
           <td class="seller-goal-cell">
-            <strong>{{ money_usd(seller.salesMonthUsd) }}</strong>
-            <small class="d-block text-secondary">Meta {{ money_usd(seller.salesGoalUsd) }}</small>
+            <strong>{{ money_currency(seller.salesMonthUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Meta {{ money_currency(seller.salesGoalUsd, sales_currency) }}</small>
             <div class="progress seller-progress" role="progressbar" aria-label="Avance meta" aria-valuenow="{{ seller.goalProgressPercent }}" aria-valuemin="0" aria-valuemax="100">
               <div class="progress-bar" style="width: {{ [seller.goalProgressPercent, 100] | min }}%"></div>
             </div>
             <small class="text-secondary">{{ seller.goalProgressPercent }}%</small>
           </td>
           <td>
-            <strong>{{ money_usd(seller.commissionPendingUsd) }}</strong>
+            <strong>{{ money_currency(seller.commissionPendingUsd, sales_currency) }}</strong>
             <small class="d-block text-secondary">Pendiente / {{ seller.commissionRatePercent }}% base</small>
           </td>
           <td>
@@ -281,8 +281,8 @@
         <div class="seller-detail-grid">
           <article class="seller-detail-card">
             <span>Venta mes</span>
-            <strong>{{ money_usd(seller.salesMonthUsd) }}</strong>
-            <small>{{ seller.goalProgressPercent }}% de {{ money_usd(seller.salesGoalUsd) }}</small>
+            <strong>{{ money_currency(seller.salesMonthUsd, sales_currency) }}</strong>
+            <small>{{ seller.goalProgressPercent }}% de {{ money_currency(seller.salesGoalUsd, sales_currency) }}</small>
           </article>
           <article class="seller-detail-card">
             <span>Cartera</span>
@@ -291,13 +291,13 @@
           </article>
           <article class="seller-detail-card">
             <span>Saldo abierto</span>
-            <strong>{{ money_usd(seller.openBalanceUsd) }}</strong>
-            <small>Vencido {{ money_usd(seller.overdueBalanceUsd) }}</small>
+            <strong>{{ money_currency(seller.openBalanceUsd, sales_currency) }}</strong>
+            <small>Vencido {{ money_currency(seller.overdueBalanceUsd, sales_currency) }}</small>
           </article>
           <article class="seller-detail-card">
             <span>Comisiones</span>
-            <strong>{{ money_usd(seller.commissionPendingUsd) }}</strong>
-            <small>Aprobada {{ money_usd(seller.commissionApprovedUsd) }}</small>
+            <strong>{{ money_currency(seller.commissionPendingUsd, sales_currency) }}</strong>
+            <small>Aprobada {{ money_currency(seller.commissionApprovedUsd, sales_currency) }}</small>
           </article>
         </div>
 
@@ -332,7 +332,7 @@
                 <div>
                   <strong>{{ client.businessName }}</strong>
                   <span>{{ client.city or 'Sin ciudad' }} - {{ client.statusLabel }}</span>
-                  <em>{{ money_usd(client.creditAvailableUsd) }} disp.</em>
+                  <em>{{ money_currency(client.creditAvailableUsd, sales_currency) }} disp.</em>
                 </div>
                 {% else %}
                 <p class="mb-0 text-secondary">Sin clientes asignados.</p>
@@ -349,7 +349,7 @@
                 <div>
                   <strong>{{ order.orderId }}</strong>
                   <span>{{ order.customerName }} - {{ order.saleTypeLabel }}</span>
-                  <em>{{ money_usd(order.totalUsd) }}</em>
+                  <em>{{ money_currency(order.totalUsd, sales_currency) }}</em>
                 </div>
                 {% else %}
                 <p class="mb-0 text-secondary">Sin ordenes registradas.</p>

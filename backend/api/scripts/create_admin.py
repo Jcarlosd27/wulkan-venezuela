@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash as werkzeug_generate_password_hash
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -35,6 +36,11 @@ ROLES = {
 PASSWORD_MIN_LENGTH = 10
 
 
+def generate_password_hash(password: str) -> str:
+    method = "scrypt" if hasattr(hashlib, "scrypt") else "pbkdf2:sha256:1000000"
+    return werkzeug_generate_password_hash(password, method=method)
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -42,6 +48,11 @@ def utc_now() -> datetime:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "admin"
+
+
+def row_company_id(user: AdminUser) -> str:
+    payload = user.payload or {}
+    return str(payload.get("companyId") or DEFAULT_COMPANY_ID)
 
 
 def password_errors(password: str) -> list[str]:
@@ -73,11 +84,16 @@ def main() -> None:
     init_database()
     now = utc_now()
     email = args.email.strip().lower()
+    company_id = args.company_id.strip() or DEFAULT_COMPANY_ID
     with SessionLocal() as session:
-        user = session.query(AdminUser).filter(AdminUser.email == email).one_or_none()
+        email_matches = session.query(AdminUser).filter(AdminUser.email == email).all()
+        company_matches = [user for user in email_matches if row_company_id(user) == company_id]
+        if len(company_matches) > 1:
+            raise SystemExit(f"Existen multiples admins con {email} en {company_id}. Corrige duplicados antes de resetear.")
+        user = company_matches[0] if company_matches else None
         if user is None:
             user = AdminUser(
-                id=f"admin-{slugify(email)}",
+                id=f"admin-{slugify(company_id)}-{slugify(email)}",
                 email=email,
                 created_at=now,
                 payload={},
@@ -93,7 +109,7 @@ def main() -> None:
         user.updated_at = now
         user.payload = {
             "id": user.id,
-            "companyId": args.company_id,
+            "companyId": company_id,
             "name": user.name,
             "email": user.email,
             "role": user.role,

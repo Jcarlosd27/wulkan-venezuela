@@ -158,9 +158,9 @@
 <section class="dashboard-section">
   <div class="section-label">Ventas y ordenes</div>
   <div class="row g-3 dashboard-metrics">
-    {{ metric_card("bi-calendar2-day", "Ventas dia", money_usd(metrics.sales_today), "Hoy", "metric-sales") }}
-    {{ metric_card("bi-calendar3", "Ventas mes", money_usd(metrics.sales_month), "Mes", "metric-sales") }}
-    {{ metric_card("bi-currency-dollar", "Ventas acum.", money_usd(metrics.sales_total), "USD", "metric-sales") }}
+    {{ metric_card("bi-calendar2-day", "Ventas dia", money_currency(metrics.sales_today, sales_currency), "Hoy", "metric-sales") }}
+    {{ metric_card("bi-calendar3", "Ventas mes", money_currency(metrics.sales_month, sales_currency), "Mes", "metric-sales") }}
+    {{ metric_card("bi-currency-dollar", "Ventas acum.", money_currency(metrics.sales_total, sales_currency), sales_currency, "metric-sales") }}
     {{ metric_card("bi-receipt", "Ordenes nuevas", metrics.orders_new, "Hoy", "metric-orders") }}
     {{ metric_card("bi-hourglass-split", "Pendientes", metrics.orders_pending, "Revision", "metric-orders") }}
     {{ metric_card("bi-check2-circle", "Aprobadas", metrics.orders_approved, "Operacion", "metric-active") }}
@@ -178,11 +178,11 @@
     {{ metric_card("bi-person-plus", "Clientes nuevos", metrics.clients_new, "Hoy") }}
     {{ metric_card("bi-lock", "Bloqueados", metrics.clients_blocked, "Riesgo", "metric-danger") }}
     {{ metric_card("bi-exclamation-diamond", "Con deuda vencida", metrics.clients_overdue, "Cobranza", "metric-danger") }}
-    {{ metric_card("bi-credit-card-2-front", "Credito aprobado", money_usd(metrics.credit_approved), "Cupo") }}
-    {{ metric_card("bi-wallet2", "Credito usado", money_usd(metrics.credit_used), "Exposicion") }}
-    {{ metric_card("bi-wallet", "Credito disponible", money_usd(metrics.credit_available), "Disponible", "metric-active") }}
-    {{ metric_card("bi-cash-coin", "Por cobrar", money_usd(metrics.accounts_receivable), "Saldo") }}
-    {{ metric_card("bi-alarm", "Deuda vencida", money_usd(metrics.overdue_debt), "Mora", "metric-danger") }}
+    {{ metric_card("bi-credit-card-2-front", "Credito aprobado", money_currency(metrics.credit_approved, sales_currency), "Cupo") }}
+    {{ metric_card("bi-wallet2", "Credito usado", money_currency(metrics.credit_used, sales_currency), "Exposicion") }}
+    {{ metric_card("bi-wallet", "Credito disponible", money_currency(metrics.credit_available, sales_currency), "Disponible", "metric-active") }}
+    {{ metric_card("bi-cash-coin", "Por cobrar", money_currency(metrics.accounts_receivable, sales_currency), "Saldo") }}
+    {{ metric_card("bi-alarm", "Deuda vencida", money_currency(metrics.overdue_debt, sales_currency), "Mora", "metric-danger") }}
   </div>
 </section>
 
@@ -195,9 +195,9 @@
     {{ metric_card("bi-box2", "Sin stock", metrics.products_out, "Agotado", "metric-danger") }}
     {{ metric_card("bi-bar-chart", "Productos vendidos", metrics.top_products, "Ranking") }}
     {{ metric_card("bi-person-badge", "Vendedores activos", metrics.sellers_active, "Equipo", "metric-active") }}
-    {{ metric_card("bi-cash-stack", "Comision pend.", money_usd(metrics.commission_pending), "Liquidar") }}
-    {{ metric_card("bi-patch-check", "Comision aprob.", money_usd(metrics.commission_approved), "Validada", "metric-active") }}
-    {{ metric_card("bi-receipt-cutoff", "Comision pagada", money_usd(metrics.commission_paid), "Cerrada") }}
+    {{ metric_card("bi-cash-stack", "Comision pend.", money_currency(metrics.commission_pending, sales_currency), "Liquidar") }}
+    {{ metric_card("bi-patch-check", "Comision aprob.", money_currency(metrics.commission_approved, sales_currency), "Validada", "metric-active") }}
+    {{ metric_card("bi-receipt-cutoff", "Comision pagada", money_currency(metrics.commission_paid, sales_currency), "Cerrada") }}
   </div>
 </section>
 
@@ -256,7 +256,7 @@
           <th>Cliente</th>
           <th>Vendedor</th>
           <th>Tipo</th>
-          <th>Total USD</th>
+          <th>Total {{ sales_currency }}</th>
           <th>Saldo</th>
           <th>Credito</th>
           <th>Estado</th>
@@ -275,8 +275,8 @@
             <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
             <small class="d-block text-secondary">{{ order.paymentTermDays }} dias</small>
           </td>
-          <td>{{ money_usd(order["totalUsd"]) }}</td>
-          <td>{{ money_usd(order.balanceUsd) }}</td>
+          <td>{{ money_currency(order["totalUsd"], sales_currency) }}</td>
+          <td>{{ money_currency(order.balanceUsd, sales_currency) }}</td>
           <td><span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatusLabel }}</span></td>
           <td><span class="badge {{ order["status"] | badge_class }}">{{ order.statusLabel }}</span></td>
         </tr>

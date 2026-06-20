@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 import secrets
 import sys
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import or_
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash as werkzeug_generate_password_hash
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -68,7 +69,8 @@ def disabled_catalog_payload(payload: dict, status: str) -> dict:
 
 
 def random_password_hash() -> str:
-    return generate_password_hash(secrets.token_urlsafe(48))
+    method = "scrypt" if hasattr(hashlib, "scrypt") else "pbkdf2:sha256:1000000"
+    return werkzeug_generate_password_hash(secrets.token_urlsafe(48), method=method)
 
 
 def disable_status_rows(session, model, ids: set[str], status: str, label: str) -> list[str]:

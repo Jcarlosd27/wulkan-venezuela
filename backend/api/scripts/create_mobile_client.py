@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import re
 import secrets
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash as werkzeug_generate_password_hash
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -17,9 +18,15 @@ if str(ROOT_DIR) not in sys.path:
 
 from core.db import SessionLocal, init_database
 from models import AuditEvent, Client
+from store import DEFAULT_COMPANY_ID
 
 
 PASSWORD_MIN_LENGTH = 10
+
+
+def generate_password_hash(password: str) -> str:
+    method = "scrypt" if hasattr(hashlib, "scrypt") else "pbkdf2:sha256:1000000"
+    return werkzeug_generate_password_hash(password, method=method)
 
 
 def utc_now() -> datetime:
@@ -29,6 +36,11 @@ def utc_now() -> datetime:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "client"
+
+
+def row_company_id(client: Client) -> str:
+    payload = client.payload or {}
+    return str(payload.get("companyId") or DEFAULT_COMPANY_ID)
 
 
 def password_errors(password: str) -> list[str]:
@@ -44,8 +56,10 @@ def password_errors(password: str) -> list[str]:
 
 def build_payload(args: argparse.Namespace, client_id: str, password_hash: str, now: datetime) -> dict:
     business_name = args.business_name.strip()
+    company_id = args.company_id.strip() or DEFAULT_COMPANY_ID
     return {
         "id": client_id,
+        "companyId": company_id,
         "legalName": args.legal_name.strip() or business_name,
         "commercialName": args.commercial_name.strip() or business_name,
         "businessName": business_name,
@@ -108,6 +122,7 @@ def main() -> None:
     parser.add_argument("--country", default="CL")
     parser.add_argument("--state", default="")
     parser.add_argument("--city", default="")
+    parser.add_argument("--company-id", default=DEFAULT_COMPANY_ID)
     parser.add_argument("--password", default="")
     args = parser.parse_args()
 
@@ -119,14 +134,19 @@ def main() -> None:
     init_database()
     now = utc_now()
     email = args.email.strip().lower()
+    company_id = args.company_id.strip() or DEFAULT_COMPANY_ID
     password_hash = generate_password_hash(password)
 
     with SessionLocal() as session:
-        client = session.query(Client).filter(Client.email == email).one_or_none()
+        email_matches = session.query(Client).filter(Client.email == email).all()
+        company_matches = [client for client in email_matches if row_company_id(client) == company_id]
+        if len(company_matches) > 1:
+            raise SystemExit(f"Existen multiples clientes con {email} en {company_id}. Corrige duplicados antes de resetear.")
+        client = company_matches[0] if company_matches else None
         created = client is None
         if client is None:
             client = Client(
-                id=f"client-{slugify(email)}",
+                id=f"client-{slugify(company_id)}-{slugify(email)}",
                 email=email,
                 created_at=now,
                 payload={},

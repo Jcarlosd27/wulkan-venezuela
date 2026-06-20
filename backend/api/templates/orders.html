@@ -60,15 +60,15 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
       <span>Venta filtrada</span>
-      <strong>{{ money_usd(metrics.total) }}</strong>
-      <em>USD</em>
+      <strong>{{ money_currency(metrics.total, sales_currency) }}</strong>
+      <em>{{ sales_currency }}</em>
     </article>
   </div>
   <div class="col-6 col-lg-4 col-xl-2">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
       <span>Saldo pendiente</span>
-      <strong>{{ money_usd(metrics.balance) }}</strong>
+      <strong>{{ money_currency(metrics.balance, sales_currency) }}</strong>
       <em>Cobranza</em>
     </article>
   </div>
@@ -92,7 +92,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-percent"></i></div>
       <span>Comision pend.</span>
-      <strong>{{ money_usd(metrics.commission_pending) }}</strong>
+      <strong>{{ money_currency(metrics.commission_pending, sales_currency) }}</strong>
       <em>Ventas</em>
     </article>
   </div>
@@ -210,7 +210,7 @@
           </td>
           <td>
             <strong class="d-block">{{ order.sellerName }}</strong>
-            <small class="text-secondary">{{ money_usd(order.commissionUsd) }} - {{ order.commissionRatePercent }}%</small>
+            <small class="text-secondary">{{ money_currency(order.commissionUsd, sales_currency) }} - {{ order.commissionRatePercent }}%</small>
           </td>
           <td>
             <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
@@ -220,9 +220,9 @@
             {% endif %}
           </td>
           <td>
-            <strong>{{ money_usd(order.totalUsd) }}</strong>
-            <small class="d-block text-secondary">Abonado {{ money_usd(order.paidUsd) }}</small>
-            <small class="d-block text-secondary">Saldo {{ money_usd(order.balanceUsd) }}</small>
+            <strong>{{ money_currency(order.totalUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Abonado {{ money_currency(order.paidUsd, sales_currency) }}</small>
+            <small class="d-block text-secondary">Saldo {{ money_currency(order.balanceUsd, sales_currency) }}</small>
           </td>
           <td>
             <span class="badge {{ order.creditStatus | badge_class }}">{{ order.creditStatusLabel }}</span>
@@ -321,8 +321,8 @@
                     <td><span class="sku-badge">{{ item.sku }}</span></td>
                     <td>{{ item.title }}</td>
                     <td>{{ item.quantity }}</td>
-                    <td>{{ money_usd(item.unitPriceUsd) }}</td>
-                    <td>{{ money_usd(item.lineTotalUsd) }}</td>
+                    <td>{{ money_currency(item.unitPriceUsd, sales_currency) }}</td>
+                    <td>{{ money_currency(item.lineTotalUsd, sales_currency) }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -332,11 +332,11 @@
           <div class="col-12 col-xl-5">
             <h3 class="h6 fw-bold">Resumen comercial</h3>
             <dl class="detail-list">
-              <div><dt>Total bruto</dt><dd>{{ money_usd(order.grossUsd) }}</dd></div>
-              <div><dt>Descuento</dt><dd>{{ money_usd(order.discountUsd) }}</dd></div>
-              <div><dt>Total neto</dt><dd>{{ money_usd(order.totalUsd) }}</dd></div>
-              <div><dt>Abonado</dt><dd>{{ money_usd(order.paidUsd) }}</dd></div>
-              <div><dt>Saldo</dt><dd>{{ money_usd(order.balanceUsd) }}</dd></div>
+              <div><dt>Total bruto</dt><dd>{{ money_currency(order.grossUsd, sales_currency) }}</dd></div>
+              <div><dt>Descuento</dt><dd>{{ money_currency(order.discountUsd, sales_currency) }}</dd></div>
+              <div><dt>Total neto</dt><dd>{{ money_currency(order.totalUsd, sales_currency) }}</dd></div>
+              <div><dt>Abonado</dt><dd>{{ money_currency(order.paidUsd, sales_currency) }}</dd></div>
+              <div><dt>Saldo</dt><dd>{{ money_currency(order.balanceUsd, sales_currency) }}</dd></div>
               <div><dt>Direccion despacho</dt><dd>{{ order.shippingAddress or "Sin direccion" }}</dd></div>
             </dl>
           </div>
@@ -345,7 +345,7 @@
             <div class="order-timeline">
               {% for payment in order.payments %}
               <div>
-                <strong>{{ money_usd(payment.amountUsd) }} - {{ payment.method }}</strong>
+                <strong>{{ money_currency(payment.amountUsd, sales_currency) }} - {{ payment.method }}</strong>
                 <span>{{ payment.reference or "Sin referencia" }} - {{ payment.createdAt }}</span>
               </div>
               {% else %}
@@ -413,7 +413,7 @@
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Registrar abono externo</h2>
-          <p class="mb-0 text-secondary">Saldo actual {{ money_usd(order.balanceUsd) }}</p>
+          <p class="mb-0 text-secondary">Saldo actual {{ money_currency(order.balanceUsd, sales_currency) }}</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>

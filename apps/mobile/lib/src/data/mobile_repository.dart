@@ -1073,7 +1073,7 @@ MobileProduct mapApiProduct(String id, Map<String, dynamic> data) {
     badge: _asString(
       data["badge"],
       fallback: requiresQuote
-          ? "Cotizar"
+          ? "Revision"
           : (requiresTechnicalValidation ? "Validar" : "Comprar"),
     ),
     requiresQuote: requiresQuote,

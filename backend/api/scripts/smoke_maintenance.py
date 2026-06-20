@@ -11,7 +11,6 @@ if str(ROOT_DIR) not in sys.path:
 
 import app as FVENTAS_app
 from store import utc_now
-from werkzeug.security import generate_password_hash
 
 
 def base_store() -> dict:
@@ -46,11 +45,11 @@ def base_store() -> dict:
         "admin_users": [
             {
                 "id": "admin-maintenance",
-                "companyId": company_id,
+                "companyId": "",
                 "name": "Admin Mantenimiento",
                 "email": "admin.maintenance@FVENTAS.test",
-                "passwordHash": generate_password_hash("AdminMaintenance2026"),
-                "role": "super_admin",
+                "passwordHash": FVENTAS_app.generate_password_hash("AdminMaintenance2026"),
+                "role": "platform_admin",
                 "status": "active",
                 "sessionVersion": 0,
                 "mustChangePassword": False,
@@ -109,7 +108,8 @@ def main() -> int:
             session["admin_authenticated"] = True
             session["admin_user_id"] = "admin-maintenance"
             session["admin_name"] = "Admin Mantenimiento"
-            session["admin_role"] = "super_admin"
+            session["admin_role"] = "platform_admin"
+            session["company_id"] = ""
             session["_csrf_token"] = "csrf-maintenance"
 
         page = assert_status(client.get("/maintenance"), 200, "modulo mantenimiento")

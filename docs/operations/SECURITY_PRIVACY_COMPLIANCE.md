@@ -98,6 +98,20 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
 10. Documentar plazos de retencion por pais para facturacion, impuestos, auditoria, fraude y soporte.
 11. Mantener rate limits activos para login, recuperacion, preferencias anonimas de landing y solicitudes publicas de eliminacion.
 12. Confirmar que documentos internos no queden publicados por URL directa de storage; deben abrirse con enlace firmado y auditoria.
+13. Confirmar que las empresas suscriptoras solo vean modulos de lanzamiento movil y reciban 403 al intentar abrir modulos archivados por URL.
+14. Confirmar que los roles `sales` y `client` no puedan iniciar sesion en el panel web y que `platform_admin` no pueda entrar como vendedor movil.
+
+## Alcance de permisos para lanzamiento movil
+
+Modulos activos para empresas suscriptoras:
+
+- Dashboard, vendedores, clientes, credito, ordenes, comisiones, productos, categorias, biblioteca tecnica, stock, anuncios app, servicios tecnicos, notificaciones, reglas de negocio, configuracion, usuarios admin, documentos, plantillas y auditoria.
+
+Modulos archivados para empresas suscriptoras:
+
+- CRM, cotizaciones web, cobranza dedicada, despacho dedicado, reportes avanzados, mantenimiento y permisos granulares.
+
+`platform_admin` conserva herramientas internas de plataforma y mantenimiento. Ningun rol de empresa debe acceder a modulos de plataforma ni a modulos archivados.
 
 ## Riesgos residuales que requieren decision operativa/legal
 

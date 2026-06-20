@@ -61,7 +61,7 @@
       </select>
     </div>
     <div class="col-6 col-lg-1">
-      <label class="form-label fw-semibold">Tasa</label>
+      <label class="form-label fw-semibold">Tasa {{ sales_currency }}/{{ local_currency }}</label>
       <input class="form-control" name="exchangeRateUsdClp" value="{{ (quote.exchangeRateUsdClp or quote.exchangeRateUsdVes) if quote else 950 }}">
     </div>
   </div>
@@ -71,7 +71,7 @@
   <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
     <div>
       <h3 class="h5 fw-bold mb-1">Productos cotizados</h3>
-      <p class="text-secondary mb-0">Precio unitario en USD, descuento por linea y cantidades solicitadas.</p>
+      <p class="text-secondary mb-0">Precio unitario en {{ sales_currency }}, descuento por linea y cantidades solicitadas.</p>
     </div>
     <span class="badge text-bg-light">{{ products | length }} activos</span>
   </div>
@@ -86,7 +86,7 @@
           <option value="">Sin producto</option>
           {% for product in products %}
           <option value="{{ product.id }}" {% if current and current.productId == product.id %}selected{% endif %}>
-            {{ product.sku }} - {{ product.title }} - {{ money_usd(product.b2bPriceUsd or product.publicPriceUsd) }} - {{ product.availableStock }} disp.
+            {{ product.sku }} - {{ product.title }} - {{ money_currency(product.b2bPriceUsd or product.publicPriceUsd, sales_currency) }} - {{ product.availableStock }} disp.
           </option>
           {% endfor %}
         </select>
@@ -96,7 +96,7 @@
         <input class="form-control" name="quantity{{ index }}" inputmode="numeric" value="{{ current.quantity if current else '' }}" placeholder="0">
       </div>
       <div class="col-4 col-lg-2">
-        <label class="form-label">Precio USD</label>
+        <label class="form-label">Precio {{ sales_currency }}</label>
         <input class="form-control" name="unitPriceUsd{{ index }}" inputmode="decimal" value="{{ current.unitPriceUsd if current else '' }}" placeholder="B2B">
       </div>
       <div class="col-4 col-lg-2">
@@ -128,7 +128,7 @@
           <strong>Version {{ version.version }}</strong>
           <small class="d-block text-secondary">{{ version.createdAt }} - {{ version.createdBy }}</small>
           <span class="badge {{ version.status | badge_class }}">{{ quote_status_label(version.status) }}</span>
-          <span class="ms-2">{{ money_usd(version.totalUsd) }}</span>
+          <span class="ms-2">{{ money_currency(version.totalUsd, sales_currency) }}</span>
         </div>
       </div>
       {% else %}

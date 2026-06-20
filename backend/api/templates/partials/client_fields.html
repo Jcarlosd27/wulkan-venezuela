@@ -284,11 +284,11 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditAvailable">Disponible calculado</label>
-        <input class="form-control" id="{{ field_id_prefix }}-creditAvailable" readonly value="{{ money_usd(client.creditAvailableUsd) if client is defined else money_usd(0) }}" aria-label="Disponible calculado">
+        <input class="form-control" id="{{ field_id_prefix }}-creditAvailable" readonly value="{{ money_currency(client.creditAvailableUsd, sales_currency) if client is defined else money_currency(0, sales_currency) }}" aria-label="Disponible calculado">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-openBalance">Saldo abierto</label>
-        <input class="form-control" id="{{ field_id_prefix }}-openBalance" readonly value="{{ money_usd(client.openBalanceUsd) if client is defined else money_usd(0) }}" aria-label="Saldo abierto">
+        <input class="form-control" id="{{ field_id_prefix }}-openBalance" readonly value="{{ money_currency(client.openBalanceUsd, sales_currency) if client is defined else money_currency(0, sales_currency) }}" aria-label="Saldo abierto">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditApprovedBy">Aprobado por</label>

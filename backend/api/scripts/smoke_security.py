@@ -57,6 +57,173 @@ def assert_temporary_passwords_follow_policy() -> None:
     assert not FVENTAS_app.password_errors(FVENTAS_app.temporary_mobile_client_password())
 
 
+def assert_role_boundaries_are_enforced() -> None:
+    platform_modules = set(FVENTAS_app.PLATFORM_MODULES)
+    archived_modules = set(FVENTAS_app.ARCHIVED_TENANT_MODULES)
+    tenant_roles = set(FVENTAS_app.WEB_ADMIN_ROLES) - {"platform_admin"}
+    platform_endpoints = {
+        "platform_companies": ("GET", "platform_companies", "view"),
+        "company_subscription_update": ("POST", "platform_companies", "edit"),
+        "platform_privacy": ("GET", "platform_privacy", "view"),
+        "platform_privacy_export": ("GET", "platform_privacy", "export"),
+        "platform_privacy_deletion_action": ("POST", "platform_privacy", "approve"),
+    }
+
+    assert "sales" not in FVENTAS_app.WEB_ADMIN_ROLES, "vendedor movil no debe ser rol de panel web"
+    assert "client" not in FVENTAS_app.WEB_ADMIN_ROLES, "cliente B2B no debe ser rol de panel web"
+    assert "collections" not in FVENTAS_app.WEB_ADMIN_ROLES, "cobranza queda archivado, no debe ser rol asignable"
+    assert "dispatch" not in FVENTAS_app.WEB_ADMIN_ROLES, "despacho queda archivado, no debe ser rol asignable"
+    assert "platform_admin" not in FVENTAS_app.MOBILE_SALES_ROLES, "dueno plataforma no debe entrar como vendedor movil"
+
+    assert archived_modules, "debe existir un conjunto de modulos archivados para el lanzamiento movil"
+    assert "crm" in archived_modules and "reports" in archived_modules, "CRM/reportes no son parte del panel MVP empresa"
+    for module in FVENTAS_app.MOBILE_LAUNCH_TENANT_MODULES:
+        assert module in FVENTAS_app.TENANT_MODULE_KEYS, f"{module} debe ser modulo de empresa"
+        assert module not in archived_modules, f"{module} no debe quedar archivado"
+
+    for module in archived_modules:
+        assert FVENTAS_app.role_can("platform_admin", module, "view"), (
+            f"platform_admin conserva acceso interno al modulo archivado {module}"
+        )
+        for role in tenant_roles:
+            assert not FVENTAS_app.role_permission_actions(role, module), (
+                f"{role} no debe tener permisos sobre modulo archivado {module}"
+            )
+
+    for module in platform_modules:
+        assert FVENTAS_app.role_can("platform_admin", module, "view"), "platform_admin debe administrar plataforma"
+        assert module not in FVENTAS_app.TENANT_MODULE_KEYS, f"{module} no debe pertenecer a modulos de empresa"
+        for role in tenant_roles:
+            assert not FVENTAS_app.role_permission_actions(role, module), (
+                f"{role} no debe tener permisos sobre modulo de plataforma {module}"
+            )
+
+    for endpoint, (method, expected_module, expected_action) in platform_endpoints.items():
+        permission = FVENTAS_app.endpoint_permission(endpoint, method)
+        assert permission == (expected_module, expected_action), f"{endpoint} debe exigir permiso de plataforma"
+        assert FVENTAS_app.role_can("platform_admin", expected_module, expected_action)
+        for role in tenant_roles:
+            assert not FVENTAS_app.role_can(role, expected_module, expected_action), (
+                f"{role} no debe pasar permiso {expected_module}.{expected_action}"
+            )
+
+
+def assert_admin_routes_have_permission_coverage() -> None:
+    public_endpoints = {
+        "account_deletion_page",
+        "desktop_download",
+        "healthz",
+        "landing",
+        "landing_access_preference",
+        "login",
+        "privacy_policy",
+        "readyz",
+        "signup",
+        "signup_success",
+        "static",
+        "terms_of_service",
+    }
+    expected_session_only_endpoints = {
+        "account_password",
+        "account_profile_alias",
+        "logout",
+    }
+    unprotected: list[tuple[str, str, str]] = []
+    post_as_view: list[tuple[str, str]] = []
+
+    for rule in FVENTAS_app.app.url_map.iter_rules():
+        endpoint = rule.endpoint
+        methods = set(rule.methods or set()) - {"HEAD", "OPTIONS"}
+        is_mobile_api = rule.rule.startswith(("/api/mobile/", "/api/v1/mobile/"))
+        is_static = rule.rule.startswith("/static/")
+        if endpoint in public_endpoints or endpoint in expected_session_only_endpoints or is_mobile_api or is_static:
+            continue
+
+        view = FVENTAS_app.app.view_functions.get(endpoint)
+        has_permission_map = endpoint in FVENTAS_app.ENDPOINT_MODULE_MAP
+        has_role_guard = bool(getattr(view, "_required_roles", ()))
+        if not has_permission_map and not has_role_guard:
+            unprotected.append((rule.rule, endpoint, ",".join(sorted(methods))))
+
+        if "POST" in methods and has_permission_map:
+            permission = FVENTAS_app.endpoint_permission(endpoint, "POST")
+            if permission and permission[1] == "view":
+                post_as_view.append((rule.rule, endpoint))
+
+    assert not unprotected, f"Rutas privadas sin modulo ni rol explicito: {unprotected}"
+    assert not post_as_view, f"Rutas POST administrativas no deben mapearse como solo view: {post_as_view}"
+
+
+def assert_platform_routes_reject_tenant_roles(app, state: dict) -> None:
+    now = utc_now()
+    state["admin_users"].append(
+        {
+            "id": "platform-owner-sec",
+            "companyId": "",
+            "name": "Owner Plataforma",
+            "email": "owner.platform@FVENTAS.test",
+            "passwordHash": generate_password_hash("PlatformOwner2026"),
+            "role": "platform_admin",
+            "status": "active",
+            "sessionVersion": 0,
+            "mustChangePassword": False,
+            "activeSessions": [],
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )
+
+    with app.test_client() as role_client:
+        with role_client.session_transaction() as session:
+            session["admin_authenticated"] = True
+            session["admin_user_id"] = "admin-sec"
+            session["admin_name"] = "Admin Seguridad"
+            session["admin_role"] = "super_admin"
+            session["company_id"] = DEFAULT_COMPANY_ID
+            session["admin_session_version"] = 0
+        assert_status(role_client.get("/platform/companies"), 403, "super_admin empresa no abre empresas SaaS")
+        assert_status(role_client.get("/platform/privacy"), 403, "super_admin empresa no abre privacidad plataforma")
+        for path in [
+            "/crm",
+            "/quotes",
+            "/quotes/new",
+            "/collections",
+            "/dispatch",
+            "/reports",
+            "/reports/print",
+            "/maintenance",
+            "/permissions",
+        ]:
+            assert_status(role_client.get(path), 403, f"super_admin empresa no abre modulo archivado {path}")
+
+        with role_client.session_transaction() as session:
+            session["admin_authenticated"] = True
+            session["admin_user_id"] = "platform-owner-sec"
+            session["admin_name"] = "Owner Plataforma"
+            session["admin_role"] = "platform_admin"
+            session["company_id"] = ""
+            session["admin_session_version"] = 0
+        assert_status(role_client.get("/platform/companies"), 200, "platform_admin abre empresas SaaS")
+        assert_status(role_client.get("/platform/privacy"), 200, "platform_admin abre privacidad plataforma")
+        assert_status(role_client.get("/maintenance"), 200, "platform_admin abre mantenimiento interno")
+
+
+def assert_legacy_mobile_api_can_be_disabled(app) -> None:
+    original_legacy_api = app.config.get("ALLOW_LEGACY_MOBILE_API", True)
+    try:
+        app.config["ALLOW_LEGACY_MOBILE_API"] = False
+        with app.test_client() as public_client:
+            response = assert_status(
+                public_client.get("/api/mobile/products"),
+                410,
+                "api movil legacy deshabilitada",
+            )
+            payload = response.get_json()
+            assert payload["code"] == "legacy_mobile_api_disabled"
+    finally:
+        app.config["ALLOW_LEGACY_MOBILE_API"] = original_legacy_api
+
+
 def base_store() -> dict:
     now = utc_now()
     return {
@@ -254,6 +421,8 @@ def main() -> int:
     assert_blank_company_ids_are_normalized()
     assert_download_filenames_are_safe()
     assert_temporary_passwords_follow_policy()
+    assert_role_boundaries_are_enforced()
+    assert_admin_routes_have_permission_coverage()
 
     state = base_store()
     FVENTAS_app.load_store = lambda: state
@@ -269,6 +438,8 @@ def main() -> int:
         REQUIRE_MOBILE_DEVICE_HEADER=True,
         WTF_CSRF_ENABLED=False,
     )
+    assert_platform_routes_reject_tenant_roles(app, state)
+    assert_legacy_mobile_api_can_be_disabled(app)
 
     original_trust_proxy = app.config.get("TRUST_PROXY_HEADERS", False)
     try:
@@ -1981,6 +2152,7 @@ def main() -> int:
     print("OK IP confiable solo desde proxy configurado")
     print("OK exportaciones CSV/XLSX neutralizan formulas")
     print("OK documentos internos no quedan publicados por uploads directos")
+    print("OK API movil legacy puede deshabilitarse para produccion")
     print("OK logout movil revoca tokens vigentes")
     print("OK eliminacion publica de cuenta no bloquea acceso sin verificacion")
     print("OK eliminacion publica de cuenta limita solicitudes repetidas")

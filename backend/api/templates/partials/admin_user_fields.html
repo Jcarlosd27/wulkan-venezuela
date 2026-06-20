@@ -21,7 +21,14 @@
   </div>
   <div class="col-12 col-md-6">
     <label class="form-label fw-semibold">Rol</label>
-    {% set selected_role = user.role if user is defined else 'operator' %}
+    {% set valid_admin_roles = ['platform_admin', 'super_admin', 'general_manager', 'commercial_manager', 'operator', 'inventory', 'auditor', 'readonly'] %}
+    {% set current_role = user.role if user is defined else 'operator' %}
+    {% set selected_role = current_role if current_role in valid_admin_roles else 'readonly' %}
+    {% if user is defined and current_role not in valid_admin_roles %}
+    <div class="alert alert-warning py-2 small mb-2">
+      El rol anterior <strong>{{ current_role }}</strong> fue archivado para el lanzamiento movil. Reasigna un rol vigente antes de guardar.
+    </div>
+    {% endif %}
     <select class="form-select" name="role">
       {% if session.get('admin_role') == 'platform_admin' or selected_role == 'platform_admin' %}
       <option value="platform_admin" {% if selected_role == 'platform_admin' %}selected{% endif %}>Administrador plataforma</option>
@@ -31,8 +38,6 @@
       <option value="commercial_manager" {% if selected_role == 'commercial_manager' %}selected{% endif %}>Gerente comercial</option>
       <option value="operator" {% if selected_role == 'operator' %}selected{% endif %}>Operador comercial</option>
       <option value="inventory" {% if selected_role == 'inventory' %}selected{% endif %}>Inventario</option>
-      <option value="collections" {% if selected_role == 'collections' %}selected{% endif %}>Cobranza</option>
-      <option value="dispatch" {% if selected_role == 'dispatch' %}selected{% endif %}>Despacho</option>
       <option value="auditor" {% if selected_role == 'auditor' %}selected{% endif %}>Auditor</option>
       <option value="readonly" {% if selected_role == 'readonly' %}selected{% endif %}>Solo lectura</option>
     </select>

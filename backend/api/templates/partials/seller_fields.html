@@ -98,7 +98,7 @@
         <input class="form-control" name="commissionRatePercent" inputmode="decimal" value="{{ seller.commissionRatePercent if seller is defined else 0 }}" placeholder="0">
       </div>
       <div class="col-12 col-md-6">
-        <label class="form-label fw-semibold">Meta mensual USD</label>
+        <label class="form-label fw-semibold">Meta mensual {{ sales_currency }}</label>
         <input class="form-control" name="salesGoalUsd" inputmode="decimal" value="{{ seller.salesGoalUsd if seller is defined else 0 }}" placeholder="0">
       </div>
       <div class="col-12">

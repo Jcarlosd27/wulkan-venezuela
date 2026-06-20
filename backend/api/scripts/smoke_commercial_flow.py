@@ -489,16 +489,11 @@ def assert_web_admin_is_tenant_scoped(client) -> None:
         ("/credit", "credito tenant scope"),
         ("/products", "productos tenant scope"),
         ("/stock", "stock tenant scope"),
-        ("/reports?type=inventory", "reportes inventario tenant scope"),
-        ("/reports?type=commercial", "reportes comerciales tenant scope"),
-        ("/reports?type=sellers", "reportes vendedores tenant scope"),
         ("/service-technicians", "servicios tenant scope"),
         ("/announcements", "anuncios tenant scope"),
         ("/business-rules", "reglas tenant scope"),
         ("/audit", "auditoria tenant scope"),
         ("/search?q=OTRA-FLOW-001", "busqueda tenant scope"),
-        ("/collections", "cobranza tenant scope"),
-        ("/dispatch", "despacho tenant scope"),
         ("/commissions", "comisiones tenant scope"),
     ]
     for path, label in pages:
@@ -506,6 +501,9 @@ def assert_web_admin_is_tenant_scoped(client) -> None:
         leaked = [value for value in forbidden if value in html]
         if leaked:
             raise AssertionError(f"{label}: datos ajenos visibles en {path}: {', '.join(leaked)}")
+
+    for path in ["/crm", "/quotes", "/collections", "/dispatch", "/reports", "/maintenance", "/permissions"]:
+        assert_html_status(client.get(path), 403, f"modulo archivado bloqueado {path}")
 
 
 def main() -> int:
@@ -965,149 +963,35 @@ def main() -> int:
         400,
         "pedido vendedor con producto oculto bloqueado",
     )
-    assert_status(
-        client.post(
-            "/api/v1/mobile/seller/quotes",
-            headers={"Authorization": f"Bearer {seller_token}"},
-            json={
-                "customerId": client_id,
-                "saleType": "cash",
-                "paymentTermDays": 0,
-                "items": [
-                    {
-                        "productId": "prod-flow-motosierra",
-                        "quantity": 1,
-                        "discountPercent": 6,
-                    }
-                ],
-            },
-        ),
-        400,
-        "cotizacion con descuento no autorizado bloqueada",
-    )
-    assert_status(
-        client.post(
-            "/api/v1/mobile/seller/quotes",
-            headers={"Authorization": f"Bearer {seller_token}"},
-            json={
-                "customerId": client_id,
-                "saleType": "cash",
-                "paymentTermDays": 0,
-                "items": [
-                    {
-                        "productId": "prod-flow-motosierra",
-                        "quantity": 1,
-                        "discountPercent": 5,
-                    }
-                ],
-            },
-        ),
-        400,
-        "cotizacion con descuento solicitado pero no aprobado bloqueada",
-    )
-    assert_status(
-        client.post(
-            "/api/v1/mobile/seller/quotes",
-            headers={"Authorization": f"Bearer {seller_token}"},
-            json={
-                "customerId": client_id,
-                "saleType": "cash",
-                "paymentTermDays": 0,
-                "items": [
-                    {
-                        "productId": "prod-flow-oculto",
-                        "quantity": 1,
-                    }
-                ],
-            },
-        ),
-        400,
-        "cotizacion con producto oculto bloqueada",
-    )
-    assert_status(
-        client.post(
-            "/api/v1/mobile/seller/quotes",
-            headers={"Authorization": f"Bearer {seller_token}"},
-            json={
-                "customerId": client_id,
-                "saleType": "term_credit",
-                "paymentTermDays": 40,
-                "items": [
-                    {
-                        "productId": "prod-flow-motosierra",
-                        "quantity": 1,
-                    }
-                ],
-            },
-        ),
-        400,
-        "cotizacion con plazo no autorizado bloqueada",
-    )
-    assert_status(
-        client.post(
-            "/api/v1/mobile/seller/quotes",
-            headers={"Authorization": f"Bearer {seller_token}"},
-            json={
-                "customerId": client_id,
-                "saleType": "term_credit",
-                "paymentTermDays": 15,
-                "items": [
-                    {
-                        "productId": "prod-flow-motosierra",
-                        "quantity": 1,
-                    }
-                ],
-            },
-        ),
-        400,
-        "cotizacion a plazo solicitada por vendedor queda pendiente de aprobacion",
-    )
-
-    mobile_quote = assert_status(
-        client.post(
-            "/api/v1/mobile/seller/quotes",
-            headers={"Authorization": f"Bearer {seller_token}"},
-            json={
-                "customerId": client_id,
-                "saleType": "cash",
-                "paymentTermDays": 0,
-                "items": [
-                    {
-                        "productId": "prod-flow-motosierra",
-                        "quantity": 1,
-                        "unitPriceUsd": 1,
-                    }
-                ],
-                "preview": {"exchangeRateUsdClp": 1, "exchangeRateUsdVes": 1},
-                "comment": "Cotizacion creada desde smoke v1.",
-            },
-        ),
-        201,
-        "crear cotizacion vendedor v1",
-    )
-    assert mobile_quote["quote"]["totalUsd"] == 162.0
-    persisted_quote = next(item for item in state["quotes"] if item["id"] == mobile_quote["quote"]["id"])
-    assert persisted_quote["items"][0]["unitPriceUsd"] == 162.0
-    assert persisted_quote["exchangeRateUsdClp"] == 950
-    assert persisted_quote["totalClp"] == 153900.0
-    seller_quotes = assert_status(
+    seller_quotes_archived = assert_status(
         client.get(
             "/api/v1/mobile/seller/quotes",
             headers={"Authorization": f"Bearer {seller_token}"},
         ),
-        200,
-        "listar cotizaciones vendedor v1",
+        410,
+        "cotizaciones vendedor v1 archivadas",
     )
-    assert seller_quotes["items"]
-    seller_quotes_paged = assert_status(
+    assert seller_quotes_archived["code"] == "mobile_feature_archived"
+    assert seller_quotes_archived["feature"] == "seller_quotes"
+    seller_quotes_create_archived = assert_status(
+        client.post(
+            "/api/v1/mobile/seller/quotes",
+            headers={"Authorization": f"Bearer {seller_token}"},
+            json={"customerId": client_id, "items": [{"productId": "prod-flow-motosierra", "quantity": 1}]},
+        ),
+        410,
+        "crear cotizacion vendedor v1 archivado",
+    )
+    assert seller_quotes_create_archived["code"] == "mobile_feature_archived"
+    seller_quotes_legacy_archived = assert_status(
         client.get(
             "/api/mobile/seller/quotes?limit=1&status=draft",
             headers={"Authorization": f"Bearer {seller_token}"},
         ),
-        200,
-        "cotizaciones vendedor legacy paginadas",
+        410,
+        "cotizaciones vendedor legacy archivadas",
     )
-    assert seller_quotes_paged["meta"]["pagination"]["limit"] == 1
+    assert seller_quotes_legacy_archived["feature"] == "seller_quotes"
     seller_clients_all = assert_status(
         client.get(
             "/api/mobile/seller/clients?limit=50",
@@ -1117,7 +1001,7 @@ def main() -> int:
         "clientes vendedor sin fuga tenant",
     )
     assert all(item["id"] != "client-ajeno-flow" for item in seller_clients_all["items"])
-    mobile_activity = assert_status(
+    mobile_activity_archived = assert_status(
         client.post(
             "/api/v1/mobile/seller/activities",
             headers={"Authorization": f"Bearer {seller_token}"},
@@ -1128,28 +1012,29 @@ def main() -> int:
                 "nextActionAt": "2026-06-15",
             },
         ),
-        201,
-        "crear actividad vendedor v1",
+        410,
+        "crear actividad CRM vendedor archivada",
     )
-    assert mobile_activity["activity"]["type"] == "call"
-    seller_activities = assert_status(
+    assert mobile_activity_archived["code"] == "mobile_feature_archived"
+    assert mobile_activity_archived["feature"] == "seller_activities"
+    seller_activities_archived = assert_status(
         client.get(
             "/api/v1/mobile/seller/activities",
             headers={"Authorization": f"Bearer {seller_token}"},
         ),
-        200,
-        "listar actividades vendedor v1",
+        410,
+        "listar actividades CRM vendedor archivadas",
     )
-    assert seller_activities["items"]
-    seller_activities_paged = assert_status(
+    assert seller_activities_archived["feature"] == "seller_activities"
+    seller_activities_legacy_archived = assert_status(
         client.get(
             "/api/mobile/seller/activities?limit=1&q=Flow",
             headers={"Authorization": f"Bearer {seller_token}"},
         ),
-        200,
-        "actividades vendedor legacy paginadas",
+        410,
+        "actividades CRM vendedor legacy archivadas",
     )
-    assert seller_activities_paged["meta"]["pagination"]["limit"] == 1
+    assert seller_activities_legacy_archived["code"] == "mobile_feature_archived"
     seller_logout_v1 = assert_status(
         client.post(
             "/api/v1/mobile/auth/logout",
@@ -1418,15 +1303,16 @@ def main() -> int:
     }
     state.setdefault("quotes", []).append(forged_quote)
     order_count_before = len(state.get("orders", []))
-    assert_status(
-        client.post(
-            "/quotes/quote-cross-company-flow/convert",
-            data={"_csrf_token": "csrf-flow"},
-            follow_redirects=False,
-        ),
-        400,
-        "cotizacion con cliente de otra empresa no convierte en orden",
+    quote_convert_response = client.post(
+        "/quotes/quote-cross-company-flow/convert",
+        data={"_csrf_token": "csrf-flow"},
+        follow_redirects=False,
     )
+    if quote_convert_response.status_code not in {400, 403}:
+        raise AssertionError(
+            "cotizacion con cliente de otra empresa no convierte en orden: "
+            f"esperado 400/403, llego {quote_convert_response.status_code}"
+        )
     assert len(state.get("orders", [])) == order_count_before
     assert not forged_quote.get("convertedOrderId")
 

@@ -58,17 +58,17 @@
           <td>{{ item.sku }}</td>
           <td>{{ item.title }}</td>
           <td class="right">{{ item.quantity }}</td>
-          <td class="right">{{ money_usd(item.unitPriceUsd) }}</td>
+          <td class="right">{{ money_currency(item.unitPriceUsd, sales_currency) }}</td>
           <td class="right">{{ item.discountPercent }}%</td>
-          <td class="right">{{ money_usd(item.lineTotalUsd) }}</td>
+          <td class="right">{{ money_currency(item.lineTotalUsd, sales_currency) }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
 
     <table class="totals">
-      <tr><td>Subtotal</td><td class="right">{{ money_usd(quote.grossUsd) }}</td></tr>
-      <tr><td>Descuento</td><td class="right">{{ money_usd(quote.discountUsd) }}</td></tr>
+      <tr><td>Subtotal</td><td class="right">{{ money_currency(quote.grossUsd, sales_currency) }}</td></tr>
+      <tr><td>Descuento</td><td class="right">{{ money_currency(quote.discountUsd, sales_currency) }}</td></tr>
       <tr class="total-row"><td>Total {{ sales_currency }}</td><td class="right">{{ money_currency(quote.totalUsd, sales_currency) }}</td></tr>
       <tr><td>Total {{ local_currency }} ref.</td><td class="right">{{ money_currency(quote.totalClp or quote.totalVes or 0, local_currency) }}</td></tr>
     </table>

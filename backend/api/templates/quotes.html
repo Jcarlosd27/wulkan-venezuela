@@ -80,7 +80,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
       <span>Total filtrado</span>
-      <strong>{{ money_usd(metrics.total) }}</strong>
+      <strong>{{ money_currency(metrics.total, sales_currency) }}</strong>
       <em>Preventas</em>
     </article>
   </div>
@@ -176,7 +176,7 @@
             <small class="d-block text-secondary">Vence {{ quote.validUntil or 'sin fecha' }}</small>
           </td>
           <td>
-            <strong>{{ money_usd(quote.totalUsd) }}</strong>
+            <strong>{{ money_currency(quote.totalUsd, sales_currency) }}</strong>
             <small class="d-block text-secondary">{{ money_currency(quote.totalClp or quote.totalVes or 0, local_currency) }}</small>
           </td>
           <td>
@@ -247,9 +247,9 @@
                     <td>{{ item.sku }}</td>
                     <td>{{ item.title }}</td>
                     <td>{{ item.quantity }}</td>
-                    <td>{{ money_usd(item.unitPriceUsd) }}</td>
+                    <td>{{ money_currency(item.unitPriceUsd, sales_currency) }}</td>
                     <td>{{ item.discountPercent }}%</td>
-                    <td>{{ money_usd(item.lineTotalUsd) }}</td>
+                    <td>{{ money_currency(item.lineTotalUsd, sales_currency) }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -264,7 +264,7 @@
           </div>
           <div class="col-12 col-lg-4">
             <div class="list-group mb-3">
-              <div class="list-group-item d-flex justify-content-between"><span>Total</span><strong>{{ money_usd(quote.totalUsd) }}</strong></div>
+              <div class="list-group-item d-flex justify-content-between"><span>Total</span><strong>{{ money_currency(quote.totalUsd, sales_currency) }}</strong></div>
               <div class="list-group-item d-flex justify-content-between"><span>Versiones</span><strong>{{ quote.versions | length }}</strong></div>
               <div class="list-group-item d-flex justify-content-between"><span>Vigencia</span><strong>{{ quote.validUntil or 'Sin fecha' }}</strong></div>
             </div>

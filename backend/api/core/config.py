@@ -108,6 +108,9 @@ class DevelopmentConfig(Config):
 class StagingConfig(Config):
     ENV = "staging"
     REQUIRE_MOBILE_TOKEN = True
+    REJECT_LEGACY_MOBILE_TOKENS = env_bool_any("FVENTAS_REJECT_LEGACY_MOBILE_TOKENS", default=True)
+    REQUIRE_MOBILE_DEVICE_HEADER = env_bool_any("FVENTAS_REQUIRE_MOBILE_DEVICE_HEADER", default=True)
+    ALLOW_LEGACY_MOBILE_API = env_bool_any("FVENTAS_ALLOW_LEGACY_MOBILE_API", default=False)
     CONTENT_SECURITY_POLICY_REPORT_ONLY = env_bool_any("FVENTAS_CSP_REPORT_ONLY", default=False)
 
 

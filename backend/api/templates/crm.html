@@ -85,7 +85,7 @@
     <input class="form-control" name="source" value="{{ record.source if record else '' }}" placeholder="WhatsApp, visita, feria, referido">
   </div>
   <div class="col-6 col-lg-2">
-    <label class="form-label fw-semibold">Valor USD</label>
+    <label class="form-label fw-semibold">Valor {{ sales_currency }}</label>
     <input class="form-control" name="estimatedValueUsd" inputmode="decimal" value="{{ record.estimatedValueUsd if record else '' }}">
   </div>
   <div class="col-6 col-lg-2">
@@ -181,7 +181,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
       <span>Valor ponderado</span>
-      <strong>{{ money_usd(metrics.weighted) }}</strong>
+      <strong>{{ money_currency(metrics.weighted, sales_currency) }}</strong>
       <em>Probabilidad</em>
     </article>
   </div>
@@ -286,8 +286,8 @@
             <small class="d-block text-secondary">{{ record.statusLabel }}</small>
           </td>
           <td>
-            <strong>{{ money_usd(record.estimatedValueUsd) }}</strong>
-            <small class="d-block text-secondary">{{ record.probabilityPercent }}% - {{ money_usd(record.weightedValueUsd) }}</small>
+            <strong>{{ money_currency(record.estimatedValueUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">{{ record.probabilityPercent }}% - {{ money_currency(record.weightedValueUsd, sales_currency) }}</small>
           </td>
           <td>
             <span class="badge {{ record.nextActionStatus | badge_class }}">{{ record.nextActionAt or 'Sin proxima' }}</span>
@@ -357,7 +357,7 @@
               <div class="list-group-item"><strong>Contacto:</strong> {{ record.contactName or 'Sin contacto' }}</div>
               <div class="list-group-item"><strong>Telefono:</strong> {{ record.phone or 'Sin telefono' }}</div>
               <div class="list-group-item"><strong>Email:</strong> {{ record.email or 'Sin email' }}</div>
-              <div class="list-group-item"><strong>Valor ponderado:</strong> {{ money_usd(record.weightedValueUsd) }}</div>
+              <div class="list-group-item"><strong>Valor ponderado:</strong> {{ money_currency(record.weightedValueUsd, sales_currency) }}</div>
             </div>
             {% if record.description %}
             <div class="alert alert-light border mt-3">{{ record.description }}</div>

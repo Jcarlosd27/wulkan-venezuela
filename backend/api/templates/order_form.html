@@ -70,7 +70,7 @@
       <select class="form-select" name="productId{{ index }}">
         <option value="">Sin producto</option>
         {% for product in products %}
-        <option value="{{ product.id }}">{{ product.sku }} - {{ product.title }} - {{ money_usd(product.b2bPriceUsd or product.publicPriceUsd) }} - {{ product.availableStock }} disp.</option>
+        <option value="{{ product.id }}">{{ product.sku }} - {{ product.title }} - {{ money_currency(product.b2bPriceUsd or product.publicPriceUsd, sales_currency) }} - {{ product.availableStock }} disp.</option>
         {% endfor %}
       </select>
     </div>

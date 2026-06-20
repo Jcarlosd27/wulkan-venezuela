@@ -36,12 +36,6 @@ PAGES = [
     "/orders",
     "/orders/new",
     "/commissions",
-    "/crm",
-    "/quotes",
-    "/quotes/new",
-    "/collections",
-    "/dispatch",
-    "/reports",
     "/products",
     "/products/new",
     "/categories",
@@ -52,14 +46,11 @@ PAGES = [
     "/service-technicians",
     "/notifications",
     "/business-rules",
-    "/maintenance",
     "/plantillas",
     "/audit",
     "/settings",
-    "/permissions",
     "/admin-users",
     "/account/password",
-    "/reports/print",
 ]
 
 

@@ -16,7 +16,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
       <span>Abonos registrados</span>
-      <strong>{{ money_usd(metrics.payments) }}</strong>
+      <strong>{{ money_currency(metrics.payments, sales_currency) }}</strong>
       <em>Historial</em>
     </article>
   </div>
@@ -24,7 +24,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-activity"></i></div>
       <span>Comprometido</span>
-      <strong>{{ money_usd(metrics.exposure) }}</strong>
+      <strong>{{ money_currency(metrics.exposure, sales_currency) }}</strong>
       <em>Ordenes</em>
     </article>
   </div>
@@ -32,7 +32,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
       <span>Disponible</span>
-      <strong>{{ money_usd(metrics.available) }}</strong>
+      <strong>{{ money_currency(metrics.available, sales_currency) }}</strong>
       <em>Credito</em>
     </article>
   </div>
@@ -73,7 +73,7 @@
           <td><span class="badge text-bg-light">{{ payment.method }}</span></td>
           <td>{{ payment.reference or 'Sin referencia' }}</td>
           <td>
-            <strong>{{ money_usd(payment.amountUsd) }}</strong>
+            <strong>{{ money_currency(payment.amountUsd, sales_currency) }}</strong>
             <small class="d-block text-secondary">{{ money_currency(payment.amountClp or payment.amountVes or 0, local_currency) }}</small>
           </td>
           <td>{{ payment.createdBy }}</td>

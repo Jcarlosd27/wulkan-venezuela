@@ -106,7 +106,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
       <span>Valor disponible</span>
-      <strong>{{ money_usd(metrics.catalog_value) }}</strong>
+      <strong>{{ money_currency(metrics.catalog_value, sales_currency) }}</strong>
       <em>Retail</em>
     </article>
   </div>
@@ -233,8 +233,8 @@
             <small class="text-secondary">{{ product.subCategory or product.productType }}</small>
           </td>
           <td>
-            <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
-            <small class="d-block text-secondary">B2B {{ money_usd(product.b2bPriceUsd) }}</small>
+            <strong>{{ money_currency(product.publicPriceUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">B2B {{ money_currency(product.b2bPriceUsd, sales_currency) }}</small>
             <small class="d-block text-secondary">{{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
           </td>
           <td>
@@ -331,8 +331,8 @@
           </div>
           <div class="product-detail-card">
             <span>Precios</span>
-            <strong>{{ money_usd(product.publicPriceUsd) }}</strong>
-            <small>B2B {{ money_usd(product.b2bPriceUsd) }} / {{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
+            <strong>{{ money_currency(product.publicPriceUsd, sales_currency) }}</strong>
+            <small>B2B {{ money_currency(product.b2bPriceUsd, sales_currency) }} / {{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
           </div>
           <div class="product-detail-card">
             <span>Inventario</span>

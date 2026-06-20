@@ -70,7 +70,7 @@
     <article class="metric-card metric-warning">
       <div class="metric-icon"><i class="bi bi-wallet2"></i></div>
       <span>Credito expuesto</span>
-      <strong>{{ money_usd(metrics.credit_exposure) }}</strong>
+      <strong>{{ money_currency(metrics.credit_exposure, sales_currency) }}</strong>
       <em>Riesgo</em>
     </article>
   </div>
@@ -78,7 +78,7 @@
     <article class="metric-card metric-danger">
       <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
       <span>Vencido</span>
-      <strong>{{ money_usd(metrics.overdue_balance) }}</strong>
+      <strong>{{ money_currency(metrics.overdue_balance, sales_currency) }}</strong>
       <em>Cobranza</em>
     </article>
   </div>
@@ -378,8 +378,8 @@
                 <tr>
                   <td>{{ order.orderId or order.id }}</td>
                   <td>{{ order.saleTypeLabel }}</td>
-                  <td>{{ money_usd(order.totalUsd) }}</td>
-                  <td>{{ money_usd(order.balanceUsd) }}</td>
+                  <td>{{ money_currency(order.totalUsd, sales_currency) }}</td>
+                  <td>{{ money_currency(order.balanceUsd, sales_currency) }}</td>
                   <td><span class="badge {{ order.status | badge_class }}">{{ order.statusLabel }}</span></td>
                 </tr>
                 {% else %}

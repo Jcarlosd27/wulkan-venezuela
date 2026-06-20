@@ -27,9 +27,9 @@
     </header>
     <section class="metrics">
       <div class="metric"><span>Ordenes</span><strong>{{ metrics.orders }}</strong></div>
-      <div class="metric"><span>Ventas</span><strong>{{ money_usd(metrics.sales) }}</strong></div>
-      <div class="metric"><span>Por cobrar</span><strong>{{ money_usd(metrics.receivable) }}</strong></div>
-      <div class="metric"><span>Comisiones</span><strong>{{ money_usd(metrics.commission) }}</strong></div>
+      <div class="metric"><span>Ventas</span><strong>{{ money_currency(metrics.sales, sales_currency) }}</strong></div>
+      <div class="metric"><span>Por cobrar</span><strong>{{ money_currency(metrics.receivable, sales_currency) }}</strong></div>
+      <div class="metric"><span>Comisiones</span><strong>{{ money_currency(metrics.commission, sales_currency) }}</strong></div>
     </section>
     <table>
       <thead>

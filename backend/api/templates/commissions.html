@@ -22,7 +22,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
       <span>Pendiente / revision</span>
-      <strong>{{ money_usd(metrics.pending + metrics.review) }}</strong>
+      <strong>{{ money_currency(metrics.pending + metrics.review, sales_currency) }}</strong>
       <em>{{ metrics.blocked_count }} bloqueadas</em>
     </article>
   </div>
@@ -30,7 +30,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
       <span>Aprobadas</span>
-      <strong>{{ money_usd(metrics.approved) }}</strong>
+      <strong>{{ money_currency(metrics.approved, sales_currency) }}</strong>
       <em>{{ metrics.payable_count }} liquidables</em>
     </article>
   </div>
@@ -38,7 +38,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
       <span>Pagadas</span>
-      <strong>{{ money_usd(metrics.paid) }}</strong>
+      <strong>{{ money_currency(metrics.paid, sales_currency) }}</strong>
       <em>Historial liquidado</em>
     </article>
   </div>
@@ -46,7 +46,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-pause-circle"></i></div>
       <span>Retenidas / anuladas</span>
-      <strong>{{ money_usd(metrics.withheld + metrics.cancelled) }}</strong>
+      <strong>{{ money_currency(metrics.withheld + metrics.cancelled, sales_currency) }}</strong>
       <em>Fuera de pago</em>
     </article>
   </div>
@@ -115,7 +115,7 @@
       <div class="insight-row">
         <span class="insight-label">{{ label }}</span>
         <span class="insight-track"><span class="insight-value" style="width: {{ 0 if status_max == 0 else (value / status_max * 100) }}%"></span></span>
-        <strong>{{ money_usd(value) }}</strong>
+        <strong>{{ money_currency(value, sales_currency) }}</strong>
       </div>
       {% else %}
       <div class="empty-state compact">
@@ -141,7 +141,7 @@
       <div class="insight-row">
         <span class="insight-label">{{ label }}</span>
         <span class="insight-track"><span class="insight-value" style="width: {{ 0 if seller_max == 0 else (value / seller_max * 100) }}%"></span></span>
-        <strong>{{ money_usd(value) }}</strong>
+        <strong>{{ money_currency(value, sales_currency) }}</strong>
       </div>
       {% else %}
       <div class="empty-state compact">
@@ -167,7 +167,7 @@
       <div class="insight-row">
         <span class="insight-label">{{ label }}</span>
         <span class="insight-track"><span class="insight-value" style="width: {{ 0 if rule_max == 0 else (value / rule_max * 100) }}%"></span></span>
-        <strong>{{ money_usd(value) }}</strong>
+        <strong>{{ money_currency(value, sales_currency) }}</strong>
       </div>
       {% else %}
       <div class="empty-state compact">
@@ -220,12 +220,12 @@
           </td>
           <td>
             <span class="badge {{ order.saleType | badge_class }}">{{ order.saleTypeLabel }}</span>
-            <small class="d-block text-secondary">Total {{ money_usd(order.totalUsd) }}</small>
-            <small class="d-block text-secondary">Saldo {{ money_usd(order.balanceUsd) }}</small>
+            <small class="d-block text-secondary">Total {{ money_currency(order.totalUsd, sales_currency) }}</small>
+            <small class="d-block text-secondary">Saldo {{ money_currency(order.balanceUsd, sales_currency) }}</small>
           </td>
           <td>
-            <strong>{{ money_usd(order.commissionUsd) }}</strong>
-            <small class="d-block text-secondary">Base {{ money_usd(order.commissionBaseUsd) }}</small>
+            <strong>{{ money_currency(order.commissionUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Base {{ money_currency(order.commissionBaseUsd, sales_currency) }}</small>
           </td>
           <td>
             <strong class="d-block">{{ order.commissionRuleLabel }}</strong>

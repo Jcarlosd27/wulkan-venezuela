@@ -2342,7 +2342,7 @@ class _SellerProductLineCardState extends State<_SellerProductLineCard> {
                         Expanded(
                           child: Text(
                             product.requiresQuote
-                                ? 'Cotizar'
+                                ? 'Revision'
                                 : _moneyFromUsd(product.effectiveB2bPriceUsd),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -2767,7 +2767,7 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                             'Total ${_moneyFromUsd(preview.totalUsd)}',
                             'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
                             if (preview.requiresOperatorReview)
-                              'Requiere revision por producto tecnico o cotizable.',
+                              'Requiere revision por producto tecnico o condicion comercial.',
                             if (orderBlocker != null) orderBlocker,
                           ],
                         ),
@@ -5564,8 +5564,8 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                 ),
               if (product.requiresQuote)
                 const _InfoChip(
-                  icon: Icons.request_quote_outlined,
-                  label: 'Cotizacion',
+                  icon: Icons.rule_folder_outlined,
+                  label: 'Revision',
                 ),
             ],
           ),
@@ -5625,7 +5625,7 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                 !canAdd
                     ? 'Sin stock disponible'
                     : product.requiresQuote
-                        ? 'Agregar para cotizar'
+                        ? 'Enviar a revision'
                         : 'Agregar $_quantity al carrito',
               ),
             ),
@@ -6135,7 +6135,7 @@ class LocationsScreen extends StatelessWidget {
 
 String _productSubtitle(MobileProduct product) {
   if (product.requiresQuote) {
-    return "Cotizacion asistida por FVENTAS";
+    return "Pedido sujeto a revision FVENTAS";
   }
 
   if (product.requiresTechnicalValidation) {
@@ -8271,8 +8271,8 @@ class _CartItemTile extends StatelessWidget {
                 children: [
                   if (item.requiresQuote)
                     const _InfoChip(
-                      icon: Icons.request_quote_outlined,
-                      label: 'Cotizacion',
+                      icon: Icons.rule_folder_outlined,
+                      label: 'Revision',
                     ),
                   if (item.requiresTechnicalValidation)
                     const _InfoChip(
@@ -9321,7 +9321,7 @@ class _ProductTile extends StatelessWidget {
                             ),
                       ),
                     Text(
-                      priceUsd == null ? 'Cotizar' : _moneyFromUsd(priceUsd!),
+                      priceUsd == null ? 'Revision' : _moneyFromUsd(priceUsd!),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -9462,7 +9462,7 @@ class _QuantitySelectorButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final helper = requiresQuote
-        ? 'Cantidad para cotizar'
+        ? 'Cantidad a revisar'
         : stock <= 0
             ? 'Sin stock disponible'
             : 'Disponible: $stock uds';
@@ -9527,7 +9527,7 @@ Future<int?> _showQuantityPicker(
               children: [
                 Text(
                   allowBeyondStock
-                      ? 'Ingresa la cantidad para cotizar.'
+                      ? 'Ingresa la cantidad para revision.'
                       : 'Maximo disponible: $limit uds.',
                   style: const TextStyle(color: _fventasMuted),
                 ),

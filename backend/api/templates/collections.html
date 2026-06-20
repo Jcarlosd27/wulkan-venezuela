@@ -56,7 +56,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-cash-coin"></i></div>
       <span>Cuentas por cobrar</span>
-      <strong>{{ money_usd(metrics.receivable) }}</strong>
+      <strong>{{ money_currency(metrics.receivable, sales_currency) }}</strong>
       <em>Saldo abierto</em>
     </article>
   </div>
@@ -64,7 +64,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-calendar2-week"></i></div>
       <span>Por vencer</span>
-      <strong>{{ money_usd(metrics.due_soon) }}</strong>
+      <strong>{{ money_currency(metrics.due_soon, sales_currency) }}</strong>
       <em>Gestion preventiva</em>
     </article>
   </div>
@@ -72,7 +72,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-exclamation-octagon"></i></div>
       <span>Vencido</span>
-      <strong>{{ money_usd(metrics.overdue) }}</strong>
+      <strong>{{ money_currency(metrics.overdue, sales_currency) }}</strong>
       <em>Mora activa</em>
     </article>
   </div>
@@ -80,7 +80,7 @@
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-fire"></i></div>
       <span>Critico</span>
-      <strong>{{ money_usd(metrics.critical) }}</strong>
+      <strong>{{ money_currency(metrics.critical, sales_currency) }}</strong>
       <em>{{ metrics.promises }} promesas</em>
     </article>
   </div>
@@ -125,8 +125,8 @@
               </td>
               <td>{{ order.sellerName or 'Sin vendedor' }}</td>
               <td>
-                <strong>{{ money_usd(order.balanceUsd) }}</strong>
-                <small class="d-block text-secondary">Abonado {{ money_usd(order.paidUsd) }}</small>
+                <strong>{{ money_currency(order.balanceUsd, sales_currency) }}</strong>
+                <small class="d-block text-secondary">Abonado {{ money_currency(order.paidUsd, sales_currency) }}</small>
               </td>
               <td>
                 <span class="badge {{ order.dueStatus | badge_class }}">{{ due_status_label(order.dueStatus) }}</span>
@@ -189,7 +189,7 @@
         {% endfor %}
       </div>
       <dl class="detail-list mt-3">
-        <div><dt>Abonos registrados</dt><dd>{{ money_usd(metrics.payments) }}</dd></div>
+        <div><dt>Abonos registrados</dt><dd>{{ money_currency(metrics.payments, sales_currency) }}</dd></div>
         <div><dt>Promesas</dt><dd>{{ metrics.promises }}</dd></div>
       </dl>
     </article>
@@ -206,14 +206,14 @@
       <div class="modal-header">
         <div>
           <h2 class="modal-title h5">Registrar abono</h2>
-          <p class="mb-0 text-secondary">{{ order.orderId }} - saldo {{ money_usd(order.balanceUsd) }}</p>
+          <p class="mb-0 text-secondary">{{ order.orderId }} - saldo {{ money_currency(order.balanceUsd, sales_currency) }}</p>
         </div>
         <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
         <div class="row g-3">
           <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">Monto USD</label>
+            <label class="form-label fw-semibold">Monto {{ sales_currency }}</label>
             <input class="form-control" name="amountUsd" inputmode="decimal" max="{{ order.balanceUsd }}" required>
           </div>
           <div class="col-12 col-md-6">

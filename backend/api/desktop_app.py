@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import secrets
 import sys
@@ -63,6 +64,13 @@ def generate_desktop_password() -> str:
     return f"Fventas-{secrets.randbelow(900000) + 100000}"
 
 
+def generate_password_hash(password: str) -> str:
+    from werkzeug.security import generate_password_hash as werkzeug_generate_password_hash
+
+    method = "scrypt" if hasattr(hashlib, "scrypt") else "pbkdf2:sha256:1000000"
+    return werkzeug_generate_password_hash(password, method=method)
+
+
 def write_first_access_file(root: Path, password: str) -> None:
     content = (
         "Credenciales iniciales FVENTAS Desktop\n"
@@ -77,7 +85,6 @@ def write_first_access_file(root: Path, password: str) -> None:
 def ensure_desktop_admin(root: Path) -> None:
     from core.db import init_database
     from store import DEFAULT_COMPANY_ID, load_store, save_store, utc_now
-    from werkzeug.security import generate_password_hash
 
     init_database()
     store = load_store()
