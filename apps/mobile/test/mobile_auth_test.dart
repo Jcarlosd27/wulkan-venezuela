@@ -117,9 +117,9 @@ void main() {
             'market': {
               'companyId': 'company-api',
               'country': 'CL',
-              'salesCurrency': 'USD',
+              'salesCurrency': 'CLP',
               'localCurrency': 'CLP',
-              'exchangeRateBaseToLocal': 950,
+              'exchangeRateBaseToLocal': 1,
             },
             'allowedPaymentTermsDays': [0],
             'defaultSaleType': 'cash',

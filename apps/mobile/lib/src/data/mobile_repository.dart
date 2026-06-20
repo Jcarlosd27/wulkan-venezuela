@@ -5,6 +5,8 @@ import '../auth/mobile_auth.dart';
 import '../config/mobile_environment.dart';
 import '../domain/mobile_models.dart';
 
+const double _mockClpRate = 950;
+
 abstract class MobileRepository {
   Future<List<MobileCategory>> listCategories();
   Future<List<MobileProduct>> listProducts();
@@ -26,6 +28,47 @@ abstract class MobileRepository {
 }
 
 class MockMobileRepository implements MobileRepository {
+  MockMobileRepository({String? countryCode})
+      : marketCountryCode =
+            (countryCode ?? mobileEnvironment.countryCode).trim().toUpperCase();
+
+  final String marketCountryCode;
+
+  bool get _usesUsdMarket => marketCountryCode == "VE";
+
+  double _mockAmount(num clpAmount) =>
+      _usesUsdMarket ? clpAmount / _mockClpRate : clpAmount.toDouble();
+
+  List<MobileProduct> get _marketProducts =>
+      _products.map(_productForMarket).toList(growable: false);
+
+  MobileProduct _productForMarket(MobileProduct product) {
+    return MobileProduct(
+      id: product.id,
+      sku: product.sku,
+      name: product.name,
+      verticalName: product.verticalName,
+      description: product.description,
+      publicPriceUsd: _mockAmount(product.publicPriceUsd),
+      b2bPriceUsd: _mockAmount(product.b2bPriceUsd),
+      availableStock: product.availableStock,
+      badge: product.badge,
+      requiresQuote: product.requiresQuote,
+      requiresTechnicalValidation: product.requiresTechnicalValidation,
+      compatibilityNotes: product.compatibilityNotes,
+      productType: product.productType,
+      imageUrls: product.imageUrls,
+      discountPercent: product.discountPercent,
+      originalPriceUsd: product.originalPriceUsd == null
+          ? null
+          : _mockAmount(product.originalPriceUsd!),
+      variants: product.variants,
+      specifications: product.specifications,
+      pdfUrls: product.pdfUrls,
+      imageUrl: product.imageUrl,
+    );
+  }
+
   static const _categories = [
     MobileCategory(
       id: "machinery-garden",
@@ -57,8 +100,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Motosierra FVENTAS 45cc",
       verticalName: "Maquinaria y jardin",
       description: "Equipo de corte para uso tecnico, finca y jardin.",
-      publicPriceUsd: 185,
-      b2bPriceUsd: 162,
+      publicPriceUsd: 185 * _mockClpRate,
+      b2bPriceUsd: 162 * _mockClpRate,
       availableStock: 12,
       badge: "Comprar",
       requiresQuote: false,
@@ -69,7 +112,7 @@ class MockMobileRepository implements MobileRepository {
       ],
       productType: "machine",
       discountPercent: 12,
-      originalPriceUsd: 185,
+      originalPriceUsd: 185 * _mockClpRate,
       imageUrl: "asset:assets/products/motosierra-45cc.png",
       specifications: {
         "Motor": "45cc",
@@ -82,8 +125,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Cadena 18 pulgadas compatible",
       verticalName: "Repuestos",
       description: "Repuesto compatible con motosierras seleccionadas FVENTAS.",
-      publicPriceUsd: 18,
-      b2bPriceUsd: 15,
+      publicPriceUsd: 18 * _mockClpRate,
+      b2bPriceUsd: 15 * _mockClpRate,
       availableStock: 4,
       badge: "Validar",
       requiresQuote: false,
@@ -102,8 +145,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Motobomba 3x3 alta presion FVENTAS",
       verticalName: "Industrial",
       description: "Motobomba para trabajo agricola e industrial.",
-      publicPriceUsd: 535,
-      b2bPriceUsd: 498,
+      publicPriceUsd: 535 * _mockClpRate,
+      b2bPriceUsd: 498 * _mockClpRate,
       availableStock: 7,
       badge: "Comprar",
       requiresQuote: false,
@@ -121,8 +164,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Desbrozadora 52cc profesional",
       verticalName: "Maquinaria y jardin",
       description: "Equipo para mantencion de parcelas, condominios y faenas.",
-      publicPriceUsd: 230,
-      b2bPriceUsd: 198,
+      publicPriceUsd: 230 * _mockClpRate,
+      b2bPriceUsd: 198 * _mockClpRate,
       availableStock: 9,
       badge: "Comprar",
       requiresQuote: false,
@@ -133,7 +176,7 @@ class MockMobileRepository implements MobileRepository {
       ],
       productType: "machine",
       discountPercent: 14,
-      originalPriceUsd: 230,
+      originalPriceUsd: 230 * _mockClpRate,
       imageUrl: "asset:assets/products/motosierra-45cc.png",
     ),
     MobileProduct(
@@ -142,8 +185,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Generador electrico 7 kVA",
       verticalName: "Industrial",
       description: "Respaldo electrico para talleres, terreno y obras.",
-      publicPriceUsd: 890,
-      b2bPriceUsd: 815,
+      publicPriceUsd: 890 * _mockClpRate,
+      b2bPriceUsd: 815 * _mockClpRate,
       availableStock: 3,
       badge: "Validar",
       requiresQuote: false,
@@ -154,7 +197,7 @@ class MockMobileRepository implements MobileRepository {
       ],
       productType: "machine",
       discountPercent: 8,
-      originalPriceUsd: 890,
+      originalPriceUsd: 890 * _mockClpRate,
       imageUrl: "asset:assets/products/motobomba-3x3.png",
     ),
     MobileProduct(
@@ -163,8 +206,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Kit manguera descarga 3 pulgadas",
       verticalName: "Repuestos",
       description: "Accesorio para motobombas 3x3 con abrazaderas.",
-      publicPriceUsd: 74,
-      b2bPriceUsd: 62,
+      publicPriceUsd: 74 * _mockClpRate,
+      b2bPriceUsd: 62 * _mockClpRate,
       availableStock: 18,
       badge: "Comprar",
       requiresQuote: false,
@@ -175,7 +218,7 @@ class MockMobileRepository implements MobileRepository {
       ],
       productType: "spare_part",
       discountPercent: 16,
-      originalPriceUsd: 74,
+      originalPriceUsd: 74 * _mockClpRate,
       imageUrl: "asset:assets/products/cadena-18.png",
     ),
     MobileProduct(
@@ -184,8 +227,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Aceite 2T premium caja 12 unidades",
       verticalName: "Consumibles",
       description: "Consumible para venta recurrente en cartera B2B.",
-      publicPriceUsd: 96,
-      b2bPriceUsd: 78,
+      publicPriceUsd: 96 * _mockClpRate,
+      b2bPriceUsd: 78 * _mockClpRate,
       availableStock: 36,
       badge: "Comprar",
       requiresQuote: false,
@@ -196,7 +239,7 @@ class MockMobileRepository implements MobileRepository {
       ],
       productType: "consumable",
       discountPercent: 19,
-      originalPriceUsd: 96,
+      originalPriceUsd: 96 * _mockClpRate,
       imageUrl: "asset:assets/products/motosierra-45cc.png",
     ),
     MobileProduct(
@@ -205,8 +248,8 @@ class MockMobileRepository implements MobileRepository {
       name: "Filtro de aire motosierra 45cc",
       verticalName: "Repuestos",
       description: "Repuesto de alta rotacion para servicio tecnico.",
-      publicPriceUsd: 12,
-      b2bPriceUsd: 9.5,
+      publicPriceUsd: 12 * _mockClpRate,
+      b2bPriceUsd: 9.5 * _mockClpRate,
       availableStock: 48,
       badge: "Comprar",
       requiresQuote: false,
@@ -217,7 +260,7 @@ class MockMobileRepository implements MobileRepository {
       ],
       productType: "spare_part",
       discountPercent: 21,
-      originalPriceUsd: 12,
+      originalPriceUsd: 12 * _mockClpRate,
       imageUrl: "asset:assets/products/cadena-18.png",
     ),
   ];
@@ -272,14 +315,15 @@ class MockMobileRepository implements MobileRepository {
   Future<List<MobileCategory>> listCategories() async => _categories;
 
   @override
-  Future<List<MobileProduct>> listProducts() async => _products;
+  Future<List<MobileProduct>> listProducts() async => _marketProducts;
 
   @override
   Future<MobileProductPage> listProductPage(MobileProductQuery query) async {
     final start = int.tryParse(query.cursor ?? "") ?? 0;
     final pageLimit = query.limit.clamp(1, 100).toInt();
-    final filtered =
-        _products.where((product) => _matchesQuery(product, query)).toList();
+    final filtered = _marketProducts
+        .where((product) => _matchesQuery(product, query))
+        .toList();
     final end = (start + pageLimit).clamp(0, filtered.length).toInt();
 
     return MobileProductPage(
@@ -291,7 +335,7 @@ class MockMobileRepository implements MobileRepository {
 
   @override
   Future<MobileProduct?> getProduct(String id) async {
-    for (final product in _products) {
+    for (final product in _marketProducts) {
       if (product.id == id) {
         return product;
       }
@@ -316,11 +360,11 @@ class MockMobileRepository implements MobileRepository {
     return MobileCreditSnapshot(
       customerId: customerId,
       creditEnabled: true,
-      creditLimitUsd: 12000,
-      creditUsedUsd: 4200,
-      creditOrdersUsd: 1850,
-      creditExposureUsd: 6050,
-      creditAvailableUsd: 5950,
+      creditLimitUsd: _mockAmount(12000 * _mockClpRate),
+      creditUsedUsd: _mockAmount(4200 * _mockClpRate),
+      creditOrdersUsd: _mockAmount(1850 * _mockClpRate),
+      creditExposureUsd: _mockAmount(6050 * _mockClpRate),
+      creditAvailableUsd: _mockAmount(5950 * _mockClpRate),
       paymentTermsDays: 30,
       status: "approved",
       allowedPaymentTermsDays: const [0, 15, 30],
@@ -338,9 +382,9 @@ class MockMobileRepository implements MobileRepository {
       MobileOrderSummary(
         id: "FVT-10318",
         status: "approved",
-        totalUsd: 1620,
+        totalUsd: _mockAmount(1620 * _mockClpRate),
         paidUsd: 0,
-        balanceUsd: 1620,
+        balanceUsd: _mockAmount(1620 * _mockClpRate),
         itemsCount: 3,
         createdAt: DateTime(2026, 6, 17),
         paymentStatus: "pending",
@@ -358,8 +402,8 @@ class MockMobileRepository implements MobileRepository {
       MobileOrderSummary(
         id: "FVT-10291",
         status: "delivered",
-        totalUsd: 840,
-        paidUsd: 840,
+        totalUsd: _mockAmount(840 * _mockClpRate),
+        paidUsd: _mockAmount(840 * _mockClpRate),
         balanceUsd: 0,
         itemsCount: 2,
         createdAt: DateTime(2026, 6, 10),
@@ -378,9 +422,9 @@ class MockMobileRepository implements MobileRepository {
       MobileOrderSummary(
         id: "FVT-10270",
         status: "review",
-        totalUsd: 390,
+        totalUsd: _mockAmount(390 * _mockClpRate),
         paidUsd: 0,
-        balanceUsd: 390,
+        balanceUsd: _mockAmount(390 * _mockClpRate),
         itemsCount: 1,
         createdAt: DateTime(2026, 6, 5),
         paymentStatus: "pending",
@@ -430,7 +474,7 @@ class MockMobileRepository implements MobileRepository {
 
   @override
   Future<MobileSellerSummary> getSellerSummary() async {
-    return const MobileSellerSummary(
+    return MobileSellerSummary(
       sellerId: "seller-local-fventas",
       sellerName: "Vendedor FVENTAS",
       roleLabel: "Vendedor",
@@ -438,25 +482,25 @@ class MockMobileRepository implements MobileRepository {
       sellerZone: "Santiago norte",
       sellerTerritory: "Ferreterias y maquinaria",
       commissionRatePercent: 3.5,
-      salesGoalUsd: 38000,
-      salesMonthUsd: 23600,
+      salesGoalUsd: _mockAmount(38000 * _mockClpRate),
+      salesMonthUsd: _mockAmount(23600 * _mockClpRate),
       goalProgressPercent: 62,
-      ticketAverageUsd: 2950,
+      ticketAverageUsd: _mockAmount(2950 * _mockClpRate),
       activeClientsCount: 3,
       newClientsMonth: 1,
       clientsCount: 4,
       ordersCount: 3,
       pendingCreditRequests: 1,
-      salesUsd: 23600,
-      openBalanceUsd: 5600,
-      pendingCommissionUsd: 418,
-      approvedCommissionUsd: 230,
-      paidCommissionUsd: 610,
+      salesUsd: _mockAmount(23600 * _mockClpRate),
+      openBalanceUsd: _mockAmount(5600 * _mockClpRate),
+      pendingCommissionUsd: _mockAmount(418 * _mockClpRate),
+      approvedCommissionUsd: _mockAmount(230 * _mockClpRate),
+      paidCommissionUsd: _mockAmount(610 * _mockClpRate),
     );
   }
 
   @override
-  Future<List<MobileSellerClient>> listSellerClients() async => const [
+  Future<List<MobileSellerClient>> listSellerClients() async => [
         MobileSellerClient(
           id: "client-ferreteria-alameda",
           businessName: "Ferreteria Alameda",
@@ -466,9 +510,9 @@ class MockMobileRepository implements MobileRepository {
           state: "Metropolitana",
           creditEnabled: true,
           creditStatus: "approved",
-          creditLimitUsd: 8000,
-          creditAvailableUsd: 5200,
-          creditExposureUsd: 2800,
+          creditLimitUsd: _mockAmount(8000 * _mockClpRate),
+          creditAvailableUsd: _mockAmount(5200 * _mockClpRate),
+          creditExposureUsd: _mockAmount(2800 * _mockClpRate),
           creditRequestStatus: "approved",
           taxId: "76.100.200-3",
           contactName: "Paula Morales",
@@ -496,7 +540,7 @@ class MockMobileRepository implements MobileRepository {
           deliveryZone: "Norte",
           defaultSaleType: "credit_line",
           allowedPaymentTermsDays: [0],
-          creditRequestedUsd: 4500,
+          creditRequestedUsd: _mockAmount(4500 * _mockClpRate),
         ),
         MobileSellerClient(
           id: "client-agro-maipo",
@@ -507,9 +551,9 @@ class MockMobileRepository implements MobileRepository {
           state: "Metropolitana",
           creditEnabled: true,
           creditStatus: "approved",
-          creditLimitUsd: 12000,
-          creditAvailableUsd: 6400,
-          creditExposureUsd: 5600,
+          creditLimitUsd: _mockAmount(12000 * _mockClpRate),
+          creditAvailableUsd: _mockAmount(6400 * _mockClpRate),
+          creditExposureUsd: _mockAmount(5600 * _mockClpRate),
           creditRequestStatus: "approved",
           taxId: "76.555.440-1",
           contactName: "Carolina Farias",
@@ -518,7 +562,7 @@ class MockMobileRepository implements MobileRepository {
           defaultSaleType: "credit_line",
           allowedPaymentTermsDays: [0, 15, 30, 40],
         ),
-        MobileSellerClient(
+        const MobileSellerClient(
           id: "client-rental-sur",
           businessName: "Rental Sur Equipos",
           email: "ventas@rentalsur.cl",
@@ -574,21 +618,21 @@ class MockMobileRepository implements MobileRepository {
 
   @override
   Future<List<MobileOrderSummary>> listSellerOrders() async =>
-      _mockSellerOrders();
+      _mockSellerOrders(_mockAmount);
 
   @override
   Future<List<MobileOrderSummary>> listSellerCommissions() async =>
-      _mockSellerOrders();
+      _mockSellerOrders(_mockAmount);
 }
 
-List<MobileOrderSummary> _mockSellerOrders() {
+List<MobileOrderSummary> _mockSellerOrders(double Function(num) money) {
   return [
     MobileOrderSummary(
       id: "FVT-10291",
       status: "approved",
-      totalUsd: 4860,
-      paidUsd: 1800,
-      balanceUsd: 3060,
+      totalUsd: money(4860 * _mockClpRate),
+      paidUsd: money(1800 * _mockClpRate),
+      balanceUsd: money(3060 * _mockClpRate),
       itemsCount: 6,
       createdAt: DateTime(2026, 6, 15),
       paymentStatus: "partial_paid",
@@ -602,15 +646,15 @@ List<MobileOrderSummary> _mockSellerOrders() {
       paymentTermDays: 30,
       dueDate: DateTime(2026, 7, 15),
       dueStatus: "current",
-      commissionUsd: 170.1,
+      commissionUsd: money(170.1 * _mockClpRate),
       commissionStatus: "commission_pending",
       commissionStatusLabel: "Pendiente",
     ),
     MobileOrderSummary(
       id: "FVT-10284",
       status: "delivered",
-      totalUsd: 3220,
-      paidUsd: 3220,
+      totalUsd: money(3220 * _mockClpRate),
+      paidUsd: money(3220 * _mockClpRate),
       balanceUsd: 0,
       itemsCount: 4,
       createdAt: DateTime(2026, 6, 12),
@@ -625,15 +669,15 @@ List<MobileOrderSummary> _mockSellerOrders() {
       paymentTermDays: 15,
       dueDate: DateTime(2026, 6, 27),
       dueStatus: "current",
-      commissionUsd: 112.7,
+      commissionUsd: money(112.7 * _mockClpRate),
       commissionStatus: "approved",
       commissionStatusLabel: "Aprobada",
     ),
     MobileOrderSummary(
       id: "FVT-10270",
       status: "paid",
-      totalUsd: 2100,
-      paidUsd: 2100,
+      totalUsd: money(2100 * _mockClpRate),
+      paidUsd: money(2100 * _mockClpRate),
       balanceUsd: 0,
       itemsCount: 3,
       createdAt: DateTime(2026, 6, 8),
@@ -645,7 +689,7 @@ List<MobileOrderSummary> _mockSellerOrders() {
       sellerName: "Vendedor FVENTAS",
       saleType: "cash",
       saleTypeLabel: "Contado",
-      commissionUsd: 73.5,
+      commissionUsd: money(73.5 * _mockClpRate),
       commissionStatus: "paid",
       commissionStatusLabel: "Pagada",
     ),

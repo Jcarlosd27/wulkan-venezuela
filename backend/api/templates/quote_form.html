@@ -60,10 +60,14 @@
         {% endfor %}
       </select>
     </div>
+    {% if sales_currency != local_currency %}
     <div class="col-6 col-lg-1">
       <label class="form-label fw-semibold">Tasa {{ sales_currency }}/{{ local_currency }}</label>
-      <input class="form-control" name="exchangeRateUsdClp" value="{{ (quote.exchangeRateUsdClp or quote.exchangeRateUsdVes) if quote else 950 }}">
+      <input class="form-control" name="exchangeRateUsdClp" value="{{ (quote.exchangeRateUsdClp or quote.exchangeRateUsdVes) if quote else exchange_rate }}">
     </div>
+    {% else %}
+    <input type="hidden" name="exchangeRateUsdClp" value="{{ (quote.exchangeRateUsdClp or quote.exchangeRateUsdVes) if quote else exchange_rate }}">
+    {% endif %}
   </div>
 
   <hr class="my-4">

@@ -119,6 +119,27 @@ def assert_market_scope_is_cl_ve_only() -> None:
     assert FVENTAS_app.market_profile("CL")["localCurrency"] == "CLP"
     assert FVENTAS_app.market_profile("VE")["salesCurrency"] == "USD"
     assert FVENTAS_app.market_profile("VE")["localCurrency"] == "USD"
+    legacy_store = {
+        "companies": [
+            {
+                "id": "company-legacy-cl",
+                "country": "CL",
+                "baseCurrency": "USD",
+                "currency": "CLP",
+                "exchangeRateBaseToLocal": 950,
+            }
+        ],
+        "business_settings": {
+            "marketCountry": "CL",
+            "salesCurrency": "USD",
+            "localCurrency": "CLP",
+            "exchangeRateBaseToLocal": 950,
+        },
+    }
+    assert FVENTAS_app.currency_context(legacy_store)["sales_currency"] == "CLP"
+    assert FVENTAS_app.currency_context(legacy_store)["exchange_rate"] == 1
+    assert FVENTAS_app.mobile_market_payload(legacy_store, "company-legacy-cl")["salesCurrency"] == "CLP"
+    assert FVENTAS_app.mobile_market_payload(legacy_store, "company-legacy-cl")["exchangeRateBaseToLocal"] == 1
 
 
 def assert_admin_routes_have_permission_coverage() -> None:

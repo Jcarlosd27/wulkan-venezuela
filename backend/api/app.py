@@ -1675,7 +1675,7 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "territorio", "required": False, "example": "Centro - Ruta A", "help": "Ruta, territorio o cobertura."},
                     {"name": "supervisor", "required": False, "example": "Gerente Comercial", "help": "Responsable interno del vendedor."},
                     {"name": "comision", "required": False, "example": "5", "help": "Porcentaje de comision."},
-                    {"name": "meta_mensual_usd", "required": False, "example": "2500", "help": "Meta comercial mensual."},
+                    {"name": "meta_mensual", "required": False, "example": "2500000", "help": "Meta comercial mensual en moneda de venta."},
                     {"name": "fecha_ingreso", "required": False, "example": "2026-06-01", "help": "Fecha de ingreso comercial."},
                     {"name": "acceso_movil", "required": False, "example": "si", "help": "si/no para permitir ingreso desde la app."},
                     {"name": "estado", "required": False, "example": "active", "help": "active, inactive, blocked o suspended."},
@@ -1718,10 +1718,10 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "score_credito", "required": False, "example": "82", "help": "Score interno de 0 a 100. Si viene vacio se calcula."},
                     {"name": "observacion_gerencia", "required": False, "example": "Cupo inicial sujeto a revision mensual.", "help": "Nota privada para decisiones de credito."},
                     {"name": "estado_credito", "required": False, "example": "pending", "help": "none, pending, review, approved, rejected, suspended, blocked_debt o blocked_limit."},
-                    {"name": "credito_solicitado_usd", "required": False, "example": "1500", "help": "Monto solicitado por el cliente o vendedor."},
-                    {"name": "deuda_manual_usd", "required": False, "example": "0", "help": "Deuda externa anterior a la plataforma."},
+                    {"name": "credito_solicitado", "required": False, "example": "1500000", "help": "Monto solicitado por el cliente o vendedor en moneda de venta."},
+                    {"name": "deuda_manual", "required": False, "example": "0", "help": "Deuda externa anterior a la plataforma en moneda de venta."},
                     {"name": "tipo_venta_default", "required": False, "example": "credit_line", "help": "cash, term_credit o credit_line."},
-                    {"name": "cupo_usd", "required": False, "example": "1000", "help": "Linea aprobada si el rol puede aprobar."},
+                    {"name": "cupo", "required": False, "example": "1000000", "help": "Linea aprobada en moneda de venta si el rol puede aprobar."},
                     {"name": "credito_aprobado", "required": False, "example": "si", "help": "si/no. Solo gerente o super admin aprueba."},
                     {"name": "dias_credito", "required": False, "example": "15", "help": "Plazo aprobado por defecto."},
                     {"name": "plazos", "required": False, "example": "0,15,30", "help": "Dias permitidos separados por coma."},
@@ -1750,18 +1750,18 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "unidad_venta", "required": False, "example": "unidad", "help": "Unidad, kit, caja, metro, litro, etc."},
                     {"name": "descripcion_corta", "required": False, "example": "Equipo de corte para jardin y finca.", "help": "Resumen corto para listados."},
                     {"name": "descripcion_larga", "required": False, "example": "Incluye espada, cadena y garantia FVENTAS.", "help": "Detalle ampliado para ficha de producto."},
-                    {"name": "precio_publico_usd", "required": True, "example": "185", "help": "Precio PVP en moneda de venta configurada."},
-                    {"name": "precio_b2b_usd", "required": False, "example": "162", "help": "Precio B2B."},
-                    {"name": "costo_referencial_usd", "required": False, "example": "120", "help": "Costo interno referencial. No se publica en app."},
+                    {"name": "precio_publico", "required": True, "example": "153900", "help": "Precio PVP en moneda de venta configurada."},
+                    {"name": "precio_b2b", "required": False, "example": "14250", "help": "Precio B2B en moneda de venta configurada."},
+                    {"name": "costo_referencial", "required": False, "example": "120000", "help": "Costo interno referencial. No se publica en app."},
                     {"name": "margen_porcentaje", "required": False, "example": "25", "help": "Margen estimado administrativo."},
                     {"name": "stock", "required": False, "example": "12", "help": "Stock fisico inicial."},
                     {"name": "stock_minimo", "required": False, "example": "3", "help": "Punto de alerta de reposicion."},
                     {"name": "stock_maximo", "required": False, "example": "30", "help": "Stock objetivo o maximo."},
                     {"name": "descripcion", "required": False, "example": "Equipo para uso tecnico y jardin.", "help": "Descripcion app movil."},
                     {"name": "tipo_producto", "required": False, "example": "machine", "help": "machine, spare_part, accessory, service o consumable."},
-                    {"name": "precio_anterior_usd", "required": False, "example": "210", "help": "Precio antes del descuento."},
+                    {"name": "precio_anterior", "required": False, "example": "175750", "help": "Precio antes del descuento en moneda de venta."},
                     {"name": "descuento_porcentaje", "required": False, "example": "12", "help": "Descuento visible."},
-                    {"name": "tasa_usd_local", "required": False, "example": "950", "help": "Tasa referencial entre moneda de venta y moneda local."},
+                    {"name": "tasa_moneda_local", "required": False, "example": "1", "help": "Tasa referencial entre moneda de venta y moneda local cuando aplique."},
                     {"name": "imagen_principal", "required": False, "example": "https://cdn.fventas.cl/producto.jpg", "help": "Imagen principal."},
                     {"name": "imagenes", "required": False, "example": "https://cdn.fventas.cl/1.jpg|https://cdn.fventas.cl/2.jpg", "help": "Galeria separada por |, coma o salto de linea."},
                     {"name": "pdf_tecnicos", "required": False, "example": "https://cdn.fventas.cl/ficha.pdf", "help": "Fichas tecnicas."},
@@ -4274,20 +4274,9 @@ def plan_pricing_for_country(country_code: str | None = None) -> dict:
 def currency_context(store: dict | None = None) -> dict:
     settings = business_settings(store)
     profile = market_profile_from_settings(settings)
-    sales_currency = normalize_currency_code(
-        settings.get("salesCurrency") or settings.get("primaryCurrency"),
-        profile.get("salesCurrency", "USD"),
-    )
-    local_currency = normalize_currency_code(
-        settings.get("localCurrency") or settings.get("referenceCurrency"),
-        profile.get("localCurrency", "CLP"),
-    )
-    rate = safe_float(
-        settings.get("exchangeRateBaseToLocal")
-        or settings.get("exchangeRateUsdClp")
-        or settings.get("exchangeRateUsdVes"),
-        profile.get("exchangeRateBaseToLocal", 950),
-    )
+    sales_currency = normalize_currency_code(profile.get("salesCurrency"), "USD")
+    local_currency = normalize_currency_code(profile.get("localCurrency"), sales_currency)
+    rate = safe_float(profile.get("exchangeRateBaseToLocal"), 1)
     return {
         "market_country": profile["code"],
         "market_profile": profile,
@@ -4299,16 +4288,8 @@ def currency_context(store: dict | None = None) -> dict:
 
 def sales_currency_for_company(store: dict | None = None, company_id: str | None = None) -> str:
     source_store = store or load_store()
-    settings = business_settings(source_store)
-    company = get_company(source_store, company_id) if company_id else None
     profile = active_market_profile_for_store(source_store, company_id)
-    return normalize_currency_code(
-        (company or {}).get("salesCurrency")
-        or (company or {}).get("primaryCurrency")
-        or settings.get("salesCurrency")
-        or settings.get("primaryCurrency"),
-        profile.get("salesCurrency", "USD"),
-    )
+    return normalize_currency_code(profile.get("salesCurrency"), "USD")
 
 
 def money_sales(value: float | int | str | None, store: dict | None = None, company_id: str | None = None) -> str:
@@ -5533,28 +5514,9 @@ def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | No
 
 def mobile_market_payload(store: dict, company_id: str | None = None) -> dict:
     profile = active_market_profile_for_store(store, company_id)
-    company = get_company(store, company_id) if company_id else None
-    company_profile = company.get("marketProfile") if isinstance(company, dict) else None
-    if not isinstance(company_profile, dict):
-        company_profile = {}
-
-    sales_currency = normalize_currency_code(
-        (company or {}).get("salesCurrency")
-        or (company or {}).get("baseCurrency")
-        or company_profile.get("salesCurrency"),
-        profile.get("salesCurrency", "USD"),
-    )
-    local_currency = normalize_currency_code(
-        (company or {}).get("localCurrency")
-        or (company or {}).get("currency")
-        or company_profile.get("localCurrency"),
-        profile.get("localCurrency", "USD"),
-    )
-    exchange_rate = safe_float(
-        (company or {}).get("exchangeRateBaseToLocal")
-        or company_profile.get("exchangeRateBaseToLocal"),
-        profile.get("exchangeRateBaseToLocal", 1),
-    )
+    sales_currency = normalize_currency_code(profile.get("salesCurrency"), "USD")
+    local_currency = normalize_currency_code(profile.get("localCurrency"), sales_currency)
+    exchange_rate = safe_float(profile.get("exchangeRateBaseToLocal"), 1)
 
     return {
         "companyId": company_id or "",
@@ -7299,15 +7261,15 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
         existing = find_product_by_sku(store, sku)
         current = existing or {}
         public_price = parse_import_float(
-            row_value(row, "publicPriceUsd", "precio_publico_usd", "precio_usd", "precio"),
+            row_value(row, "publicPriceUsd", "precio_publico", "precio_publico_usd", "precio_usd", "precio"),
             float(current.get("publicPriceUsd") or 0),
         )
         original_price = parse_import_float(
-            row_value(row, "originalPriceUsd", "precio_anterior_usd", "precio_lista_usd"),
+            row_value(row, "originalPriceUsd", "precio_anterior", "precio_anterior_usd", "precio_lista_usd"),
             float(current.get("originalPriceUsd") or public_price),
         )
         b2b_price = parse_import_float(
-            row_value(row, "b2bPriceUsd", "precio_b2b_usd"),
+            row_value(row, "b2bPriceUsd", "precio_b2b", "precio_b2b_usd"),
             float(current.get("b2bPriceUsd") or public_price),
         )
         discount = parse_import_float(
@@ -7315,7 +7277,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             float(current.get("discountPercent") or 0),
         )
         if public_price <= 0:
-            bulk_error(result, row_number, f"SKU {sku} requiere precio_publico_usd mayor a 0.")
+            bulk_error(result, row_number, f"SKU {sku} requiere precio_publico mayor a 0.")
             continue
         if original_price < 0 or b2b_price < 0:
             bulk_error(result, row_number, f"SKU {sku}: precio anterior y precio B2B no pueden ser negativos.")
@@ -7371,7 +7333,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             int(current.get("maximumStock") or 0),
         )
         cost_reference = parse_import_float(
-            row_value(row, "costReferenceUsd", "costo_referencial_usd", "costo_usd"),
+            row_value(row, "costReferenceUsd", "costo_referencial", "costo_referencial_usd", "costo_usd"),
             float(current.get("costReferenceUsd") or 0),
         )
         margin_percent = parse_import_float(
@@ -7410,7 +7372,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             "costReferenceUsd": cost_reference,
             "marginPercent": margin_percent,
             "exchangeRateUsdClp": parse_import_float(
-                row_value(row, "exchangeRateUsdClp", "tasa_usd_local", "tasa_usd_clp", "tasa"),
+                row_value(row, "exchangeRateUsdClp", "tasa_moneda_local", "tasa_usd_local", "tasa_usd_clp", "tasa"),
                 float(current.get("exchangeRateUsdClp") or current_rate()),
             ),
             "stock": stock_quantity,
@@ -7623,7 +7585,7 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             "phone": row_value(row, "phone", "telefono", "whatsapp", default=(user or {}).get("phone", "")),
             "commissionRatePercent": commission,
             "salesGoalUsd": parse_import_float(
-                row_value(row, "salesGoalUsd", "meta_usd", "meta_mensual_usd", "meta_ventas_usd"),
+                row_value(row, "salesGoalUsd", "meta_mensual", "meta", "meta_usd", "meta_mensual_usd", "meta_ventas_usd"),
                 float((user or {}).get("salesGoalUsd") or 0),
             ),
             "hiredAt": row_value(row, "hiredAt", "fecha_ingreso", default=(user or {}).get("hiredAt", "")),
@@ -7756,8 +7718,8 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         if not password and not client:
             password = temporary_mobile_client_password()
         seller = find_seller_for_import(store, row)
-        credit_requested = parse_import_float(row_value(row, "creditRequestedUsd", "credito_solicitado_usd", "solicitud_credito_usd"), float((client or {}).get("creditRequestedUsd") or 0))
-        credit_limit = parse_import_float(row_value(row, "creditLimitUsd", "credito_limite_usd", "cupo_usd", "linea_credito_usd"), float((client or {}).get("creditLimitUsd") or 0))
+        credit_requested = parse_import_float(row_value(row, "creditRequestedUsd", "credito_solicitado", "credito_solicitado_usd", "solicitud_credito_usd"), float((client or {}).get("creditRequestedUsd") or 0))
+        credit_limit = parse_import_float(row_value(row, "creditLimitUsd", "credito_limite", "cupo", "credito_limite_usd", "cupo_usd", "linea_credito_usd"), float((client or {}).get("creditLimitUsd") or 0))
         credit_status = row_value(row, "creditRequestStatus", "estado_credito", default=(client or {}).get("creditRequestStatus", "none")) or "none"
         if credit_status not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
             bulk_error(result, row_number, f"{business_name}: estado_credito no valido.")
@@ -7881,7 +7843,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "creditRequestedUsd": credit_requested,
             "creditEnabled": credit_enabled and credit_status == "approved",
             "creditLimitUsd": credit_limit if credit_enabled and credit_status == "approved" else float((client or {}).get("creditLimitUsd") or 0),
-            "creditUsedUsd": parse_import_float(row_value(row, "creditUsedUsd", "credito_usado_usd", "deuda_manual_usd"), float((client or {}).get("creditUsedUsd") or 0)),
+            "creditUsedUsd": parse_import_float(row_value(row, "creditUsedUsd", "deuda_manual", "credito_usado", "credito_usado_usd", "deuda_manual_usd"), float((client or {}).get("creditUsedUsd") or 0)),
             "paymentTermsDays": payment_term if credit_status == "approved" else int((client or {}).get("paymentTermsDays") or 0),
             "notes": row_value(row, "notes", "notas", default=(client or {}).get("notes", "")),
             "updatedVia": "import",
@@ -12588,6 +12550,7 @@ def quote_to_order_payload(quote: dict) -> dict:
 
 
 def quote_form_context(store: dict, quote: dict | None = None, error: str = "") -> dict:
+    currency_data = currency_context(store)
     scoped_orders = visible_records_for_current_company(store, "orders")
     scoped_credit_movements = visible_records_for_current_company(store, "credit_movements")
     clients_list = [
@@ -12612,6 +12575,9 @@ def quote_form_context(store: dict, quote: dict | None = None, error: str = "") 
         "sale_type_options": SALE_TYPE_OPTIONS,
         "payment_terms": payment_term_options(store),
         "default_valid_until": default_valid_until,
+        "sales_currency": currency_data["sales_currency"],
+        "local_currency": currency_data["local_currency"],
+        "exchange_rate": currency_data["exchange_rate"],
         "error": error,
     }
 
@@ -13195,9 +13161,9 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
             ("tipo_venta", "Tipo venta"),
             ("estado", "Estado"),
             ("items", "Items"),
-            ("total_usd", "Total moneda venta"),
-            ("abonado_usd", "Abonado moneda venta"),
-            ("saldo_usd", "Saldo moneda venta"),
+            ("total", "Total moneda venta"),
+            ("abonado", "Abonado moneda venta"),
+            ("saldo", "Saldo moneda venta"),
         ],
         "finance": [
             ("vence", "Vence"),
@@ -13206,9 +13172,9 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
             ("vendedor", "Vendedor"),
             ("condicion", "Condicion"),
             ("estado_cobranza", "Cobranza"),
-            ("total_usd", "Total moneda venta"),
-            ("abonado_usd", "Abonado moneda venta"),
-            ("saldo_usd", "Saldo moneda venta"),
+            ("total", "Total moneda venta"),
+            ("abonado", "Abonado moneda venta"),
+            ("saldo", "Saldo moneda venta"),
             ("ultimo_abono", "Ultimo abono"),
         ],
         "inventory": [
@@ -13220,20 +13186,20 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
             ("reservado", "Reservado"),
             ("disponible", "Disponible"),
             ("rotacion", "Rotacion"),
-            ("precio_usd", "Precio moneda venta"),
-            ("valor_stock_usd", "Valor stock moneda venta"),
+            ("precio", "Precio moneda venta"),
+            ("valor_stock", "Valor stock moneda venta"),
         ],
         "sellers": [
             ("vendedor", "Vendedor"),
             ("zona", "Zona"),
             ("clientes", "Clientes"),
             ("ordenes", "Ordenes"),
-            ("ventas_usd", "Ventas moneda venta"),
-            ("ticket_promedio_usd", "Ticket promedio moneda venta"),
-            ("meta_usd", "Meta moneda venta"),
+            ("ventas", "Ventas moneda venta"),
+            ("ticket_promedio", "Ticket promedio moneda venta"),
+            ("meta", "Meta moneda venta"),
             ("avance_meta", "Avance meta"),
-            ("comision_pendiente_usd", "Comision pendiente moneda venta"),
-            ("comision_pagada_usd", "Comision pagada moneda venta"),
+            ("comision_pendiente", "Comision pendiente moneda venta"),
+            ("comision_pagada", "Comision pagada moneda venta"),
         ],
     }
     return columns.get(report_type, columns["commercial"])
@@ -13256,9 +13222,9 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
                     "tipo_venta": order.get("saleTypeLabel", ""),
                     "estado": order.get("statusLabel", ""),
                     "items": " | ".join(f"{line['sku']} x{line['quantity']}" for line in lines),
-                    "total_usd": round(safe_float(order.get("totalUsd"), 0), 2),
-                    "abonado_usd": round(safe_float(order.get("paidUsd"), 0), 2),
-                    "saldo_usd": round(safe_float(order.get("balanceUsd"), 0), 2),
+                    "total": round(safe_float(order.get("totalUsd"), 0), 2),
+                    "abonado": round(safe_float(order.get("paidUsd"), 0), 2),
+                    "saldo": round(safe_float(order.get("balanceUsd"), 0), 2),
                 }
             )
         return rows
@@ -13271,9 +13237,9 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
                 "vendedor": order.get("sellerName", ""),
                 "condicion": order.get("saleTypeLabel", ""),
                 "estado_cobranza": order.get("collectionStatusLabel", ""),
-                "total_usd": round(safe_float(order.get("totalUsd"), 0), 2),
-                "abonado_usd": round(safe_float(order.get("paidUsd"), 0), 2),
-                "saldo_usd": round(safe_float(order.get("balanceUsd"), 0), 2),
+                "total": round(safe_float(order.get("totalUsd"), 0), 2),
+                "abonado": round(safe_float(order.get("paidUsd"), 0), 2),
+                "saldo": round(safe_float(order.get("balanceUsd"), 0), 2),
                 "ultimo_abono": order.get("lastPaymentAt", ""),
             }
             for order in sorted(orders, key=lambda item: (item.get("dueDate", ""), item.get("createdAt", "")))
@@ -13295,8 +13261,8 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
                 "reservado": safe_int(product.get("reserved"), 0),
                 "disponible": max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)),
                 "rotacion": safe_int(product.get("rotationLast30Days"), 0),
-                "precio_usd": round(safe_float(product.get("publicPriceUsd"), 0), 2),
-                "valor_stock_usd": round(max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)) * safe_float(product.get("publicPriceUsd"), 0), 2),
+                "precio": round(safe_float(product.get("publicPriceUsd"), 0), 2),
+                "valor_stock": round(max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)) * safe_float(product.get("publicPriceUsd"), 0), 2),
             }
             for product in sorted(products, key=lambda item: (item.get("categoryName", ""), item.get("title", "")))
         ]
@@ -13313,12 +13279,12 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
             "zona": seller.get("zone", ""),
             "clientes": seller.get("clientsCount", 0),
             "ordenes": seller.get("ordersCount", 0),
-            "ventas_usd": round(safe_float(seller.get("salesUsd"), 0), 2),
-            "ticket_promedio_usd": round(safe_float(seller.get("ticketAverageUsd"), 0), 2),
-            "meta_usd": round(safe_float(seller.get("salesGoalUsd"), 0), 2),
+            "ventas": round(safe_float(seller.get("salesUsd"), 0), 2),
+            "ticket_promedio": round(safe_float(seller.get("ticketAverageUsd"), 0), 2),
+            "meta": round(safe_float(seller.get("salesGoalUsd"), 0), 2),
             "avance_meta": f"{seller.get('goalProgressPercent', 0)}%",
-            "comision_pendiente_usd": round(safe_float(seller.get("commissionPendingUsd"), 0), 2),
-            "comision_pagada_usd": round(safe_float(seller.get("commissionPaidUsd"), 0), 2),
+            "comision_pendiente": round(safe_float(seller.get("commissionPendingUsd"), 0), 2),
+            "comision_pagada": round(safe_float(seller.get("commissionPaidUsd"), 0), 2),
         }
         for seller in sorted(sellers, key=lambda item: safe_float(item.get("salesUsd"), 0), reverse=True)
     ]
@@ -15085,9 +15051,9 @@ def products_export():
         "modelo",
         "tipo_producto",
         "unidad_venta",
-        "precio_publico_usd",
-        "precio_b2b_usd",
-        "precio_anterior_usd",
+        "precio_publico",
+        "precio_b2b",
+        "precio_anterior",
         "descuento_porcentaje",
         "stock_fisico",
         "stock_disponible",
@@ -15114,9 +15080,9 @@ def products_export():
                 "modelo": product.get("model", ""),
                 "tipo_producto": product.get("productType", ""),
                 "unidad_venta": product.get("unitOfSale", ""),
-                "precio_publico_usd": product.get("publicPriceUsd", 0),
-                "precio_b2b_usd": product.get("b2bPriceUsd", 0),
-                "precio_anterior_usd": product.get("originalPriceUsd", 0),
+                "precio_publico": product.get("publicPriceUsd", 0),
+                "precio_b2b": product.get("b2bPriceUsd", 0),
+                "precio_anterior": product.get("originalPriceUsd", 0),
                 "descuento_porcentaje": product.get("discountPercent", 0),
                 "stock_fisico": product.get("physicalStock", 0),
                 "stock_disponible": product.get("availableStock", 0),
@@ -16453,15 +16419,15 @@ def credit_export():
             "estado_credito",
             "riesgo",
             "score",
-            "solicitado_usd",
-            "limite_usd",
-            "deuda_vigente_usd",
-            "deuda_vencida_usd",
-            "ordenes_abiertas_usd",
-            "disponible_usd",
+            "solicitado",
+            "limite",
+            "deuda_vigente",
+            "deuda_vencida",
+            "ordenes_abiertas",
+            "disponible",
             "dias_credito",
             "promedio_pago_dias",
-            "ultimo_pago_usd",
+            "ultimo_pago",
             "ultimo_pago_fecha",
             "observacion_gerencia",
         ],
@@ -16478,15 +16444,15 @@ def credit_export():
                 "estado_credito": client.get("creditStatusLabel", ""),
                 "riesgo": client.get("creditRiskLabel", ""),
                 "score": client.get("creditScore", 0),
-                "solicitado_usd": client.get("creditRequestedUsd", 0),
-                "limite_usd": client.get("creditLimitUsd", 0),
-                "deuda_vigente_usd": client.get("currentDebtUsd", 0),
-                "deuda_vencida_usd": client.get("overdueBalanceUsd", 0),
-                "ordenes_abiertas_usd": client.get("creditOrdersUsd", 0),
-                "disponible_usd": client.get("creditAvailableUsd", 0),
+                "solicitado": client.get("creditRequestedUsd", 0),
+                "limite": client.get("creditLimitUsd", 0),
+                "deuda_vigente": client.get("currentDebtUsd", 0),
+                "deuda_vencida": client.get("overdueBalanceUsd", 0),
+                "ordenes_abiertas": client.get("creditOrdersUsd", 0),
+                "disponible": client.get("creditAvailableUsd", 0),
                 "dias_credito": client.get("paymentTermsDays", 0),
                 "promedio_pago_dias": client.get("averagePaymentDays", 0),
-                "ultimo_pago_usd": client.get("lastPaymentUsd", 0),
+                "ultimo_pago": client.get("lastPaymentUsd", 0),
                 "ultimo_pago_fecha": client.get("lastPaymentAt", ""),
                 "observacion_gerencia": client.get("creditManagerNote", ""),
             }
@@ -16506,7 +16472,7 @@ def credit_due_export():
     output = io.StringIO()
     writer = safe_csv_dict_writer(
         output,
-        fieldnames=["vence", "orden", "cliente", "vendedor", "condicion", "saldo_usd", "dias", "estado"],
+        fieldnames=["vence", "orden", "cliente", "vendedor", "condicion", "saldo", "dias", "estado"],
         lineterminator="\n",
     )
     writer.writeheader()
@@ -16518,7 +16484,7 @@ def credit_due_export():
                 "cliente": order.get("customerName", ""),
                 "vendedor": order.get("sellerName", ""),
                 "condicion": order.get("saleTypeLabel", ""),
-                "saldo_usd": order.get("balanceUsd", 0),
+                "saldo": order.get("balanceUsd", 0),
                 "dias": order.get("dueDays", 0),
                 "estado": order.get("dueStatus", ""),
             }
@@ -16538,7 +16504,7 @@ def credit_history_export():
     output = io.StringIO()
     writer = safe_csv_dict_writer(
         output,
-        fieldnames=["fecha", "orden", "cliente", "metodo", "referencia", "monto_usd", "monto_clp", "usuario", "nota"],
+        fieldnames=["fecha", "orden", "cliente", "metodo", "referencia", "monto", "monto_local", "usuario", "nota"],
         lineterminator="\n",
     )
     writer.writeheader()
@@ -16550,8 +16516,8 @@ def credit_history_export():
                 "cliente": payment.get("clientName", ""),
                 "metodo": payment.get("method", ""),
                 "referencia": payment.get("reference", ""),
-                "monto_usd": payment.get("amountUsd", 0),
-                "monto_clp": payment.get("amountClp", payment.get("amountVes", 0)),
+                "monto": payment.get("amountUsd", 0),
+                "monto_local": payment.get("amountClp", payment.get("amountVes", 0)),
                 "usuario": payment.get("createdBy", ""),
                 "nota": payment.get("note", ""),
             }
@@ -17878,9 +17844,9 @@ def crm_export():
         "telefono",
         "email",
         "origen",
-        "valor_estimado_usd",
+        "valor_estimado",
         "probabilidad",
-        "valor_ponderado_usd",
+        "valor_ponderado",
         "cierre_estimado",
         "proxima_accion",
         "ultima_actividad",
@@ -17901,9 +17867,9 @@ def crm_export():
                 "telefono": record.get("phone", ""),
                 "email": record.get("email", ""),
                 "origen": record.get("source", ""),
-                "valor_estimado_usd": record.get("estimatedValueUsd", 0),
+                "valor_estimado": record.get("estimatedValueUsd", 0),
                 "probabilidad": record.get("probabilityPercent", 0),
-                "valor_ponderado_usd": record.get("weightedValueUsd", 0),
+                "valor_ponderado": record.get("weightedValueUsd", 0),
                 "cierre_estimado": record.get("expectedCloseAt", ""),
                 "proxima_accion": record.get("nextActionAt", ""),
                 "ultima_actividad": record.get("lastActivityAt", ""),
@@ -18029,8 +17995,8 @@ def quotes_export():
         "tipo_venta",
         "plazo_dias",
         "version",
-        "total_usd",
-        "total_clp",
+        "total",
+        "total_local",
         "items",
         "orden_convertida",
     ]
@@ -18048,8 +18014,8 @@ def quotes_export():
                 "tipo_venta": quote.get("saleTypeLabel", ""),
                 "plazo_dias": quote.get("paymentTermDays", 0),
                 "version": quote.get("version", 1),
-                "total_usd": quote.get("totalUsd", 0),
-                "total_clp": quote.get("totalClp", quote.get("totalVes", 0)),
+                "total": quote.get("totalUsd", 0),
+                "total_local": quote.get("totalClp", quote.get("totalVes", quote.get("totalUsd", 0))),
                 "items": "|".join(
                     f"{item.get('sku', '')}:{item.get('quantity', 0)}"
                     for item in quote.get("items") or []
@@ -18287,13 +18253,13 @@ def orders_export():
         "estado_inventario",
         "estado_pago",
         "estado_despacho",
-        "total_usd",
-        "abonado_usd",
-        "saldo_usd",
+        "total",
+        "abonado",
+        "saldo",
         "vence",
         "items",
         "direccion_despacho",
-        "comision_usd",
+        "comision",
         "estado_comision",
     ]
     writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
@@ -18313,16 +18279,16 @@ def orders_export():
                 "estado_inventario": order.get("stockStatus", ""),
                 "estado_pago": order.get("paymentStatusLabel", ""),
                 "estado_despacho": order.get("dispatchStatusLabel", ""),
-                "total_usd": order.get("totalUsd", 0),
-                "abonado_usd": order.get("paidUsd", 0),
-                "saldo_usd": order.get("balanceUsd", 0),
+                "total": order.get("totalUsd", 0),
+                "abonado": order.get("paidUsd", 0),
+                "saldo": order.get("balanceUsd", 0),
                 "vence": order.get("dueDate", ""),
                 "items": "|".join(
                     f"{item.get('sku', '')}:{item.get('quantity', 0)}"
                     for item in order.get("items") or []
                 ),
                 "direccion_despacho": order.get("shippingAddress", ""),
-                "comision_usd": order.get("commissionUsd", 0),
+                "comision": order.get("commissionUsd", 0),
                 "estado_comision": order.get("commissionStatusLabel", ""),
             }
         )
@@ -18658,9 +18624,9 @@ def collections_export():
             "orden",
             "cliente",
             "vendedor",
-            "total_usd",
-            "abonado_usd",
-            "saldo_usd",
+            "total",
+            "abonado",
+            "saldo",
             "fecha_emision",
             "fecha_vencimiento",
             "dias_atraso",
@@ -18680,9 +18646,9 @@ def collections_export():
                 "orden": order.get("orderId", ""),
                 "cliente": order.get("customerName", ""),
                 "vendedor": order.get("sellerName", ""),
-                "total_usd": order.get("totalUsd", 0),
-                "abonado_usd": order.get("paidUsd", 0),
-                "saldo_usd": order.get("balanceUsd", 0),
+                "total": order.get("totalUsd", 0),
+                "abonado": order.get("paidUsd", 0),
+                "saldo": order.get("balanceUsd", 0),
                 "fecha_emision": order.get("createdAt", ""),
                 "fecha_vencimiento": order.get("dueDate", ""),
                 "dias_atraso": order.get("dueDays", 0) if order.get("dueStatus") == "overdue" else 0,
@@ -18717,7 +18683,7 @@ def collection_statement(client_id: str):
     output = io.StringIO()
     writer = safe_csv_dict_writer(
         output,
-        fieldnames=["fecha", "tipo", "documento", "debe_usd", "haber_usd", "saldo_usd", "detalle"],
+        fieldnames=["fecha", "tipo", "documento", "debe", "haber", "saldo", "detalle"],
         lineterminator="\n",
     )
     writer.writeheader()
@@ -18729,9 +18695,9 @@ def collection_statement(client_id: str):
                 "fecha": order.get("createdAt", ""),
                 "tipo": "orden",
                 "documento": order.get("orderId", ""),
-                "debe_usd": order.get("totalUsd", 0),
-                "haber_usd": 0,
-                "saldo_usd": round(running_balance, 2),
+                "debe": order.get("totalUsd", 0),
+                "haber": 0,
+                "saldo": round(running_balance, 2),
                 "detalle": order.get("saleTypeLabel", ""),
             }
         )
@@ -18742,9 +18708,9 @@ def collection_statement(client_id: str):
                     "fecha": payment.get("createdAt", ""),
                     "tipo": "abono",
                     "documento": payment.get("orderId", ""),
-                    "debe_usd": 0,
-                    "haber_usd": payment.get("amountUsd", 0),
-                    "saldo_usd": round(running_balance, 2),
+                    "debe": 0,
+                    "haber": payment.get("amountUsd", 0),
+                    "saldo": round(running_balance, 2),
                     "detalle": payment.get("reference") or payment.get("method", ""),
                 }
             )
@@ -19066,17 +19032,17 @@ def commissions_export():
         "fecha_generacion",
         "vendedor",
         "cliente",
-        "total_venta_usd",
-        "base_comisionable_usd",
+        "total_venta",
+        "base_comisionable",
         "porcentaje",
-        "comision_usd",
+        "comision",
         "regla",
         "estado_comision",
         "fecha_aprobacion",
         "aprobado_por",
         "fecha_pago",
         "pagado_por",
-        "saldo_orden_usd",
+        "saldo_orden",
         "bloqueos",
         "observacion",
     ]
@@ -19089,17 +19055,17 @@ def commissions_export():
                 "fecha_generacion": order.get("commissionGeneratedAt", ""),
                 "vendedor": order.get("sellerName", ""),
                 "cliente": order.get("customerName", ""),
-                "total_venta_usd": order.get("totalUsd", 0),
-                "base_comisionable_usd": order.get("commissionBaseUsd", 0),
+                "total_venta": order.get("totalUsd", 0),
+                "base_comisionable": order.get("commissionBaseUsd", 0),
                 "porcentaje": order.get("commissionRatePercent", 0),
-                "comision_usd": order.get("commissionUsd", 0),
+                "comision": order.get("commissionUsd", 0),
                 "regla": order.get("commissionRuleLabel", ""),
                 "estado_comision": order.get("commissionStatusLabel", ""),
                 "fecha_aprobacion": order.get("commissionApprovedAt", ""),
                 "aprobado_por": order.get("commissionApprovedBy", ""),
                 "fecha_pago": order.get("commissionPaidAt", ""),
                 "pagado_por": order.get("commissionPaidBy", ""),
-                "saldo_orden_usd": order.get("balanceUsd", 0),
+                "saldo_orden": order.get("balanceUsd", 0),
                 "bloqueos": " | ".join(order.get("commissionReleaseBlockers") or []),
                 "observacion": order.get("commissionObservation", ""),
             }

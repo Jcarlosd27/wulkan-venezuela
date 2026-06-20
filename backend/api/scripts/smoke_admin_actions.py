@@ -252,7 +252,7 @@ def base_store() -> dict:
                 "originalPriceUsd": 210,
                 "discountPercent": 12,
                 "b2bPriceUsd": 162,
-                "exchangeRateUsdVes": 950.0,
+                "exchangeRateUsdVes": 1.0,
                 "stock": 12,
                 "reserved": 1,
                 "status": "active",
@@ -471,7 +471,7 @@ def base_store() -> dict:
         "audit_events": [],
         "business_settings": {
             "companyName": "FVENTAS",
-            "exchangeRateUsdVes": 950.0,
+            "exchangeRateUsdVes": 1.0,
             "defaultPaymentTermsDays": [0, 10, 15, 20, 30, 40],
             "defaultCommissionPercent": 5,
         },

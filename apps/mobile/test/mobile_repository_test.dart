@@ -65,8 +65,21 @@ void main() {
       final product = await repository.getProduct('prod-motosierra-45cc');
 
       expect(product, isNotNull);
-      expect(product?.publicPriceUsd, 185);
+      expect(product?.publicPriceUsd, 175750);
       expect(product?.compatibilityNotes, isNotEmpty);
+    });
+
+    test('adapts mock amounts for Venezuela without leaking CLP values',
+        () async {
+      final venezuelaRepository = MockMobileRepository(countryCode: 'VE');
+
+      final product =
+          await venezuelaRepository.getProduct('prod-motosierra-45cc');
+      final credit = await venezuelaRepository.getCredit('client-local');
+
+      expect(product?.publicPriceUsd, 185);
+      expect(product?.b2bPriceUsd, 162);
+      expect(credit.creditLimitUsd, 12000);
     });
 
     test('returns authorized locations', () async {

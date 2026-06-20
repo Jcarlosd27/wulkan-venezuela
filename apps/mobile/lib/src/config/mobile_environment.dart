@@ -66,7 +66,7 @@ class MobileEnvironment {
   factory MobileEnvironment.fromDartDefines() {
     const legacyExchangeRate = String.fromEnvironment(
       "FVENTAS_EXCHANGE_RATE_USD_CLP",
-      defaultValue: "950",
+      defaultValue: "1",
     );
     const exchangeRate = String.fromEnvironment(
       "FVENTAS_EXCHANGE_RATE_USD_LOCAL",
@@ -104,13 +104,13 @@ class MobileEnvironment {
       ),
       primaryCurrency: const String.fromEnvironment(
         "FVENTAS_PRIMARY_CURRENCY",
-        defaultValue: "USD",
+        defaultValue: "CLP",
       ),
       secondaryCurrency: const String.fromEnvironment(
         "FVENTAS_SECONDARY_CURRENCY",
         defaultValue: "CLP",
       ),
-      exchangeRateUsdLocal: double.tryParse(exchangeRate) ?? 950,
+      exchangeRateUsdLocal: double.tryParse(exchangeRate) ?? 1,
       adminApiUrl: const String.fromEnvironment(
         "FVENTAS_ADMIN_API_URL",
         defaultValue: "https://fventas.cl/api/v1/mobile",

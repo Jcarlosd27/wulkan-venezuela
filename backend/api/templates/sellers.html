@@ -393,7 +393,7 @@
 {% set bulk_action = url_for("sellers_import") %}
 {% set bulk_title = "Importar vendedores" %}
 {% set bulk_help = "Crea o actualiza usuarios vendedores para app movil con zona, ruta, comision, meta y acceso." %}
-{% set bulk_columns = ["nombre_completo", "email", "telefono", "codigo_vendedor", "zona", "territorio", "supervisor", "comision", "meta_mensual_usd", "fecha_ingreso", "acceso_movil", "estado"] %}
+{% set bulk_columns = ["nombre_completo", "email", "telefono", "codigo_vendedor", "zona", "territorio", "supervisor", "comision", "meta_mensual", "fecha_ingreso", "acceso_movil", "estado"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}
 

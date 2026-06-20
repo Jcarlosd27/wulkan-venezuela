@@ -272,7 +272,7 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         if not product.get("sku") or not product.get("title"):
             add(findings, "error", "product-required", f"Producto incompleto: {product.get('id', 'sin-id')}.")
         if float(product.get("publicPriceUsd") or 0) <= 0:
-            add(findings, "error", "product-price", f"Producto sin precio USD publico: {product.get('sku', product.get('id'))}.")
+            add(findings, "error", "product-price", f"Producto sin precio publico de venta: {product.get('sku', product.get('id'))}.")
         if product.get("categoryId") not in category_ids:
             add(findings, "error", "product-category", f"Producto con categoria inexistente: {product.get('sku', product.get('id'))}.")
         if strict and not (product.get("imageUrl") or product.get("imageUrls")):

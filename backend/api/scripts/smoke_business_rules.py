@@ -68,7 +68,7 @@ def base_store() -> dict:
                 "originalPriceUsd": 120,
                 "discountPercent": 0,
                 "b2bPriceUsd": 90,
-                "exchangeRateUsdVes": 950.0,
+                "exchangeRateUsdVes": 1.0,
                 "stock": 2,
                 "reserved": 0,
                 "status": "active",

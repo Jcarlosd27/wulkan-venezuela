@@ -145,7 +145,11 @@
         <div class="panel-header">
           <div>
             <h2>Precios y margen</h2>
+            {% if sales_currency == local_currency %}
+            <span>Precios en {{ sales_currency }} definidos por el mercado de la empresa.</span>
+            {% else %}
             <span>{{ sales_currency }} es la moneda operativa; {{ local_currency }} se calcula como referencia.</span>
+            {% endif %}
           </div>
         </div>
         <div class="row g-3">
@@ -173,10 +177,14 @@
             <label class="form-label fw-semibold">Margen estimado %</label>
             <input class="form-control" name="marginPercent" inputmode="decimal" value="{{ product.marginPercent if product else '' }}" aria-label="Margen estimado">
           </div>
+          {% if sales_currency != local_currency %}
           <div class="col-12 col-lg-4">
             <label class="form-label fw-semibold">Tasa {{ sales_currency }}/{{ local_currency }}</label>
             <input class="form-control" name="exchangeRateUsdClp" inputmode="decimal" value="{{ (product.exchangeRateUsdClp or product.exchangeRateUsdVes) if product else rate }}" aria-label="Tasa {{ sales_currency }} {{ local_currency }}">
           </div>
+          {% else %}
+          <input type="hidden" name="exchangeRateUsdClp" value="{{ (product.exchangeRateUsdClp or product.exchangeRateUsdVes) if product else rate }}">
+          {% endif %}
         </div>
       </article>
     </div>

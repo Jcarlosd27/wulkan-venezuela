@@ -235,7 +235,9 @@
           <td>
             <strong>{{ money_currency(product.publicPriceUsd, sales_currency) }}</strong>
             <small class="d-block text-secondary">B2B {{ money_currency(product.b2bPriceUsd, sales_currency) }}</small>
+            {% if sales_currency != money_context.local_currency %}
             <small class="d-block text-secondary">{{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
+            {% endif %}
           </td>
           <td>
             <span class="badge {{ product.stockStatus | badge_class }}">{{ stock_label_map.get(product.stockStatus, product.stockStatus) }}</span>
@@ -332,7 +334,12 @@
           <div class="product-detail-card">
             <span>Precios</span>
             <strong>{{ money_currency(product.publicPriceUsd, sales_currency) }}</strong>
-            <small>B2B {{ money_currency(product.b2bPriceUsd, sales_currency) }} / {{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}</small>
+            <small>
+              B2B {{ money_currency(product.b2bPriceUsd, sales_currency) }}
+              {% if sales_currency != money_context.local_currency %}
+              / {{ convert_currency(product.publicPriceUsd, product.exchangeRateBaseToLocal or product.exchangeRateUsdClp or product.exchangeRateUsdVes or money_context.exchange_rate, money_context.local_currency) }}
+              {% endif %}
+            </small>
           </div>
           <div class="product-detail-card">
             <span>Inventario</span>
@@ -377,6 +384,6 @@
 {% set bulk_action = url_for("products_import") %}
 {% set bulk_title = "Importar productos" %}
 {% set bulk_help = "Crea o actualiza productos por SKU con precios, stock, categorias, galeria, PDFs y publicacion movil." %}
-{% set bulk_columns = ["sku", "codigo_interno", "nombre", "categoria", "subcategoria", "marca", "modelo", "precio_publico_usd", "precio_b2b_usd", "stock", "stock_minimo", "imagenes", "pdf_tecnicos", "visible_app", "estado"] %}
+{% set bulk_columns = ["sku", "codigo_interno", "nombre", "categoria", "subcategoria", "marca", "modelo", "precio_publico", "precio_b2b", "stock", "stock_minimo", "imagenes", "pdf_tecnicos", "visible_app", "estado"] %}
 {% include "partials/bulk_import_modal.html" %}
 {% endblock %}

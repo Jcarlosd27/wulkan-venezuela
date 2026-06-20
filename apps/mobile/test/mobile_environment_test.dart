@@ -14,9 +14,9 @@ void main() {
       allowMock: true,
       mockSessionRole: '',
       defaultCountry: country,
-      primaryCurrency: 'USD',
+      primaryCurrency: country == 'VE' ? 'USD' : 'CLP',
       secondaryCurrency: 'CLP',
-      exchangeRateUsdLocal: 950,
+      exchangeRateUsdLocal: 1,
       adminApiUrl: 'http://localhost:5000/api/v1/mobile',
       orderApiUrl: '',
     );
@@ -26,8 +26,8 @@ void main() {
     final environment = environmentFor('CL');
 
     expect(environment.displayCurrency, 'CLP');
-    expect(environment.moneyFromUsd(162), r'$153.900');
-    expect(environment.visibleAmountToUsd(153900), 162);
+    expect(environment.moneyFromUsd(153900), r'$153.900');
+    expect(environment.visibleAmountToUsd(153900), 153900);
   });
 
   test('formats Venezuela prices in dollars', () {

@@ -72,7 +72,7 @@ def synthetic_store(
     products = []
     for index in range(products_count):
         category = categories[index % len(categories)]
-        price = 12 + (index % 900) * 1.7
+        price = 12000 + (index % 900) * 1700
         b2b_price = round(price * 0.88, 2)
         products.append(
             {
@@ -248,8 +248,8 @@ def synthetic_store(
                 "legalName": "FVENTAS carga",
                 "country": "CL",
                 "currency": "CLP",
-                "baseCurrency": "USD",
-                "exchangeRateBaseToLocal": 950,
+                "baseCurrency": "CLP",
+                "exchangeRateBaseToLocal": 1,
                 "status": "active",
                 "createdAt": now,
                 "updatedAt": now,
@@ -270,9 +270,9 @@ def synthetic_store(
         ],
         "business_settings": {
             "marketCountry": "CL",
-            "salesCurrency": "USD",
+            "salesCurrency": "CLP",
             "localCurrency": "CLP",
-            "exchangeRateBaseToLocal": 950,
+            "exchangeRateBaseToLocal": 1,
             "defaultPaymentTermsDays": [0, 15, 30],
             "purchaseConditionsScope": "Solo datos de tu empresa",
         },

@@ -23,6 +23,7 @@ CLIENT_PASSWORD = "ClienteTemporal2026"
 CLIENT_NEW_PASSWORD = "ClienteFinal2026"
 COMPANY_ID = "company-fventas-chile"
 OTHER_COMPANY_ID = "company-competidor-chile"
+CLP_RATE = 950
 
 
 def base_store() -> dict:
@@ -36,8 +37,10 @@ def base_store() -> dict:
                 "name": "FVENTAS",
                 "country": "CL",
                 "currency": "CLP",
-                "baseCurrency": "USD",
-                "exchangeRateBaseToLocal": 950,
+                "baseCurrency": "CLP",
+                "salesCurrency": "CLP",
+                "localCurrency": "CLP",
+                "exchangeRateBaseToLocal": 1,
                 "purchaseConditions": {
                     "title": "Condiciones de compra",
                     "defaultSaleType": "cash",
@@ -87,9 +90,9 @@ def base_store() -> dict:
         ],
         "business_settings": {
             "marketCountry": "CL",
-            "salesCurrency": "USD",
+            "salesCurrency": "CLP",
             "localCurrency": "CLP",
-            "exchangeRateBaseToLocal": 950,
+            "exchangeRateBaseToLocal": 1,
             "defaultPaymentTermsDays": [0, 15, 30],
             "purchaseConditionsTitle": "Condiciones de compra",
             "purchaseDefaultSaleType": "cash",
@@ -131,11 +134,11 @@ def base_store() -> dict:
                 "productType": "machine",
                 "categoryId": "cat-maquinaria-flow",
                 "categoryName": "Maquinaria profesional",
-                "publicPriceUsd": 185.0,
-                "originalPriceUsd": 215.0,
+                "publicPriceUsd": 185.0 * CLP_RATE,
+                "originalPriceUsd": 215.0 * CLP_RATE,
                 "discountPercent": 14.0,
-                "b2bPriceUsd": 162.0,
-                "exchangeRateUsdClp": 950.0,
+                "b2bPriceUsd": 162.0 * CLP_RATE,
+                "exchangeRateUsdClp": 1.0,
                 "stock": 12,
                 "reserved": 0,
                 "status": "active",
@@ -161,11 +164,11 @@ def base_store() -> dict:
                 "productType": "machine",
                 "categoryId": "cat-maquinaria-flow",
                 "categoryName": "Maquinaria profesional",
-                "publicPriceUsd": 120.0,
-                "originalPriceUsd": 120.0,
+                "publicPriceUsd": 120.0 * CLP_RATE,
+                "originalPriceUsd": 120.0 * CLP_RATE,
                 "discountPercent": 0.0,
-                "b2bPriceUsd": 100.0,
-                "exchangeRateUsdClp": 950.0,
+                "b2bPriceUsd": 100.0 * CLP_RATE,
+                "exchangeRateUsdClp": 1.0,
                 "stock": 8,
                 "reserved": 0,
                 "status": "active",
@@ -189,11 +192,11 @@ def base_store() -> dict:
                 "productType": "machine",
                 "categoryId": "cat-ajena-flow",
                 "categoryName": "Categoria ajena",
-                "publicPriceUsd": 999.0,
-                "originalPriceUsd": 999.0,
+                "publicPriceUsd": 999.0 * CLP_RATE,
+                "originalPriceUsd": 999.0 * CLP_RATE,
                 "discountPercent": 0.0,
-                "b2bPriceUsd": 900.0,
-                "exchangeRateUsdClp": 950.0,
+                "b2bPriceUsd": 900.0 * CLP_RATE,
+                "exchangeRateUsdClp": 1.0,
                 "stock": 99,
                 "reserved": 0,
                 "status": "active",
@@ -258,18 +261,18 @@ def base_store() -> dict:
                 "dispatchStatus": "delivered",
                 "paymentStatus": "partial",
                 "commissionStatus": "commission_pending",
-                "commissionUsd": 45.0,
-                "totalUsd": 900.0,
-                "paidUsd": 100.0,
-                "balanceUsd": 800.0,
+                "commissionUsd": 45.0 * CLP_RATE,
+                "totalUsd": 900.0 * CLP_RATE,
+                "paidUsd": 100.0 * CLP_RATE,
+                "balanceUsd": 800.0 * CLP_RATE,
                 "items": [
                     {
                         "productId": "prod-ajeno-flow",
                         "sku": "OTRA-FLOW-001",
                         "title": "Producto de otra empresa",
                         "quantity": 1,
-                        "unitPriceUsd": 900.0,
-                        "lineTotalUsd": 900.0,
+                        "unitPriceUsd": 900.0 * CLP_RATE,
+                        "lineTotalUsd": 900.0 * CLP_RATE,
                     }
                 ],
                 "createdAt": now,
@@ -311,7 +314,7 @@ def base_store() -> dict:
                 "sellerCode": "CL-FLOW",
                 "sellerZone": "Centro",
                 "commissionRatePercent": 5.0,
-                "salesGoalUsd": 1000.0,
+                "salesGoalUsd": 1000.0 * CLP_RATE,
                 "createdAt": now,
                 "updatedAt": now,
             },
@@ -326,7 +329,7 @@ def base_store() -> dict:
                 "sellerCode": "CL-AJENO",
                 "sellerZone": "Otra zona",
                 "commissionRatePercent": 5.0,
-                "salesGoalUsd": 1000.0,
+                "salesGoalUsd": 1000.0 * CLP_RATE,
                 "createdAt": now,
                 "updatedAt": now,
             },
@@ -344,8 +347,8 @@ def base_store() -> dict:
                 "assignedSellerName": "Vendedor Ajeno",
                 "status": "active",
                 "creditEnabled": True,
-                "creditLimitUsd": 1500.0,
-                "creditUsedUsd": 800.0,
+                "creditLimitUsd": 1500.0 * CLP_RATE,
+                "creditUsedUsd": 800.0 * CLP_RATE,
                 "creditRequestStatus": "approved",
                 "createdAt": now,
                 "updatedAt": now,
@@ -358,8 +361,8 @@ def base_store() -> dict:
                 "movementType": "payment",
                 "clientId": "client-ajeno-flow",
                 "orderId": "ORD-AJENO-FLOW",
-                "amountUsd": 100.0,
-                "amountClp": 95000.0,
+                "amountUsd": 100.0 * CLP_RATE,
+                "amountClp": 100.0 * CLP_RATE,
                 "method": "transfer",
                 "reference": "PAGO-AJENO",
                 "createdBy": "Vendedor Ajeno",
@@ -542,8 +545,8 @@ def main() -> int:
                 "_csrf_token": "csrf-flow",
                 "importFile": (
                     io.BytesIO(
-                        b"sku,nombre,categoria,precio_publico_usd,precio_b2b_usd,stock,imagenes,notas_compatibilidad\n"
-                        b"FVT-FLOW-45CC,Motosierra FVENTAS 45cc Flow,Maquinaria profesional,185,162,12,https://cdn.example.com/productos/motosierra.jpg|https://cdn.example.com/productos/motosierra-lateral.jpg,Compatible con FVT-REP-CAD18|Validar serie antes de despacho\n"
+                        b"sku,nombre,categoria,precio_publico,precio_b2b,stock,imagenes,notas_compatibilidad\n"
+                        b"FVT-FLOW-45CC,Motosierra FVENTAS 45cc Flow,Maquinaria profesional,175750,153900,12,https://cdn.example.com/productos/motosierra.jpg|https://cdn.example.com/productos/motosierra-lateral.jpg,Compatible con FVT-REP-CAD18|Validar serie antes de despacho\n"
                     ),
                     "products.csv",
                 ),
@@ -883,7 +886,7 @@ def main() -> int:
                         "quantity": 1,
                     }
                 ],
-                "preview": {"totalUsd": 162, "subtotalUsd": 162},
+                "preview": {"totalUsd": 162 * CLP_RATE, "subtotalUsd": 162 * CLP_RATE},
             },
         ),
         201,
@@ -934,7 +937,7 @@ def main() -> int:
                         "quantity": 1,
                     }
                 ],
-                "preview": {"totalUsd": 162, "subtotalUsd": 162},
+                "preview": {"totalUsd": 162 * CLP_RATE, "subtotalUsd": 162 * CLP_RATE},
             },
         ),
         201,
@@ -957,7 +960,7 @@ def main() -> int:
                         "quantity": 1,
                     }
                 ],
-                "preview": {"totalUsd": 100, "subtotalUsd": 100},
+                "preview": {"totalUsd": 100 * CLP_RATE, "subtotalUsd": 100 * CLP_RATE},
             },
         ),
         400,
@@ -1058,7 +1061,7 @@ def main() -> int:
             data={
                 "_csrf_token": "csrf-flow",
                 "decision": "approved",
-                "creditLimitUsd": "500",
+                "creditLimitUsd": str(500 * CLP_RATE),
                 "paymentTermsDays": "30",
             },
             follow_redirects=False,
@@ -1218,7 +1221,7 @@ def main() -> int:
                         "quantity": 1,
                     }
                 ],
-                "preview": {"exchangeRateUsdVes": 950.0},
+                "preview": {"exchangeRateUsdVes": 1.0},
             },
         ),
         400,
@@ -1238,7 +1241,7 @@ def main() -> int:
                         "quantity": 1,
                     }
                 ],
-                "preview": {"totalUsd": 100, "subtotalUsd": 100},
+                "preview": {"totalUsd": 100 * CLP_RATE, "subtotalUsd": 100 * CLP_RATE},
             },
         ),
         400,
@@ -1334,7 +1337,7 @@ def main() -> int:
                 "preview": {
                     "totalUsd": 1,
                     "subtotalUsd": 1,
-                    "exchangeRateUsdVes": 950.0,
+                    "exchangeRateUsdVes": 1.0,
                 },
             },
         ),
@@ -1346,10 +1349,10 @@ def main() -> int:
     assert order["sellerId"] == "admin-seller-flow"
     assert created_order["salesChannel"] == "mobile"
     assert created_order["saleType"] == "credit_line"
-    assert created_order["totalUsd"] == 324
-    assert created_order["creditBeforeUsd"] == 500
-    assert created_order["creditAfterUsd"] == 176
-    assert created_order["commissionUsd"] == 16.2
+    assert created_order["totalUsd"] == 324 * CLP_RATE
+    assert created_order["creditBeforeUsd"] == 500 * CLP_RATE
+    assert created_order["creditAfterUsd"] == 176 * CLP_RATE
+    assert created_order["commissionUsd"] == 16.2 * CLP_RATE
     assert created_order["inventoryStatus"] == "reserved"
     customer_notifications_order = assert_status(
         client.get(
@@ -1396,7 +1399,7 @@ def main() -> int:
                     }
                 ],
                 "preview": {
-                    "exchangeRateUsdVes": 950.0,
+                    "exchangeRateUsdVes": 1.0,
                 },
             },
         ),
@@ -1409,7 +1412,7 @@ def main() -> int:
     assert cash_order["status"] == "payment_under_review"
     assert cash_order["creditStatus"] == "without_credit"
     assert cash_order["paymentTermDays"] == 0
-    assert cash_order["balanceUsd"] == 162
+    assert cash_order["balanceUsd"] == 162 * CLP_RATE
 
     assert_status(
         client.post(
@@ -1437,7 +1440,7 @@ def main() -> int:
                 "amountUsd": str(cash_order["balanceUsd"]),
                 "method": "cash",
                 "reference": "EFECTIVO-FLOW",
-                "exchangeRateUsdVes": "950.0",
+                "exchangeRateUsdVes": "1.0",
             },
             follow_redirects=False,
         ),
@@ -1470,7 +1473,7 @@ def main() -> int:
                     }
                 ],
                 "preview": {
-                    "exchangeRateUsdVes": 950.0,
+                    "exchangeRateUsdVes": 1.0,
                 },
             },
         ),
