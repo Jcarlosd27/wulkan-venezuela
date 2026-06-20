@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fventas}
+      POSTGRES_USER: ${POSTGRES_USER:-fventas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fventas} -d ${POSTGRES_DB:-fventas}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    environment:
+      FVENTAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-fventas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-fventas}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

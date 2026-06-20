@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -30,7 +30,7 @@ class AdminUser(TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(50), default="operator", nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
@@ -116,7 +116,7 @@ class MediaAsset(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     title: Mapped[str] = mapped_column(String(220), nullable=False)
-    product_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("products.id"))
+    product_id: Mapped[Optional[str]] = mapped_column(String(80), ForeignKey("products.id"))
     asset_type: Mapped[str] = mapped_column(String(50), default="image", nullable=False)
     url: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     file_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Terminos del servicio | FVENTAS CRM</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/fventas-crm-icon.svg') }}?v=20260615-saas">
+    <meta name="theme-color" content="#0d6efd">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <style>
+      :root {
+        --fventas-primary: #0d6efd;
+        --fventas-ink: #101828;
+        --fventas-muted: #667085;
+        --fventas-border: #e7eef8;
+        --fventas-bg: #f5f8fc;
+      }
+
+      body {
+        background: var(--fventas-bg);
+        color: var(--fventas-ink);
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .legal-shell {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 40px 16px;
+      }
+
+      .legal-card {
+        overflow: hidden;
+        border: 1px solid var(--fventas-border);
+        border-radius: 24px;
+        background: #fff;
+        box-shadow: 0 24px 60px rgba(16, 24, 40, 0.08);
+      }
+
+      .legal-hero {
+        padding: 32px;
+        border-bottom: 1px solid var(--fventas-border);
+        background: linear-gradient(135deg, rgba(13, 110, 253, 0.12), rgba(255, 255, 255, 0));
+      }
+
+      .brand-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 7px 12px;
+        background: rgba(13, 110, 253, 0.1);
+        color: var(--fventas-primary);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .brand-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--fventas-primary);
+      }
+
+      h1 {
+        margin: 16px 0 10px;
+        font-size: clamp(32px, 5vw, 48px);
+        line-height: 1.05;
+        font-weight: 900;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        margin: 30px 0 12px;
+        font-size: 22px;
+        font-weight: 850;
+        letter-spacing: 0;
+      }
+
+      p,
+      li {
+        color: #344054;
+        line-height: 1.7;
+      }
+
+      .legal-body {
+        padding: 32px;
+      }
+
+      .muted {
+        color: var(--fventas-muted);
+      }
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .info-box {
+        border: 1px solid var(--fventas-border);
+        border-radius: 16px;
+        padding: 16px;
+        background: #fbfcff;
+      }
+
+      .info-box strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .footer-note {
+        margin-top: 32px;
+        border-top: 1px solid var(--fventas-border);
+        padding-top: 20px;
+        font-size: 14px;
+      }
+
+      @media (max-width: 720px) {
+        .legal-shell {
+          padding: 20px 12px;
+        }
+
+        .legal-hero,
+        .legal-body {
+          padding: 22px;
+        }
+
+        .info-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="legal-shell">
+      <article class="legal-card">
+        <header class="legal-hero">
+          <span class="brand-pill"><span class="brand-dot"></span> FVENTAS CRM</span>
+          <h1>Terminos del servicio</h1>
+          <p class="lead mb-0">Condiciones comerciales y operativas para usar FVENTAS Admin y la app movil B2B.</p>
+          <p class="muted mt-3 mb-0">Ultima actualizacion: {{ legal_terms_version }}</p>
+        </header>
+
+        <section class="legal-body">
+          <div class="info-grid">
+            <div class="info-box">
+              <strong>Servicio</strong>
+              <span>Panel administrativo, API y app movil para operacion comercial B2B.</span>
+            </div>
+            <div class="info-box">
+              <strong>Privacidad</strong>
+              <span>Estos terminos se complementan con la <a href="{{ url_for('privacy_policy') }}">Politica de privacidad</a>.</span>
+            </div>
+          </div>
+
+          <h2>1. Aceptacion</h2>
+          <p>
+            Al registrar una empresa, iniciar sesion o usar FVENTAS, declaras tener facultades para actuar por la empresa
+            suscriptora y aceptas estos terminos, la politica de privacidad vigente y las condiciones comerciales del plan mensual.
+          </p>
+
+          <h2>2. Cuenta de empresa y aislamiento</h2>
+          <p>
+            Cada empresa suscriptora opera con sus propios usuarios, clientes, vendedores, productos, precios, stock, condiciones
+            de compra, ordenes, comisiones y reportes. Los usuarios solo deben acceder a informacion que su rol y empresa permitan.
+          </p>
+
+          <h2>3. Roles y responsabilidades</h2>
+          <ul>
+            <li>La empresa suscriptora debe crear usuarios reales, asignar roles correctos y desactivar accesos cuando corresponda.</li>
+            <li>Los super administradores de empresa son responsables de catalogo, precios, credito, vendedores y condiciones comerciales.</li>
+            <li>Los vendedores solo pueden operar cartera, clientes, pedidos, cotizaciones y comisiones permitidas por su empresa.</li>
+            <li>Los clientes B2B solo pueden ver su catalogo, condiciones, ordenes, cupo y vendedor asignado.</li>
+          </ul>
+
+          <h2>4. Suscripcion y acceso</h2>
+          <p>
+            FVENTAS se ofrece como servicio mensual por empresa. El acceso puede quedar pendiente, suspendido o limitado por falta de
+            pago, revision operativa, solicitud de eliminacion, uso indebido, riesgo de seguridad o incumplimiento de estos terminos.
+          </p>
+
+          <h2>5. Uso permitido</h2>
+          <p>
+            No esta permitido intentar acceder a datos de otra empresa, manipular precios desde clientes no autorizados, eludir controles
+            de rol, automatizar ataques, cargar informacion falsa o usar FVENTAS para actividades ilegales, fraudulentas o ajenas al flujo B2B.
+          </p>
+
+          <h2>6. Catalogo, precios, stock y credito</h2>
+          <p>
+            Los precios, stock, monedas, condiciones de pago y cupos visibles en la app dependen de la configuracion de la empresa
+            suscriptora en el panel admin. Las ordenes pueden quedar sujetas a revision de stock, credito, pago, compatibilidad tecnica,
+            despacho o aprobacion comercial.
+          </p>
+
+          <h2>7. Datos, seguridad y auditoria</h2>
+          <p>
+            FVENTAS registra auditoria de acciones sensibles para seguridad, soporte y trazabilidad. La empresa y sus usuarios deben
+            mantener credenciales seguras, no compartir claves y reportar accesos sospechosos por canales oficiales.
+          </p>
+
+          <h2>8. Eliminacion o desactivacion de cuenta</h2>
+          <p>
+            Las cuentas moviles pueden solicitar eliminacion o desactivacion desde la app o en
+            <a href="{{ url_for('account_deletion_page') }}">Eliminar cuenta</a>. FVENTAS puede conservar registros comerciales,
+            contables, de auditoria o seguridad necesarios para operaciones ya realizadas, cumplimiento o defensa de derechos.
+          </p>
+
+          <h2>9. Disponibilidad y cambios</h2>
+          <p>
+            FVENTAS puede actualizar funciones, corregir errores, modificar integraciones, cambiar estos terminos o suspender temporalmente
+            componentes por mantenimiento, seguridad, fuerza mayor o dependencias de terceros. La version vigente se publicara en esta pagina.
+          </p>
+
+          <h2>10. Contacto</h2>
+          <p>
+            Para soporte, privacidad, seguridad o consultas comerciales, usa los canales oficiales de FVENTAS publicados en el panel,
+            la app movil o las fichas de distribucion correspondientes.
+          </p>
+
+          <p class="footer-note muted mb-0">
+            Version terminos {{ legal_terms_version }} - version privacidad {{ legal_privacy_version }}.
+          </p>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>

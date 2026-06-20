@@ -13,7 +13,10 @@ if str(ROOT_DIR) not in sys.path:
 
 import app as FVENTAS_app
 from store import normalize_store, utc_now
-from werkzeug.security import generate_password_hash
+
+
+def generate_password_hash(password: str) -> str:
+    return FVENTAS_app.generate_password_hash(password, method="pbkdf2:sha256:1")
 
 
 ADMIN_ID = "admin-actions"
@@ -21,6 +24,10 @@ CSRF = "csrf-actions"
 
 PAGES = [
     "/",
+    "/signup",
+    "/privacy",
+    "/terms",
+    "/account-deletion",
     "/sellers",
     "/clients",
     "/credit",
@@ -618,7 +625,15 @@ def assert_product_seed_creates_mobile_catalog(app, state_holder: dict, failures
     if any(not product.get("imageUrl") for product in seeded):
         failures.append("Productos base FVENTAS quedaron sin imagen principal.")
 
-    mobile_skus = {product.get("sku") for product in FVENTAS_app.mobile_visible_products(state_holder["state"])}
+    company_id = (
+        (seeded[0].get("companyId") if seeded else "")
+        or state_holder["state"].get("currentCompanyId")
+        or ((state_holder["state"].get("companies") or [{}])[0]).get("id", "")
+    )
+    mobile_skus = {
+        product.get("sku")
+        for product in FVENTAS_app.mobile_visible_products(state_holder["state"], company_id=company_id)
+    }
     if not starter_skus.issubset(mobile_skus):
         failures.append("La API movil no expone todos los Productos base FVENTAS visibles.")
 
@@ -826,6 +841,103 @@ def assert_seller_create_handles_full_sync_failure(app, state_holder: dict, fail
         sql_store.sync_admin_user_records = original_sync_admin_user_records
 
 
+def assert_signup_requires_legal_acceptance(app, state_holder: dict, failures: list[str]) -> None:
+    state_holder["state"] = base_store()
+    state_holder["state"].setdefault("companies", []).append(
+        {
+            "id": "company-signup-existing",
+            "name": "Empresa Existente Signup",
+            "legalName": "Empresa Existente Signup SpA",
+            "taxId": "76.000.000-0",
+            "country": "CL",
+            "status": "active",
+            "ownerEmail": "empresa.existente.signup@fventas.test",
+            "createdAt": utc_now(),
+            "updatedAt": utc_now(),
+        }
+    )
+    state_holder["state"].setdefault("clients", []).append(
+        {
+            "id": "client-signup-conflict",
+            "companyId": "company-main",
+            "businessName": "Cliente Signup Conflict",
+            "email": "cliente.signup.conflict@fventas.test",
+            "status": "active",
+            "createdAt": utc_now(),
+            "updatedAt": utc_now(),
+        }
+    )
+    payload = {
+        "marketCountry": "CL",
+        "companyName": "Empresa Legal Smoke",
+        "legalName": "Empresa Legal Smoke SpA",
+        "taxId": "76.000.002-7",
+        "ownerName": "Admin Legal",
+        "supportPhone": "+56 9 1111 2222",
+        "ownerEmail": "legal.smoke@fventas.test",
+        "password": "LegalSmoke2026",
+        "confirmPassword": "LegalSmoke2026",
+    }
+    with app.test_client() as client:
+        signup_page = client.get("/signup")
+        token_match = re.search(r'name="_csrf_token" value="([^"]+)"', signup_page.get_data(as_text=True))
+        csrf_token = token_match.group(1) if token_match else CSRF
+        payload["_csrf_token"] = csrf_token
+        response = client.post(
+            "/signup",
+            data={
+                **payload,
+                "companyName": "Empresa Rut Duplicado Smoke",
+                "taxId": "76.000.000-0",
+                "ownerEmail": "rut.duplicado.smoke@fventas.test",
+                "legalAccepted": "on",
+            },
+        )
+        if response.status_code != 200 or "documento fiscal" not in response.get_data(as_text=True):
+            failures.append("Registro de empresa no bloquea documento fiscal duplicado.")
+            return
+        response = client.post(
+            "/signup",
+            data={
+                **payload,
+                "companyName": "Empresa Correo Cliente Smoke",
+                "taxId": "76.000.001-9",
+                "ownerEmail": "cliente.signup.conflict@fventas.test",
+                "legalAccepted": "on",
+            },
+        )
+        if response.status_code != 200 or "ya pertenece a una cuenta FVENTAS" not in response.get_data(as_text=True):
+            failures.append("Registro de empresa permite usar correo existente de cliente movil.")
+            return
+        response = client.post("/signup", data=payload)
+        if response.status_code != 200 or "Debes aceptar" not in response.get_data(as_text=True):
+            failures.append("Registro de empresa no exige aceptacion legal explicita.")
+            return
+        response = client.post("/signup", data={**payload, "legalAccepted": "on"})
+        if response.status_code not in {302, 303}:
+            failures.append(f"Registro de empresa con aceptacion legal fallo: HTTP {response.status_code}")
+            return
+        success_url = response.headers.get("Location", "")
+        if "/signup/success/" not in success_url:
+            failures.append("Registro de empresa no redirige a pantalla de activacion.")
+            return
+        success_page = client.get(success_url)
+        if success_page.status_code != 200 or "Proximos pasos" not in success_page.get_data(as_text=True):
+            failures.append("Pantalla de activacion post-registro no cargo correctamente.")
+            return
+
+    company = next(
+        (item for item in state_holder["state"].get("companies", []) if item.get("ownerEmail") == payload["ownerEmail"]),
+        None,
+    )
+    acceptance = (company or {}).get("legalAcceptance") or {}
+    if not company or not acceptance.get("accepted"):
+        failures.append("Registro de empresa no guardo legalAcceptance.")
+        return
+    if not acceptance.get("termsVersion") or not acceptance.get("privacyVersion"):
+        failures.append("Registro legal no guardo versiones de terminos y privacidad.")
+
+
 def main() -> int:
     failures: list[str] = []
     collected_forms: list[tuple[str, dict]] = []
@@ -883,6 +995,7 @@ def main() -> int:
     assert_category_delete_preserves_children(app, state_holder, failures)
     assert_seller_crud(app, state_holder, failures)
     assert_seller_create_handles_full_sync_failure(app, state_holder, failures)
+    assert_signup_requires_legal_acceptance(app, state_holder, failures)
     assert_product_seed_creates_mobile_catalog(app, state_holder, failures)
     assert_product_seed_handles_full_sync_failure(app, state_holder, failures)
 

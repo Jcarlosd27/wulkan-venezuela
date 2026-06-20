@@ -8,7 +8,7 @@ App Flutter para Android e iOS orientada a clientes B2B y vendedores FVENTAS. La
 - Dart.
 - Riverpod.
 - GoRouter.
-- API Flask publica en `https://fventas.cl/api/v1/mobile`.
+- API Flask publica en `https://app.example.com/api/v1/mobile` o el dominio productivo de la empresa.
 - Storage seguro local para sesion movil.
 
 La app ya no usa Firebase ni Firestore.
@@ -21,8 +21,8 @@ Produccion y DigitalOcean usan API:
 {
   "FVENTAS_MOBILE_DATA_SOURCE": "api",
   "FVENTAS_MOBILE_AUTH_MODE": "api",
-  "FVENTAS_ADMIN_API_URL": "https://fventas.cl/api/v1/mobile",
-  "FVENTAS_MOBILE_ORDER_API_URL": "https://fventas.cl/api/v1/mobile/orders"
+  "FVENTAS_ADMIN_API_URL": "https://app.example.com/api/v1/mobile",
+  "FVENTAS_MOBILE_ORDER_API_URL": "https://app.example.com/api/v1/mobile/orders"
 }
 ```
 
@@ -85,7 +85,7 @@ Antes de subir a App Store Connect se debe configurar en Xcode el equipo de firm
 
 La app incluye la solicitud de eliminacion de cuenta desde Perfil. Al confirmar, el backend registra la solicitud, bloquea el acceso movil de la cuenta y conserva solo la informacion necesaria para trazabilidad comercial, seguridad, auditoria o cumplimiento legal.
 
-Tambien existe la pagina publica `https://fventas.cl/account-deletion` para usuarios que ya no tengan la app instalada.
+Tambien existe la pagina publica `https://app.example.com/account-deletion` para usuarios que ya no tengan la app instalada.
 
 ## Experiencia Actual
 

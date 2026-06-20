@@ -505,6 +505,14 @@ class MobileSellerClient {
     required this.creditAvailableUsd,
     required this.creditExposureUsd,
     required this.creditRequestStatus,
+    this.taxId = "",
+    this.contactName = "",
+    this.address = "",
+    this.deliveryZone = "",
+    this.status = "active",
+    this.defaultSaleType = "cash",
+    this.allowedPaymentTermsDays = const [0],
+    this.creditRequestedUsd = 0,
   });
 
   final String id;
@@ -519,6 +527,19 @@ class MobileSellerClient {
   final double creditAvailableUsd;
   final double creditExposureUsd;
   final String creditRequestStatus;
+  final String taxId;
+  final String contactName;
+  final String address;
+  final String deliveryZone;
+  final String status;
+  final String defaultSaleType;
+  final List<int> allowedPaymentTermsDays;
+  final double creditRequestedUsd;
+
+  List<int> get positivePaymentTerms =>
+      allowedPaymentTermsDays.where((term) => term > 0).toList(growable: false);
+  bool get canUseTermCredit => positivePaymentTerms.isNotEmpty;
+  bool get canUseCreditLine => creditEnabled && creditAvailableUsd > 0;
 }
 
 class MobileSellerClientDraft {

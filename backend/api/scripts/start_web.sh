@@ -14,6 +14,10 @@ fi
 
 python scripts/harden_production_defaults.py
 
+if [ "${FVENTAS_BOOTSTRAP_ON_START:-0}" = "1" ]; then
+  python scripts/bootstrap_production.py --no-input
+fi
+
 exec gunicorn \
   --bind "0.0.0.0:${PORT}" \
   --workers "${WORKERS}" \

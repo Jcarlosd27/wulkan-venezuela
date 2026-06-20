@@ -1,21 +1,4 @@
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    env_file:
-      - .env.production
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-FVENTAS}
-      POSTGRES_USER: ${POSTGRES_USER:-FVENTAS}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-FVENTAS} -d ${POSTGRES_DB:-FVENTAS}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   api:
     build:
       context: ../../backend/api
@@ -28,19 +11,9 @@ services:
       FVENTAS_DATA_BACKEND: sql
       FVENTAS_SQL_FALLBACK_TO_JSON: "0"
       FVENTAS_REQUIRE_MOBILE_TOKEN: "1"
-      FVENTAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-FVENTAS}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-FVENTAS}
-    depends_on:
-      db:
-        condition: service_healthy
-    command: >
-      sh -c "python -m alembic upgrade head &&
-      gunicorn --bind 0.0.0.0:5000
-      --workers ${FVENTAS_WEB_WORKERS:-1}
-      --threads ${FVENTAS_WEB_THREADS:-4}
-      --timeout ${FVENTAS_GUNICORN_TIMEOUT:-60}
-      --max-requests ${FVENTAS_GUNICORN_MAX_REQUESTS:-600}
-      --max-requests-jitter ${FVENTAS_GUNICORN_MAX_REQUESTS_JITTER:-60}
-      wsgi:application"
+      FVENTAS_DATABASE_URL: ${FVENTAS_DATABASE_URL:-}
+      FVENTAS_RUN_MIGRATIONS: ${FVENTAS_RUN_MIGRATIONS:-1}
+    command: ["./scripts/start_web.sh"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/healthz"]
       interval: 15s
@@ -64,6 +37,5 @@ services:
         condition: service_healthy
 
 volumes:
-  postgres_data:
   caddy_data:
   caddy_config:

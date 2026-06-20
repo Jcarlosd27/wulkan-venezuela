@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from flask import g, has_request_context
 
 from core.config import Config
 
@@ -14,6 +17,9 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 STORE_PATH = DATA_DIR / "fventas_store.json"
 SQL_BACKEND_NAMES = {"sql", "database", "db"}
 PRODUCTION_ENV_NAME = "production"
+JSON_STORE_CACHE_LOCK = threading.Lock()
+JSON_STORE_CACHE_SIGNATURE: tuple[int, int] | None = None
+JSON_STORE_CACHE: dict[str, Any] | None = None
 INSECURE_PRODUCTION_ADMIN_EMAILS = {"admin@fventas.local"}
 INSECURE_PRODUCTION_CLIENT_IDS = {"client-demo-b2b"}
 INSECURE_PRODUCTION_CLIENT_EMAILS = {"cliente@fventas.local"}
@@ -100,6 +106,7 @@ TENANT_COLLECTIONS = (
 DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {
     "companies": [],
     "subscriptions": [],
+    "account_deletion_requests": [],
     "categories": [],
     "products": [],
     "announcements": [],
@@ -197,18 +204,43 @@ def default_collection(name: str) -> list[dict[str, Any]]:
     return deepcopy(DEFAULT_STORE[name])
 
 
+def json_store_signature() -> tuple[int, int] | None:
+    try:
+        stat = STORE_PATH.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
 def load_json_store() -> dict[str, list[dict[str, Any]]]:
+    global JSON_STORE_CACHE_SIGNATURE, JSON_STORE_CACHE
+
     ensure_store()
+    signature = json_store_signature()
+    cached_store = None
+    with JSON_STORE_CACHE_LOCK:
+        if JSON_STORE_CACHE is not None and JSON_STORE_CACHE_SIGNATURE == signature:
+            cached_store = JSON_STORE_CACHE
+    if cached_store is not None:
+        return deepcopy(cached_store)
+
     with STORE_PATH.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
     store = deepcopy(DEFAULT_STORE)
     store.update(payload)
     normalize_store(store)
-    return store
+    signature = json_store_signature()
+    with JSON_STORE_CACHE_LOCK:
+        JSON_STORE_CACHE_SIGNATURE = signature
+        JSON_STORE_CACHE = store
+    return deepcopy(store)
 
 
 def load_store() -> dict[str, list[dict[str, Any]]]:
+    if has_request_context() and hasattr(g, "fventas_store"):
+        return g.fventas_store
+
     if use_sql_backend():
         try:
             from sql_store import load_sql_store, sync_store_to_sql
@@ -220,12 +252,18 @@ def load_store() -> dict[str, list[dict[str, Any]]]:
             if is_production():
                 store = production_safe_seed(store)
             normalize_store(store)
+            if has_request_context():
+                g.fventas_store = store
             return store
         except Exception:
             if not Config.SQL_FALLBACK_TO_JSON:
                 raise
 
-    return load_json_store()
+    json_store = load_json_store()
+    store = production_safe_seed(json_store) if is_production() else json_store
+    if has_request_context():
+        g.fventas_store = store
+    return store
 
 
 def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
@@ -247,6 +285,10 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     settings.setdefault("exchangeRateUsdVes", settings.get("exchangeRateBaseToLocal", 950.0))
     settings.setdefault("exchangeRateUsdClp", settings.get("exchangeRateBaseToLocal", 950.0))
     settings.setdefault("defaultPaymentTermsDays", [0, 10, 15, 20, 30, 40])
+    settings.setdefault("purchaseConditionsTitle", "Condiciones de compra")
+    settings.setdefault("purchaseDefaultSaleType", "cash")
+    settings.setdefault("purchaseConditionsScope", "Solo datos de tu empresa")
+    settings.setdefault("purchaseConditionsNote", "")
     settings.setdefault("creditApprovalThresholdUsd", 0.0)
     settings.setdefault("overdueBlockDays", 15)
     settings.setdefault("defaultCommissionRule", "sale_generated")
@@ -255,11 +297,23 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     settings.setdefault("maxUploadMb", 10)
     settings.setdefault("quoteFooterText", "Precios sujetos a disponibilidad y validacion comercial FVENTAS.")
     settings.setdefault("orderTermsText", "Pedidos sujetos a validacion de stock, credito y despacho.")
+    settings.setdefault(
+        "purchaseConditions",
+        {
+            "title": settings["purchaseConditionsTitle"],
+            "defaultSaleType": settings["purchaseDefaultSaleType"],
+            "allowedPaymentTermsDays": settings["defaultPaymentTermsDays"],
+            "scopeLabel": settings["purchaseConditionsScope"],
+            "note": settings["purchaseConditionsNote"] or settings["orderTermsText"],
+        },
+    )
     settings.setdefault("notificationEmails", [])
+    settings.setdefault("accountDeletionRequests", [])
     settings.setdefault("createdAt", utc_now())
     settings.setdefault("updatedAt", utc_now())
     store.setdefault("companies", [])
     store.setdefault("subscriptions", [])
+    store.setdefault("account_deletion_requests", settings.get("accountDeletionRequests") or [])
     if not store["companies"]:
         store["companies"].append(
             {
@@ -596,6 +650,19 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
         event.setdefault("path", "")
         event.setdefault("method", "")
         event.setdefault("createdAt", utc_now())
+    for deletion_request in store.get("account_deletion_requests", []):
+        deletion_request.setdefault("id", next_id("acctdel", deletion_request.get("email", utc_now())))
+        deletion_request.setdefault("email", "")
+        deletion_request.setdefault("subjectType", "unknown")
+        deletion_request.setdefault("subjectId", "")
+        deletion_request.setdefault("companyId", "")
+        deletion_request.setdefault("channel", "web")
+        deletion_request.setdefault("reason", "")
+        deletion_request.setdefault("status", "requested")
+        deletion_request.setdefault("resolutionNote", "")
+        deletion_request.setdefault("createdAt", utc_now())
+        deletion_request.setdefault("updatedAt", deletion_request.get("createdAt", utc_now()))
+    settings["accountDeletionRequests"] = store.get("account_deletion_requests", [])
     for product in store.get("products", []):
         product.setdefault("internalCode", "")
         product.setdefault("brand", "FVENTAS")
@@ -656,13 +723,22 @@ def normalize_store(store: dict[str, list[dict[str, Any]]]) -> None:
     for collection_name in TENANT_COLLECTIONS:
         for item in store.get(collection_name, []):
             if isinstance(item, dict):
-                item.setdefault("companyId", default_company_id)
+                item_company_id = str(item.get("companyId") or "").strip()
+                item["companyId"] = item_company_id or default_company_id
 
 
 def save_json_store(store: dict[str, list[dict[str, Any]]]) -> None:
+    global JSON_STORE_CACHE_SIGNATURE, JSON_STORE_CACHE
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with STORE_PATH.open("w", encoding="utf-8") as file:
         json.dump(store, file, ensure_ascii=True, indent=2)
+    cached_store = deepcopy(DEFAULT_STORE)
+    cached_store.update(deepcopy(store))
+    normalize_store(cached_store)
+    with JSON_STORE_CACHE_LOCK:
+        JSON_STORE_CACHE_SIGNATURE = json_store_signature()
+        JSON_STORE_CACHE = cached_store
 
 
 def save_store(store: dict[str, list[dict[str, Any]]]) -> None:
@@ -674,12 +750,16 @@ def save_store(store: dict[str, list[dict[str, Any]]]) -> None:
             from sql_store import sync_store_to_sql
 
             sync_store_to_sql(store)
+            if has_request_context():
+                g.fventas_store = store
             return
         except Exception:
             if not Config.SQL_FALLBACK_TO_JSON:
                 raise
 
     save_json_store(store)
+    if has_request_context():
+        g.fventas_store = store
 
 
 def slugify(value: str) -> str:

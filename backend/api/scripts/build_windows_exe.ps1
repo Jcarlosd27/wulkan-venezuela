@@ -20,6 +20,7 @@ try {
         "--collect-submodules", "webview",
         "--add-data", "templates;templates",
         "--add-data", "static;static",
+        "--add-data", "core\country_locations_data.json;core",
         "--add-data", "migrations;migrations",
         "--add-data", "alembic.ini;.",
         "desktop_app.py"

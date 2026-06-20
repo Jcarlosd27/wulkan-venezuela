@@ -5,10 +5,12 @@ import hmac
 import csv
 import copy
 import io
+import math
 import os
 import re
 import secrets
 import sys
+import threading
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -16,12 +18,16 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
+from flask import Flask, Response, abort, g, has_request_context, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import Markup, escape
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError, ProgrammingError, SQLAlchemyError
 from werkzeug.exceptions import BadRequest, HTTPException
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import (
+    check_password_hash,
+    generate_password_hash as werkzeug_generate_password_hash,
+)
+from werkzeug.utils import secure_filename
 
 from core.config import get_config
 from core.insights import rotation_chart, stock_health
@@ -40,12 +46,19 @@ from store import (
     use_sql_backend,
 )
 from core.uix import badge_class, convert_currency, money_currency, money_usd, usd_to_clp
-from core.chile_locations import (
-    CHILE_REGION_CITIES,
-    normalize_chilean_location,
-    normalize_chilean_phone,
-    normalize_chilean_rut,
+from core.chile_locations import normalize_chilean_phone, normalize_chilean_rut
+from core.country_locations import (
+    country_location_labels,
+    country_location_options,
+    country_location_payload,
+    normalize_country_location,
 )
+
+
+def generate_password_hash(password: str, *args, **kwargs) -> str:
+    if "method" not in kwargs and not args:
+        kwargs["method"] = "scrypt" if hasattr(hashlib, "scrypt") else "pbkdf2:sha256:1000000"
+    return werkzeug_generate_password_hash(password, *args, **kwargs)
 
 
 APP_RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -60,6 +73,151 @@ app.jinja_env.filters["badge_class"] = badge_class
 app.jinja_env.filters["money_usd"] = money_usd
 
 
+RUNTIME_REQUEST_LOCK = threading.Lock()
+RUNTIME_IDENTITY_LOCK = threading.Lock()
+RUNTIME_STARTED_AT_EPOCH = int(time.time())
+RUNTIME_REQUEST_METRICS = {
+    "activeRequests": 0,
+    "peakActiveRequests": 0,
+    "totalRequests": 0,
+    "lastRequestAtEpoch": 0,
+}
+RUNTIME_SEEN_IDENTITIES: dict[str, dict] = {}
+RUNTIME_SEEN_RETENTION_SECONDS = 60 * 60 * 24
+
+
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
+LOCAL_UPLOAD_PREFIX = "/static/uploads/"
+IMAGE_UPLOAD_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "webp", "gif"})
+PDF_UPLOAD_EXTENSIONS = frozenset({"pdf"})
+DOCUMENT_UPLOAD_EXTENSIONS = IMAGE_UPLOAD_EXTENSIONS | PDF_UPLOAD_EXTENSIONS
+
+
+def safe_export_cell(value):
+    if not isinstance(value, str) or not value:
+        return value
+    if value.lstrip().startswith(CSV_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
+
+
+def safe_export_row(row: dict) -> dict:
+    return {key: safe_export_cell(value) for key, value in row.items()}
+
+
+def safe_export_values(values) -> list:
+    return [safe_export_cell(value) for value in values]
+
+
+class SafeCsvDictWriter(csv.DictWriter):
+    def writerow(self, rowdict):
+        return super().writerow(safe_export_row(rowdict))
+
+    def writerows(self, rowdicts):
+        return super().writerows(safe_export_row(rowdict) for rowdict in rowdicts)
+
+
+def safe_csv_dict_writer(*args, **kwargs) -> SafeCsvDictWriter:
+    return SafeCsvDictWriter(*args, **kwargs)
+
+
+def safe_internal_url(raw_url: str | None, fallback_endpoint: str = "dashboard") -> str:
+    fallback = url_for(fallback_endpoint)
+    value = str(raw_url or "").strip()
+    if not value:
+        return fallback
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/") or parsed.path.startswith("//"):
+        return fallback
+    return value
+
+
+def safe_download_filename(raw_filename: str, fallback: str = "fventas.csv") -> str:
+    fallback_name = secure_filename(str(fallback or "fventas.csv")) or "fventas.csv"
+    cleaned = str(raw_filename or "").replace("\r", "").replace("\n", "").strip()
+    filename = secure_filename(cleaned) or fallback_name
+    return filename[:180] or fallback_name
+
+
+def uploaded_document_is_public(filename: str) -> bool:
+    normalized = str(filename or "").lstrip("/\\")
+    if not normalized.startswith("documents/"):
+        return True
+    raw_url = f"{LOCAL_UPLOAD_PREFIX}{normalized}"
+    try:
+        store = load_store()
+    except Exception:
+        return False
+    for asset in store.get("media_assets", []):
+        if not document_is_asset(asset) or asset.get("status") == "deleted":
+            continue
+        asset_url = str(asset.get("url") or "").strip()
+        if asset_url == raw_url or document_storage_key(asset_url) == normalized:
+            return not document_is_private(asset)
+    return False
+
+
+def runtime_request_begin() -> None:
+    now = int(time.time())
+    with RUNTIME_REQUEST_LOCK:
+        RUNTIME_REQUEST_METRICS["activeRequests"] += 1
+        RUNTIME_REQUEST_METRICS["totalRequests"] += 1
+        RUNTIME_REQUEST_METRICS["lastRequestAtEpoch"] = now
+        RUNTIME_REQUEST_METRICS["peakActiveRequests"] = max(
+            RUNTIME_REQUEST_METRICS["peakActiveRequests"],
+            RUNTIME_REQUEST_METRICS["activeRequests"],
+        )
+
+
+def runtime_request_end() -> None:
+    with RUNTIME_REQUEST_LOCK:
+        RUNTIME_REQUEST_METRICS["activeRequests"] = max(
+            0,
+            RUNTIME_REQUEST_METRICS["activeRequests"] - 1,
+        )
+
+
+def runtime_identity_seen(identity_type: str, company_id: str, subject_id: str, role: str = "") -> None:
+    if not identity_type or not subject_id:
+        return
+    now = int(time.time())
+    key = f"{identity_type}:{company_id}:{subject_id}"
+    cutoff = now - RUNTIME_SEEN_RETENTION_SECONDS
+    if not RUNTIME_IDENTITY_LOCK.acquire(blocking=False):
+        return
+    try:
+        if len(RUNTIME_SEEN_IDENTITIES) > 10000:
+            stale_keys = [
+                item_key
+                for item_key, item in RUNTIME_SEEN_IDENTITIES.items()
+                if int(item.get("lastSeenEpoch") or 0) < cutoff
+            ]
+            for item_key in stale_keys[:2000]:
+                RUNTIME_SEEN_IDENTITIES.pop(item_key, None)
+        RUNTIME_SEEN_IDENTITIES[key] = {
+            "type": identity_type,
+            "companyId": company_id,
+            "subjectId": subject_id,
+            "role": role,
+            "lastSeenEpoch": now,
+        }
+    finally:
+        RUNTIME_IDENTITY_LOCK.release()
+
+
+@app.before_request
+def track_runtime_request_start():
+    g.runtime_request_counted = True
+    runtime_request_begin()
+    return None
+
+
+@app.teardown_request
+def track_runtime_request_end(_exc=None):
+    if getattr(g, "runtime_request_counted", False):
+        runtime_request_end()
+
+
 def validate_runtime_config() -> None:
     if app.config.get("ENV") != "production":
         return
@@ -72,6 +230,10 @@ def validate_runtime_config() -> None:
         raise RuntimeError("FVENTAS_DATABASE_URL debe apuntar a PostgreSQL en produccion.")
     if app.config.get("SQL_FALLBACK_TO_JSON"):
         raise RuntimeError("FVENTAS_SQL_FALLBACK_TO_JSON debe estar desactivado en produccion.")
+    if not app.config.get("REQUIRE_MOBILE_DEVICE_HEADER"):
+        raise RuntimeError("FVENTAS_REQUIRE_MOBILE_DEVICE_HEADER debe estar activo en produccion.")
+    if app.config.get("ALLOW_LEGACY_MOBILE_API"):
+        raise RuntimeError("FVENTAS_ALLOW_LEGACY_MOBILE_API debe estar desactivado en produccion.")
     storage_backend = str(app.config.get("STORAGE_BACKEND", "")).strip().lower()
     if storage_backend != "s3":
         raise RuntimeError("FVENTAS_STORAGE_BACKEND=s3 es obligatorio en produccion.")
@@ -84,6 +246,8 @@ validate_runtime_config()
 
 @app.get("/static/uploads/<path:filename>")
 def serve_uploaded_asset(filename: str):
+    if not uploaded_document_is_public(filename):
+        abort(404)
     configured_upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
     requested_file = (configured_upload_root / filename).resolve()
     try:
@@ -111,8 +275,7 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers.setdefault(
-        "Content-Security-Policy-Report-Only",
+    csp_value = (
         "default-src 'self'; "
         "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
         "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
@@ -121,8 +284,14 @@ def add_security_headers(response):
         "connect-src 'self'; "
         "frame-ancestors 'self'; "
         "base-uri 'self'; "
-        "form-action 'self'",
+        "form-action 'self'"
     )
+    csp_header = (
+        "Content-Security-Policy-Report-Only"
+        if app.config.get("CONTENT_SECURITY_POLICY_REPORT_ONLY", True)
+        else "Content-Security-Policy"
+    )
+    response.headers.setdefault(csp_header, csp_value)
     if response.mimetype == "text/html" and (session.get("admin_authenticated") or request.endpoint == "login"):
         response.headers.setdefault("Cache-Control", "no-store, max-age=0")
         response.headers.setdefault("Pragma", "no-cache")
@@ -181,7 +350,7 @@ def handle_database_exception(exc: SQLAlchemyError):
 
     if request.method == "POST":
         push_admin_toast(message, "danger", "Accion no aplicada")
-        return redirect(request.referrer or url_for("dashboard"))
+        return redirect(safe_internal_url(request.referrer))
 
     return render_template("forbidden.html", heading="Accion no aplicada", description=message), status
 
@@ -196,7 +365,7 @@ def handle_api_unexpected_exception(exc: Exception):
                 "danger",
                 "Accion no aplicada",
             )
-            return redirect(request.referrer or url_for("dashboard"))
+            return redirect(safe_internal_url(request.referrer))
         raise exc
     app.logger.exception("Unexpected API error on %s", request.path)
     return jsonify({"meta": mobile_api_meta(), "error": "Error interno del servidor.", "code": "internal_server_error"}), 500
@@ -311,6 +480,22 @@ MARKET_PROFILES = {
         "locale": "es-CO",
         "timezone": "America/Bogota",
     },
+    "EC": {
+        "code": "EC",
+        "label": "Ecuador",
+        "companyNoun": "empresa",
+        "taxLabel": "RUC",
+        "taxPlaceholder": "1790012345001",
+        "phonePrefix": "+593",
+        "phonePlaceholder": "+593 99 123 4567",
+        "salesCurrency": "USD",
+        "localCurrency": "USD",
+        "exchangeRateBaseToLocal": 1,
+        "planCurrency": "USD",
+        "planPrice": 79,
+        "locale": "es-EC",
+        "timezone": "America/Guayaquil",
+    },
     "MX": {
         "code": "MX",
         "label": "Mexico",
@@ -359,6 +544,22 @@ MARKET_PROFILES = {
         "locale": "en-US",
         "timezone": "America/New_York",
     },
+    "VE": {
+        "code": "VE",
+        "label": "Venezuela",
+        "companyNoun": "empresa",
+        "taxLabel": "RIF",
+        "taxPlaceholder": "J-12345678-9",
+        "phonePrefix": "+58",
+        "phonePlaceholder": "+58 412 123 4567",
+        "salesCurrency": "USD",
+        "localCurrency": "USD",
+        "exchangeRateBaseToLocal": 1,
+        "planCurrency": "USD",
+        "planPrice": 79,
+        "locale": "es-VE",
+        "timezone": "America/Caracas",
+    },
     "OTHER": {
         "code": "OTHER",
         "label": "Otro mercado",
@@ -377,6 +578,8 @@ MARKET_PROFILES = {
     },
 }
 MARKET_COUNTRY_OPTIONS = [(code, profile["label"]) for code, profile in MARKET_PROFILES.items()]
+LEGAL_TERMS_VERSION = "2026-06-17"
+LEGAL_PRIVACY_VERSION = "2026-06-17"
 CURRENCY_OPTIONS = [
     ("USD", "USD - Dolar estadounidense"),
     ("CLP", "CLP - Peso chileno"),
@@ -1155,6 +1358,7 @@ PERMISSION_ACTIONS = [
 PERMISSION_MODULES = [
     ("dashboard", "Dashboard", "bi-grid-1x2", "KPIs ejecutivos e insights comerciales."),
     ("platform_companies", "Empresas SaaS", "bi-buildings", "Empresas suscritas, planes y activacion comercial."),
+    ("platform_privacy", "Privacidad plataforma", "bi-person-x", "Solicitudes de eliminacion, bloqueo movil y trazabilidad normativa."),
     ("sellers", "Vendedores", "bi-person-badge", "Fuerza comercial, cartera y metas."),
     ("clients", "Clientes", "bi-shop", "Clientes B2B, datos comerciales y credito."),
     ("crm", "CRM Comercial", "bi-kanban", "Leads, oportunidades, tareas, visitas y seguimiento."),
@@ -1317,6 +1521,7 @@ ROLE_MODULE_PERMISSIONS["general_manager"].update({
     "commissions": set(ACTION_APPROVE),
 })
 ROLE_MODULE_PERMISSIONS["super_admin"]["platform_companies"] = set()
+ROLE_MODULE_PERMISSIONS["super_admin"]["platform_privacy"] = set()
 MODULE_ACCESS = {
     module: {
         role
@@ -1336,6 +1541,17 @@ ADMIN_MENU_GROUPS = [
                 "label": "Empresas SaaS",
                 "icon": "bi-buildings",
                 "active": ["platform_companies", "company_subscription_update"],
+            },
+            {
+                "module": "platform_privacy",
+                "endpoint": "platform_privacy",
+                "label": "Privacidad",
+                "icon": "bi-person-x",
+                "active": [
+                    "platform_privacy",
+                    "platform_privacy_export",
+                    "platform_privacy_deletion_action",
+                ],
             },
         ],
     },
@@ -1401,6 +1617,8 @@ for group in ADMIN_MENU_GROUPS:
 ENDPOINT_MODULE_MAP["dashboard"] = "dashboard"
 ENDPOINT_MODULE_MAP.update({
     "company_subscription_update": "platform_companies",
+    "platform_privacy_export": "platform_privacy",
+    "platform_privacy_deletion_action": "platform_privacy",
     "credit_export": "credit",
     "credit_due_export": "credit",
     "credit_history_export": "credit",
@@ -1420,6 +1638,9 @@ ENDPOINT_UI_LABELS = {
     "dashboard": "Dashboard",
     "platform_companies": "Empresas SaaS",
     "company_subscription_update": "Actualizar suscripcion",
+    "platform_privacy": "Privacidad plataforma",
+    "platform_privacy_export": "Exportar privacidad",
+    "platform_privacy_deletion_action": "Resolver eliminacion",
     "admin_search": "Busqueda",
     "product_new": "Crear producto",
     "product_edit": "Editar producto",
@@ -1453,6 +1674,9 @@ ENDPOINT_ACTION_OVERRIDES = {
     "dashboard": "view",
     "platform_companies": {"GET": "view", "POST": "create"},
     "company_subscription_update": "edit",
+    "platform_privacy": "view",
+    "platform_privacy_export": "export",
+    "platform_privacy_deletion_action": "approve",
     "admin_search": "view",
     "download_import_template": "export",
     "import_issues_export": "export",
@@ -1669,6 +1893,7 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "variantes", "required": False, "example": "18 pulgadas|20 pulgadas", "help": "Opciones visibles."},
                     {"name": "especificaciones", "required": False, "example": "Motor:45cc|Garantia:6 meses", "help": "Formato clave:valor."},
                     {"name": "skus_relacionados", "required": False, "example": "FVT-REP-CAD18|FVT-ACE-2T", "help": "Productos relacionados por SKU."},
+                    {"name": "notas_compatibilidad", "required": False, "example": "Compatible con FVT-REP-CAD18|Validar serie antes de despacho", "help": "Notas visibles en app movil para compatibilidad o validacion."},
                     {"name": "requiere_cotizacion", "required": False, "example": "no", "help": "si/no."},
                     {"name": "requiere_validacion_tecnica", "required": False, "example": "si", "help": "si/no."},
                     {"name": "visible_app", "required": False, "example": "si", "help": "si/no para publicar en app movil."},
@@ -1861,7 +2086,28 @@ def web_admin_users(store: dict) -> list[dict]:
 
 
 def current_admin_user(store: dict) -> dict | None:
-    return find_by_id(store.get("admin_users", []), session.get("admin_user_id", ""))
+    admin_user_id = session.get("admin_user_id", "")
+    if not admin_user_id:
+        return None
+    matches = [
+        user
+        for user in store.get("admin_users", [])
+        if user.get("id") == admin_user_id
+    ]
+    if not matches:
+        return None
+    session_company_id = str(session.get("company_id") or "").strip()
+    if session_company_id:
+        scoped = next(
+            (user for user in matches if record_company_id(user, store) == session_company_id),
+            None,
+        )
+        if scoped:
+            return scoped
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def user_session_version(user: dict | None) -> int:
@@ -1910,8 +2156,17 @@ def temporary_admin_password() -> str:
     return f"FVENTAS{secrets.randbelow(900000) + 100000}"
 
 
+def temporary_mobile_client_password() -> str:
+    return f"Fventas-{secrets.token_urlsafe(12)}-1"
+
+
 def request_ip_address() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    remote_addr = (request.remote_addr or "").strip()
+    if app.config.get("TRUST_PROXY_HEADERS"):
+        forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        real_ip = request.headers.get("X-Real-IP", "").strip()
+        return forwarded_for or real_ip or remote_addr
+    return remote_addr
 
 
 def request_user_agent() -> str:
@@ -2199,6 +2454,50 @@ def safe_float(value, default: float = 0.0) -> float:
         return default
 
 
+def runtime_capacity_snapshot(company_id: str = "") -> dict:
+    now = int(time.time())
+    workers = max(1, safe_int(os.environ.get("FVENTAS_WEB_WORKERS"), 1))
+    threads = max(1, safe_int(os.environ.get("FVENTAS_WEB_THREADS"), 4))
+    company_id = str(company_id or "").strip()
+    with RUNTIME_REQUEST_LOCK:
+        request_metrics = dict(RUNTIME_REQUEST_METRICS)
+    with RUNTIME_IDENTITY_LOCK:
+        seen_items = list(RUNTIME_SEEN_IDENTITIES.values())
+
+    if company_id:
+        seen_items = [
+            item for item in seen_items
+            if str(item.get("companyId") or "") == company_id
+        ]
+
+    def count_seen(seconds: int, *types: str) -> int:
+        allowed_types = set(types)
+        return sum(
+            1
+            for item in seen_items
+            if now - safe_int(item.get("lastSeenEpoch"), 0) <= seconds
+            and (not allowed_types or item.get("type") in allowed_types)
+        )
+
+    uptime = max(0, now - RUNTIME_STARTED_AT_EPOCH)
+    return {
+        "pid": os.getpid(),
+        "workers": workers,
+        "threads": threads,
+        "configuredRequestSlots": workers * threads,
+        "activeRequests": request_metrics.get("activeRequests", 0),
+        "peakActiveRequests": request_metrics.get("peakActiveRequests", 0),
+        "totalRequests": request_metrics.get("totalRequests", 0),
+        "uptimeSeconds": uptime,
+        "requestsPerMinute": round((request_metrics.get("totalRequests", 0) / max(uptime, 1)) * 60, 2),
+        "mobileUsers5m": count_seen(300, "client_app", "seller_app"),
+        "mobileUsers15m": count_seen(900, "client_app", "seller_app"),
+        "clientUsers15m": count_seen(900, "client_app"),
+        "sellerUsers15m": count_seen(900, "seller_app"),
+        "adminUsers15m": count_seen(900, "admin_panel"),
+    }
+
+
 def date_value_is_today(value: str | None) -> bool:
     if not value:
         return False
@@ -2390,14 +2689,36 @@ def dashboard_charts(
     }
 
 
-def seller_commission_rate(store: dict, seller_id: str) -> float:
-    seller = find_by_id(store.get("admin_users", []), seller_id)
+def seller_record_for(store: dict, seller_id: str, company_id: str = "") -> dict | None:
+    if not seller_id:
+        return None
+    matches = [
+        user
+        for user in store.get("admin_users", [])
+        if user.get("id") == seller_id and user.get("role") == "sales"
+    ]
+    if not matches:
+        return None
+    target_company_id = company_id or current_company_id(store)
+    scoped = next(
+        (user for user in matches if record_company_id(user, store) == target_company_id),
+        None,
+    )
+    if scoped:
+        return scoped
+    if is_platform_scope():
+        return matches[0]
+    return None
+
+
+def seller_commission_rate(store: dict, seller_id: str, company_id: str = "") -> float:
+    seller = seller_record_for(store, seller_id, company_id)
     seller_rate = safe_float((seller or {}).get("commissionRatePercent"), 0)
     return seller_rate if seller_rate > 0 else safe_float(business_settings(store).get("defaultCommissionPercent"), 0)
 
 
-def seller_name_for(store: dict, seller_id: str) -> str:
-    seller = find_by_id(store.get("admin_users", []), seller_id)
+def seller_name_for(store: dict, seller_id: str, company_id: str = "") -> str:
+    seller = seller_record_for(store, seller_id, company_id)
     return (seller or {}).get("name", "")
 
 
@@ -2432,8 +2753,49 @@ def visible_records_for_current_company(store: dict, collection: str) -> list[di
 
 
 def find_company_record(store: dict, collection: str, record_id: str) -> dict | None:
-    record = find_by_id(store.get(collection, []), record_id)
-    return record if can_access_company_record(record, store) else None
+    if not record_id:
+        return None
+    matches = [
+        record
+        for record in store.get(collection, [])
+        if record.get("id") == record_id
+    ]
+    if not matches:
+        return None
+    company_id = current_company_id(store)
+    scoped_record = next(
+        (record for record in matches if record_company_id(record, store) == company_id),
+        None,
+    )
+    if scoped_record:
+        return scoped_record
+    if is_platform_scope():
+        return matches[0]
+    return None
+
+
+def same_company_record(store: dict, item: dict | None, target: dict | None) -> bool:
+    if not item or not target:
+        return False
+    return (
+        item.get("id") == target.get("id")
+        and record_company_id(item, store) == record_company_id(target, store)
+    )
+
+
+def replace_company_record(store: dict, collection: str, target: dict, replacement: dict) -> None:
+    store[collection] = [
+        replacement if same_company_record(store, item, target) else item
+        for item in store.get(collection, [])
+    ]
+
+
+def remove_company_record(store: dict, collection: str, target: dict) -> None:
+    store[collection] = [
+        item
+        for item in store.get(collection, [])
+        if not same_company_record(store, item, target)
+    ]
 
 
 def visible_clients_for_current_user(store: dict) -> list[dict]:
@@ -2559,7 +2921,7 @@ def product_has_commercial_history(store: dict, product: dict | None) -> bool:
 
 
 def login_attempt_key(scope: str, email: str) -> str:
-    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "local").split(",")[0].strip()
+    ip_address = request_ip_address() or "local"
     return f"{scope}:{ip_address}:{email.lower()}"
 
 
@@ -2579,6 +2941,15 @@ def register_login_failure(scope: str, email: str) -> None:
 
 def reset_login_attempts(scope: str, email: str) -> None:
     LOGIN_ATTEMPTS.pop(login_attempt_key(scope, email), None)
+
+
+def mobile_password_recovery_response():
+    return jsonify(
+        {
+            "status": "received",
+            "message": "Si el correo existe, FVENTAS gestionara la recuperacion de acceso.",
+        }
+    )
 
 
 def password_errors(password: str) -> list[str]:
@@ -2680,13 +3051,16 @@ def visible_import_template_groups() -> list[dict]:
 
 
 def import_template_filename(spec: dict, file_format: str) -> str:
-    return f"plantilla_fventas_{spec['key']}.{file_format}"
+    return safe_download_filename(
+        f"plantilla_fventas_{spec.get('key', 'importacion')}.{file_format}",
+        f"plantilla_fventas.{file_format}",
+    )
 
 
 def build_csv_template(spec: dict) -> Response:
     headers = [column["name"] for column in spec["columns"]]
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=headers, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=headers, lineterminator="\n")
     writer.writeheader()
     payload = "\ufeff" + output.getvalue()
     return Response(
@@ -2848,8 +3222,16 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
         return []
 
     groups: dict[str, dict] = {}
-    orders = store.get("orders", [])
-    movements = store.get("credit_movements", [])
+    orders = visible_orders_for_current_user(store)
+    products = visible_records_for_current_company(store, "products")
+    stock_movements = visible_records_for_current_company(store, "stock_movements")
+    movements = visible_records_for_current_company(store, "credit_movements")
+    sellers = [
+        user
+        for user in visible_records_for_current_company(store, "admin_users")
+        if user.get("role") == "sales" and user.get("status") != "deleted"
+    ]
+    categories = visible_records_for_current_company(store, "categories")
     tokens = normalized_query.split()
 
     def matches(*values) -> bool:
@@ -2857,7 +3239,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
         return all(token in blob for token in tokens)
 
     if can_access_module("products"):
-        for product in [enrich_inventory_product(item, orders, store.get("stock_movements", [])) for item in store.get("products", [])]:
+        for product in enrich_inventory_products(products, orders, stock_movements):
             if matches(product.get("sku"), product.get("title"), product.get("categoryName"), product.get("brand"), product.get("model"), product.get("description")):
                 href = url_for("product_edit", product_id=product["id"]) if can_module_action("products", "edit") else url_for("products", q=product.get("sku", ""))
                 append_search_result(groups, "products", {
@@ -2887,7 +3269,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                 })
 
     if can_access_module("sellers"):
-        for seller in [enrich_seller(store, item) for item in store.get("admin_users", []) if item.get("role") == "sales" and item.get("status") != "deleted"]:
+        for seller in [enrich_seller(store, item) for item in sellers]:
             if matches(seller.get("name"), seller.get("email"), seller.get("sellerCode"), seller.get("sellerZone"), seller.get("phone")):
                 append_search_result(groups, "sellers", {
                     "group_label": "Vendedores",
@@ -2901,7 +3283,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                 })
 
     if can_access_module("orders"):
-        for order in [enrich_order(item, movements) for item in visible_orders_for_current_user(store)]:
+        for order in [enrich_order(item, movements) for item in orders]:
             if matches(order.get("orderId"), order.get("customerName"), order.get("sellerName"), order.get("saleTypeLabel"), order.get("statusLabel")):
                 append_search_result(groups, "orders", {
                     "group_label": "Ordenes",
@@ -2930,7 +3312,7 @@ def admin_search_result_groups(store: dict, query: str) -> list[dict]:
                 })
 
     if can_access_module("categories"):
-        for category in store.get("categories", []):
+        for category in categories:
             if category.get("status") == "deleted":
                 continue
             if matches(category.get("name"), category.get("description"), category.get("slug"), category.get("status")):
@@ -3056,9 +3438,35 @@ def protect_admin_csrf():
 
 
 @app.before_request
+def block_legacy_mobile_api_in_production():
+    if not request.path.startswith("/api/mobile/"):
+        return None
+    if app.config.get("ALLOW_LEGACY_MOBILE_API"):
+        return None
+    return jsonify(
+        {
+            "error": "Version de API movil obsoleta. Actualiza la app para usar /api/v1/mobile.",
+            "code": "legacy_mobile_api_disabled",
+        }
+    ), 410
+
+
+@app.before_request
 def require_admin_session():
     public_prefixes = ("/api/mobile/", "/api/v1/mobile/", "/static/")
-    public_endpoints = {"landing", "login", "signup", "privacy_policy", "account_deletion_page", "healthz", "readyz"}
+    public_endpoints = {
+        "landing",
+        "landing_access_preference",
+        "desktop_download",
+        "login",
+        "signup",
+        "signup_success",
+        "terms_of_service",
+        "privacy_policy",
+        "account_deletion_page",
+        "healthz",
+        "readyz",
+    }
 
     if request.path.startswith(public_prefixes) or request.endpoint in public_endpoints:
         return None
@@ -3206,14 +3614,42 @@ def login():
             save_store(store)
             return render_template("login.html", error=error)
 
-        admin_user = next(
-            (
-                user
-                for user in store.get("admin_users", [])
-                if user.get("email", "").lower() == email and user.get("status") == "active"
-            ),
-            None,
-        )
+        admin_candidates = [
+            user
+            for user in store.get("admin_users", [])
+            if user.get("email", "").lower() == email and user.get("status") == "active"
+        ]
+        if len(admin_candidates) > 1:
+            register_login_failure("admin", email)
+            now = utc_now()
+            for candidate in admin_candidates:
+                candidate["failedLoginAttempts"] = safe_int(candidate.get("failedLoginAttempts")) + 1
+                candidate["lastFailedLoginAt"] = now
+                candidate["lastLoginIp"] = request_ip_address()
+            record_audit_event(
+                store,
+                "login_blocked",
+                "admin_user",
+                email,
+                "Login admin bloqueado por identidad duplicada entre empresas o roles.",
+                actor={"id": email, "name": email or "desconocido", "role": "anonymous"},
+                metadata={
+                    "matches": [
+                        {
+                            "id": user.get("id", ""),
+                            "companyId": record_company_id(user, store),
+                            "role": user.get("role", ""),
+                        }
+                        for user in admin_candidates
+                    ]
+                },
+                criticality="high",
+            )
+            save_store(store)
+            error = "Credenciales invalidas."
+            return render_template("login.html", error=error)
+
+        admin_user = admin_candidates[0] if admin_candidates else None
 
         if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
             if admin_user.get("role") == "sales":
@@ -3285,7 +3721,8 @@ def login():
 def signup():
     store = load_store()
     error = ""
-    success = ""
+    response_status = 200
+    mobile_first_choices = {"mobile_first", "mobile_only", "desktop_download_cancelled"}
 
     if request.method == "POST":
         market_country = normalize_market_country(request.form.get("marketCountry", "CL"))
@@ -3293,27 +3730,100 @@ def signup():
         pricing = plan_pricing_for_country(market_country)
         company_name = sanitize_text(request.form.get("companyName", ""), max_length=180, allow_newlines=False)
         legal_name = sanitize_text(request.form.get("legalName", ""), max_length=180, allow_newlines=False)
-        tax_id = sanitize_text(request.form.get("taxId", ""), max_length=60, allow_newlines=False)
+        tax_id = normalize_tax_id_for_market(request.form.get("taxId", ""), profile)
         owner_name = sanitize_text(request.form.get("ownerName", ""), max_length=160, allow_newlines=False)
         owner_email = request.form.get("ownerEmail", "").strip().lower()
-        support_phone = sanitize_text(request.form.get("supportPhone", ""), max_length=80, allow_newlines=False)
+        support_phone = normalize_phone_for_market(request.form.get("supportPhone", ""), profile)
+        desktop_access_preference = sanitize_text(
+            request.form.get("desktopAccessPreference", ""),
+            max_length=80,
+            allow_newlines=False,
+        )
+        if desktop_access_preference not in {
+            "desktop_download_started",
+            "desktop_download_cancelled",
+            "mobile_first",
+            "mobile_only",
+        }:
+            desktop_access_preference = ""
+        mobile_app_access_requested = desktop_access_preference in mobile_first_choices
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirmPassword", "")
+        legal_accepted = request.form.get("legalAccepted") == "on"
+        ip_address = request_ip_address()
+        signup_window_seconds = max(1, int(app.config.get("SIGNUP_WINDOW_SECONDS", 300)))
+        signup_max_events = max(1, int(app.config.get("SIGNUP_MAX_EVENTS", 5)))
+        signup_rate_limited = public_submission_rate_limited(
+            store,
+            "signup_rate_events",
+            ip_address=ip_address,
+            email=owner_email,
+            window_seconds=signup_window_seconds,
+            max_events=signup_max_events,
+        )
+        owner_admin_conflict = admin_user_by_email(store, owner_email) if owner_email else None
+        owner_client_conflict = next(
+            (
+                client
+                for client in store.get("clients", [])
+                if client.get("email", "").strip().lower() == owner_email
+                and client.get("status") == "active"
+            ),
+            None,
+        )
+        company_tax_conflict = next(
+            (
+                company
+                for company in store.get("companies", [])
+                if company.get("status") not in {"deleted", "cancelled"}
+                and normalize_market_country(
+                    company.get("country")
+                    or company.get("marketCountry")
+                    or (company.get("marketProfile") or {}).get("code")
+                )
+                == profile["code"]
+                and normalize_tax_id_for_market(company.get("taxId", ""), profile).lower() == tax_id.lower()
+            ),
+            None,
+        ) if tax_id else None
 
-        if not company_name:
+        if signup_rate_limited:
+            error = "Hemos recibido varios registros recientes. Espera unos minutos antes de intentarlo nuevamente."
+            response_status = 429
+        elif not company_name:
             error = "El nombre de la empresa es obligatorio."
+        elif not tax_id:
+            error = f"Ingresa un {profile.get('taxLabel', 'documento fiscal')} valido para {profile.get('label', 'el pais seleccionado')}."
+        elif company_tax_conflict:
+            error = "Ya existe una empresa registrada con ese documento fiscal."
         elif not owner_name:
             error = "El nombre del administrador es obligatorio."
         elif not owner_email:
             error = "El correo del administrador es obligatorio."
-        elif admin_user_by_email(store, owner_email):
-            error = "Ya existe un usuario registrado con ese correo."
+        elif owner_admin_conflict or owner_client_conflict:
+            error = "Ese correo ya pertenece a una cuenta FVENTAS y no puede registrar otra empresa."
+        elif not support_phone:
+            error = f"Ingresa un telefono valido para {profile.get('label', 'el pais seleccionado')}."
         elif password != confirm_password:
             error = "Las contrasenas no coinciden."
+        elif not legal_accepted:
+            error = "Debes aceptar los terminos del servicio y la politica de privacidad para continuar."
         else:
             password_issues = password_errors(password)
             if password_issues:
                 error = " ".join(password_issues)
+
+        if not signup_rate_limited:
+            record_public_submission_rate_event(
+                store,
+                "signup_rate_events",
+                ip_address=ip_address,
+                email=owner_email,
+                action="signup",
+                window_seconds=signup_window_seconds,
+            )
+            if error:
+                save_store(store)
 
         if not error:
             now = utc_now()
@@ -3338,6 +3848,17 @@ def signup():
                 "ownerName": owner_name,
                 "ownerEmail": owner_email,
                 "supportPhone": support_phone,
+                "desktopAccessPreference": desktop_access_preference,
+                "mobileAppAccessRequested": mobile_app_access_requested,
+                "legalAcceptance": {
+                    "accepted": True,
+                    "termsVersion": LEGAL_TERMS_VERSION,
+                    "privacyVersion": LEGAL_PRIVACY_VERSION,
+                    "acceptedAt": now,
+                    "acceptedByEmail": owner_email,
+                    "ipAddress": ip_address,
+                    "userAgent": sanitize_text(request.headers.get("User-Agent", ""), max_length=240, allow_newlines=False),
+                },
                 "createdAt": now,
                 "updatedAt": now,
             }
@@ -3376,8 +3897,15 @@ def signup():
                 "sellerTerritory": "",
                 "sellerSupervisor": "",
                 "phone": support_phone,
-                "mobileAccessEnabled": False,
-                "internalNotes": "Administrador creado desde registro SaaS.",
+                "mobileAccessEnabled": mobile_app_access_requested,
+                "internalNotes": (
+                    "Administrador creado desde registro SaaS. "
+                    + (
+                        "Cliente prefirio acceso por app movil sin descargar panel desktop."
+                        if mobile_app_access_requested
+                        else ""
+                    )
+                ).strip(),
                 "commissionRatePercent": 0,
                 "salesGoalUsd": 0,
                 "createdAt": now,
@@ -3403,21 +3931,75 @@ def signup():
                 actor={"id": owner_email, "name": owner_name, "role": "signup"},
             )
             save_store(store)
-            success = "Empresa registrada. El acceso quedara habilitado cuando FVENTAS confirme el pago mensual."
+            session["signup_success_company_id"] = company_id
+            return redirect(url_for("signup_success", company_id=company_id, token=issue_signup_success_token(company_id)))
 
-    selected_market_country = normalize_market_country(request.form.get("marketCountry", "CL"))
+    selected_market_country = normalize_market_country(
+        request.form.get("marketCountry")
+        or request.args.get("marketCountry")
+        or "CL"
+    )
     selected_market_profile = market_profile(selected_market_country)
     selected_plan = plan_pricing_for_country(selected_market_country)
-    return render_template(
+    desktop_access_preference = sanitize_text(
+        request.form.get("desktopAccessPreference")
+        or request.args.get("desktopAccessPreference")
+        or "",
+        max_length=80,
+        allow_newlines=False,
+    )
+    if desktop_access_preference not in {
+        "desktop_download_started",
+        "desktop_download_cancelled",
+        "mobile_first",
+        "mobile_only",
+    }:
+        desktop_access_preference = ""
+    rendered_signup = render_template(
         "signup.html",
         error=error,
-        success=success,
         plan_name=SAAS_PLAN_NAME,
         plan_price_display=selected_plan["display"],
         selected_market_country=selected_market_country,
         selected_market_profile=selected_market_profile,
         market_country_options=MARKET_COUNTRY_OPTIONS,
         market_profiles=MARKET_PROFILES,
+        desktop_access_preference=desktop_access_preference,
+        legal_terms_version=LEGAL_TERMS_VERSION,
+        legal_privacy_version=LEGAL_PRIVACY_VERSION,
+    )
+    if response_status != 200:
+        return rendered_signup, response_status
+    return rendered_signup
+
+
+@app.get("/signup/success/<company_id>")
+def signup_success(company_id: str):
+    store = load_store()
+    company = get_company(store, company_id)
+    if not company:
+        return redirect(url_for("signup"))
+    token_company_id = signup_success_token_company_id(request.args.get("token", ""))
+    session_company_id = str(session.get("signup_success_company_id") or "")
+    if company_id not in {token_company_id, session_company_id}:
+        return redirect(url_for("signup"))
+    subscription = current_subscription(store, company_id) or {}
+    profile = market_profile(company.get("country") or subscription.get("country") or "CL")
+    installer_info = desktop_installer_info()
+    display_company = copy.deepcopy(company)
+    display_company["ownerEmail"] = masked_email(display_company.get("ownerEmail", ""))
+    return render_template(
+        "signup_success.html",
+        company=display_company,
+        subscription=subscription,
+        market_profile=profile,
+        plan_name=SAAS_PLAN_NAME,
+        plan_display=money_currency(
+            safe_float(subscription.get("price") or company.get("planPrice"), 0),
+            normalize_currency_code(subscription.get("currency") or company.get("planCurrency"), profile["planCurrency"]),
+        ),
+        desktop_installer=installer_info,
+        desktop_download_available=installer_info["available"],
     )
 
 
@@ -3448,7 +4030,7 @@ def logout():
 @app.route("/account/password", methods=["GET", "POST"])
 def account_password():
     store = load_store()
-    admin_user = find_by_id(store.get("admin_users", []), session.get("admin_user_id", ""))
+    admin_user = current_admin_user(store)
     if not admin_user:
         session.clear()
         return redirect(url_for("login"))
@@ -3492,15 +4074,271 @@ def account_password():
     )
 
 
+def desktop_installer_candidates() -> list[Path]:
+    return [
+        APP_RESOURCE_ROOT / "dist" / "FVENTAS Desktop.exe",
+        Path(__file__).resolve().parent / "dist" / "FVENTAS Desktop.exe",
+    ]
+
+
+def desktop_installer_info() -> dict:
+    for candidate in desktop_installer_candidates():
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        digest = hashlib.sha256()
+        with candidate.open("rb") as installer_file:
+            for chunk in iter(lambda: installer_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        size_bytes = candidate.stat().st_size
+        size_mb = size_bytes / (1024 * 1024)
+        return {
+            "available": True,
+            "path": candidate,
+            "filename": "FVENTAS Desktop.exe",
+            "sizeBytes": size_bytes,
+            "sizeDisplay": f"{size_mb:.1f} MB",
+            "sha256": digest.hexdigest(),
+            "updatedAt": datetime.fromtimestamp(candidate.stat().st_mtime, timezone.utc).isoformat(),
+        }
+    return {
+        "available": False,
+        "path": None,
+        "filename": "FVENTAS Desktop.exe",
+        "sizeBytes": 0,
+        "sizeDisplay": "",
+        "sha256": "",
+        "updatedAt": "",
+    }
+
+
 @app.get("/")
+@app.get("/landing")
+@app.get("/inicio")
 def landing():
-    default_plan = plan_pricing_for_country("CL")
+    selected_market_country = normalize_market_country(request.args.get("marketCountry") or "CL")
+    selected_plan = plan_pricing_for_country(selected_market_country)
+    installer_info = desktop_installer_info()
     return render_template(
         "landing.html",
         plan_name=SAAS_PLAN_NAME,
-        plan_price_display=default_plan["display"],
+        plan_price_display=selected_plan["display"],
+        selected_market_country=selected_market_country,
+        selected_market_profile=market_profile(selected_market_country),
         market_country_options=MARKET_COUNTRY_OPTIONS,
         market_profiles=MARKET_PROFILES,
+        desktop_download_available=installer_info["available"],
+        desktop_installer=installer_info,
+        desktop_download_unavailable=request.args.get("desktop") == "unavailable",
+    )
+
+
+@app.get("/desktop/download")
+def desktop_download():
+    installer_info = desktop_installer_info()
+    candidate = installer_info.get("path")
+    if candidate:
+        return send_file(
+            candidate,
+            as_attachment=True,
+            download_name=safe_download_filename(
+                installer_info.get("filename") or "FVENTAS Desktop.exe",
+                "FVENTAS_Desktop.exe",
+            ),
+        )
+    return redirect(url_for("landing", desktop="unavailable"))
+
+
+def public_submission_rate_limited(
+    store: dict,
+    collection: str,
+    *,
+    ip_address: str,
+    email: str = "",
+    window_seconds: int = 300,
+    max_events: int = 5,
+) -> bool:
+    now_dt = datetime.now(timezone.utc)
+    normalized_email = str(email or "").strip().lower()
+    window_seconds = max(1, int(window_seconds or 300))
+    max_events = max(1, int(max_events or 5))
+    recent_events = []
+    for event in store.setdefault(collection, []):
+        created_at = parse_utc_datetime(event.get("createdAt"))
+        if (now_dt - created_at).total_seconds() > window_seconds:
+            continue
+        if event.get("ipAddress") == ip_address or (normalized_email and event.get("email", "").lower() == normalized_email):
+            recent_events.append(event)
+    return len(recent_events) >= max_events
+
+
+def record_public_submission_rate_event(
+    store: dict,
+    collection: str,
+    *,
+    ip_address: str,
+    email: str = "",
+    action: str = "submit",
+    window_seconds: int = 300,
+) -> None:
+    now = utc_now()
+    now_dt = datetime.now(timezone.utc)
+    normalized_email = str(email or "").strip().lower()
+    events = store.setdefault(collection, [])
+    events.append(
+        {
+            "id": next_id("public-rate", f"{collection}-{ip_address}-{normalized_email}-{action}-{now}"),
+            "action": sanitize_text(action, max_length=80, allow_newlines=False),
+            "ipAddress": ip_address,
+            "email": normalized_email,
+            "createdAt": now,
+        }
+    )
+    retention_seconds = max(1, int(window_seconds or 300)) * 4
+    store[collection] = [
+        event
+        for event in events[-1000:]
+        if (now_dt - parse_utc_datetime(event.get("createdAt"))).total_seconds() <= retention_seconds
+    ]
+
+
+def mobile_write_subject_key(*, action: str, actor_id: str, company_id: str, device_id: str) -> str:
+    raw_value = f"{company_id}:{actor_id}:{device_id}:{action}"
+    return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:48]
+
+
+def guard_mobile_write_rate_limit(
+    store: dict,
+    *,
+    action: str,
+    actor: dict,
+    actor_type: str,
+    company_id: str,
+) -> object | None:
+    actor_id = str(actor.get("id") or "").strip()
+    device_id = mobile_device_id()
+    ip_address = request_ip_address()
+    window_seconds = max(1, int(app.config.get("MOBILE_WRITE_WINDOW_SECONDS", 60)))
+    max_events = max(1, int(app.config.get("MOBILE_WRITE_MAX_EVENTS", 30)))
+    subject_key = mobile_write_subject_key(
+        action=action,
+        actor_id=actor_id,
+        company_id=company_id,
+        device_id=device_id,
+    )
+    now_dt = datetime.now(timezone.utc)
+    events = store.setdefault("mobile_write_rate_events", [])
+    recent_events = [
+        event
+        for event in events
+        if event.get("subjectKey") == subject_key
+        and (now_dt - parse_utc_datetime(event.get("createdAt"))).total_seconds() <= window_seconds
+    ]
+    metadata = {
+        "companyId": company_id,
+        "actorType": actor_type,
+        "action": action,
+        "deviceId": device_id,
+        "subjectKey": subject_key,
+        "windowSeconds": window_seconds,
+        "maxEvents": max_events,
+    }
+    if len(recent_events) >= max_events:
+        record_audit_event(
+            store,
+            "mobile_write_limited",
+            actor_type,
+            actor_id,
+            "Escritura movil bloqueada temporalmente por solicitudes repetidas.",
+            metadata=metadata,
+            actor={
+                "id": actor_id,
+                "name": actor.get("businessName") or actor.get("name") or actor_id,
+                "role": actor.get("role") or actor_type,
+                "companyId": company_id,
+            },
+            criticality="medium",
+        )
+        save_store(store)
+        return jsonify({"error": "Demasiadas solicitudes recientes. Espera unos minutos antes de reintentar."}), 429
+
+    now = utc_now()
+    events.append(
+        {
+            "id": next_id("mobile-rate", f"{subject_key}-{now}"),
+            "companyId": company_id,
+            "actorType": actor_type,
+            "actorId": actor_id,
+            "action": sanitize_text(action, max_length=80, allow_newlines=False),
+            "subjectKey": subject_key,
+            "ipAddress": ip_address,
+            "deviceId": sanitize_text(device_id, max_length=120, allow_newlines=False),
+            "createdAt": now,
+        }
+    )
+    retention_seconds = window_seconds * 4
+    store["mobile_write_rate_events"] = [
+        event
+        for event in events[-1000:]
+        if (now_dt - parse_utc_datetime(event.get("createdAt"))).total_seconds() <= retention_seconds
+    ]
+    save_store(store)
+    return None
+
+
+@app.post("/api/landing/access-preference")
+def landing_access_preference():
+    payload = request.get_json(silent=True) or request.form
+    preference = sanitize_text(
+        payload.get("preference") or payload.get("choice") or "",
+        max_length=80,
+        allow_newlines=False,
+    )
+    allowed = {
+        "desktop_download_started",
+        "desktop_download_cancelled",
+        "mobile_first",
+        "mobile_only",
+    }
+    if preference not in allowed:
+        return jsonify({"error": "Preferencia no valida."}), 400
+
+    store = load_store()
+    ip_address = request_ip_address()
+    now_dt = datetime.now(timezone.utc)
+    window_seconds = max(1, int(app.config.get("LANDING_ACCESS_PREFERENCE_WINDOW_SECONDS", 60)))
+    max_events = max(1, int(app.config.get("LANDING_ACCESS_PREFERENCE_MAX_EVENTS", 12)))
+    recent_events = [
+        event
+        for event in store.get("landing_access_preferences", [])
+        if event.get("ipAddress") == ip_address
+        and (now_dt - parse_utc_datetime(event.get("createdAt"))).total_seconds() <= window_seconds
+    ]
+    if len(recent_events) >= max_events:
+        return jsonify({"error": "Demasiadas solicitudes. Intentalo nuevamente en unos minutos."}), 429
+    market_country = normalize_market_country(payload.get("marketCountry") or "CL")
+    event = {
+        "id": next_id("landing-pref", preference),
+        "preference": preference,
+        "source": sanitize_text(payload.get("source") or "landing", max_length=80, allow_newlines=False),
+        "marketCountry": market_country,
+        "mobileAppAccessRequested": preference in {"desktop_download_cancelled", "mobile_first", "mobile_only"},
+        "userAgent": sanitize_text(request.headers.get("User-Agent", ""), max_length=240, allow_newlines=False),
+        "ipAddress": ip_address,
+        "createdAt": utc_now(),
+    }
+    events = store.setdefault("landing_access_preferences", [])
+    events.append(event)
+    if len(events) > 500:
+        del events[:-500]
+    save_store(store)
+    return jsonify(
+        {
+            "ok": True,
+            "preference": preference,
+            "mobileAppAccessRequested": event["mobileAppAccessRequested"],
+            "signupUrl": url_for("signup", marketCountry=market_country, desktopAccessPreference=preference),
+            "mobileApiUrl": url_for("api_mobile_meta"),
+        }
     )
 
 
@@ -3627,8 +4465,9 @@ def normalize_location_for_market(
     profile: dict | None = None,
 ) -> tuple[str, str, str]:
     active_profile = profile or market_profile("CL")
-    if active_profile.get("code") == "CL":
-        return normalize_chilean_location(state, city)
+    location_options = country_location_options(active_profile.get("code"))
+    if location_options:
+        return normalize_country_location(active_profile.get("code"), state, city)
     normalized_state = sanitize_text(state or "", max_length=120, allow_newlines=False)
     normalized_city = sanitize_text(city or "", max_length=120, allow_newlines=False)
     if not normalized_state:
@@ -3655,6 +4494,107 @@ SUBSCRIPTION_STATUS_OPTIONS = [
 
 def subscription_status_label(status: str) -> str:
     return dict(SUBSCRIPTION_STATUS_OPTIONS).get(status, status or "Sin estado")
+
+
+ACCESS_PREFERENCE_LABELS = {
+    "desktop_download_started": "Panel Windows",
+    "desktop_download_cancelled": "App movil prioritaria",
+    "mobile_first": "App movil prioritaria",
+    "mobile_only": "Solo app movil",
+}
+
+
+def access_preference_label(value: str | None) -> str:
+    return ACCESS_PREFERENCE_LABELS.get(str(value or "").strip(), "Alta completa")
+
+
+def company_setup_checklist(company: dict, subscription: dict, store: dict) -> dict:
+    company_id = company.get("id", "")
+
+    def in_company(record: dict) -> bool:
+        return record_company_id(record, store) == company_id
+
+    active_admins = [
+        user
+        for user in store.get("admin_users", [])
+        if in_company(user)
+        and user.get("role") in WEB_ADMIN_ROLES
+        and user.get("status") == "active"
+    ]
+    active_sellers = [
+        user
+        for user in store.get("admin_users", [])
+        if in_company(user)
+        and user.get("role") == "sales"
+        and user.get("status") == "active"
+    ]
+    active_clients = [
+        client
+        for client in store.get("clients", [])
+        if in_company(client) and client.get("status") == "active"
+    ]
+    active_products = [
+        product
+        for product in store.get("products", [])
+        if in_company(product) and product.get("status") == "active"
+    ]
+    active_categories = [
+        category
+        for category in store.get("categories", [])
+        if in_company(category) and category.get("status") == "active"
+    ]
+    purchase_conditions = company.get("purchaseConditions") if isinstance(company.get("purchaseConditions"), dict) else {}
+    subscription_active = (
+        subscription.get("status") in SUBSCRIPTION_ACTIVE_STATUSES
+        or company.get("status") in SUBSCRIPTION_ACTIVE_STATUSES
+    )
+    items = [
+        {
+            "label": "Suscripcion activa",
+            "done": subscription_active,
+            "detail": subscription_status_label(subscription.get("status") or company.get("status")),
+        },
+        {
+            "label": "Aceptacion legal",
+            "done": bool((company.get("legalAcceptance") or {}).get("accepted")),
+            "detail": (company.get("legalAcceptance") or {}).get("termsVersion") or "Pendiente",
+        },
+        {
+            "label": "Administrador",
+            "done": bool(active_admins),
+            "detail": f"{len(active_admins)} activo(s)",
+        },
+        {
+            "label": "Condiciones de compra",
+            "done": bool(purchase_conditions.get("title") and purchase_conditions.get("scopeLabel")),
+            "detail": purchase_conditions.get("title") or "Sin configurar",
+        },
+        {
+            "label": "Categorias",
+            "done": bool(active_categories),
+            "detail": f"{len(active_categories)} activa(s)",
+        },
+        {
+            "label": "Catalogo",
+            "done": bool(active_products),
+            "detail": f"{len(active_products)} producto(s)",
+        },
+        {
+            "label": "Usuarios moviles",
+            "done": bool(active_sellers or active_clients),
+            "detail": f"{len(active_sellers)} vendedor(es), {len(active_clients)} cliente(s)",
+        },
+    ]
+    done_count = sum(1 for item in items if item["done"])
+    total_count = len(items)
+    return {
+        "items": items,
+        "done": done_count,
+        "total": total_count,
+        "percent": round((done_count / total_count) * 100) if total_count else 0,
+        "missing": [item["label"] for item in items if not item["done"]],
+        "ready": done_count == total_count,
+    }
 
 
 def default_company_id(store: dict | None = None) -> str:
@@ -3713,14 +4653,29 @@ def company_subscription_allows_access(store: dict, company_id: str | None) -> b
     return bool(subscription and subscription.get("status") in SUBSCRIPTION_ACTIVE_STATUSES)
 
 
-def payment_term_options(store: dict | None = None) -> list[int]:
-    raw_terms = business_settings(store).get("defaultPaymentTermsDays") or PAYMENT_TERM_OPTIONS
+def normalized_payment_terms(value, fallback: list[int] | None = None) -> list[int]:
+    if isinstance(value, str):
+        raw_terms = re.split(r"[\s,;|/]+", value)
+    elif isinstance(value, list):
+        raw_terms = value
+    elif value in (None, ""):
+        raw_terms = []
+    else:
+        raw_terms = [value]
+
     terms = []
     for term in raw_terms:
         value = safe_int(term, -1)
         if value >= 0 and value not in terms:
             terms.append(value)
-    return sorted(terms) or list(PAYMENT_TERM_OPTIONS)
+    if terms:
+        return sorted(terms)
+    return sorted(set(fallback or [0]))
+
+
+def payment_term_options(store: dict | None = None) -> list[int]:
+    raw_terms = business_settings(store).get("defaultPaymentTermsDays") or PAYMENT_TERM_OPTIONS
+    return normalized_payment_terms(raw_terms, PAYMENT_TERM_OPTIONS)
 
 
 @app.get("/healthz")
@@ -3738,7 +4693,22 @@ def healthz():
 @app.get("/privacy")
 @app.get("/privacidad")
 def privacy_policy():
-    return render_template("privacy_policy.html")
+    return render_template(
+        "privacy_policy.html",
+        legal_privacy_version=LEGAL_PRIVACY_VERSION,
+        legal_terms_version=LEGAL_TERMS_VERSION,
+    )
+
+
+@app.get("/terms")
+@app.get("/terminos")
+@app.get("/terms-of-service")
+def terms_of_service():
+    return render_template(
+        "terms_of_service.html",
+        legal_terms_version=LEGAL_TERMS_VERSION,
+        legal_privacy_version=LEGAL_PRIVACY_VERSION,
+    )
 
 
 @app.route("/account-deletion", methods=["GET", "POST"])
@@ -3747,79 +4717,130 @@ def account_deletion_page():
     submitted = False
     request_id = ""
     message = ""
+    error = ""
     email = ""
 
     if request.method == "POST":
         store = load_store()
         email = str(request.form.get("email") or "").strip().lower()
         reason = str(request.form.get("reason") or "").strip()
-        subject_type, subject = find_mobile_account_for_deletion(store, email)
-        if subject:
-            request_id, _ = request_mobile_account_deletion(
-                store,
-                subject_type,
-                subject,
-                channel="web",
-                reason=reason,
-                actor={"id": email, "name": email, "role": "public"},
-            )
+        ip_address = request_ip_address()
+        window_seconds = max(1, int(app.config.get("ACCOUNT_DELETION_WINDOW_SECONDS", 300)))
+        max_events = max(1, int(app.config.get("ACCOUNT_DELETION_MAX_EVENTS", 5)))
+        if public_submission_rate_limited(
+            store,
+            "account_deletion_rate_events",
+            ip_address=ip_address,
+            email=email,
+            window_seconds=window_seconds,
+            max_events=max_events,
+        ):
+            error = "Hemos recibido varias solicitudes recientes. Espera unos minutos antes de intentarlo nuevamente."
         else:
-            request_id = next_id("acctdel", email or utc_now())
-            record_audit_event(
+            subject_type, subject = find_mobile_account_for_deletion(store, email)
+            if subject:
+                request_id = register_public_account_deletion_request(
+                    store,
+                    subject_type=subject_type,
+                    subject=subject,
+                    email=email,
+                    channel="web",
+                    reason=reason,
+                    actor={"id": email, "name": email, "role": "public"},
+                )
+            else:
+                request_id = register_unknown_account_deletion_request(
+                    store,
+                    email=email,
+                    channel="web",
+                    reason=reason,
+                    actor={
+                        "id": email or "account-deletion-public",
+                        "name": email or "solicitud publica",
+                        "role": "public",
+                    },
+                )
+                if subject_type == "ambiguous":
+                    record_audit_event(
+                        store,
+                        "account_deletion_ambiguous_public",
+                        "account_deletion_request",
+                        request_id,
+                        "Solicitud publica de eliminacion requiere revision manual por correo asociado a multiples cuentas.",
+                        actor={
+                            "id": email or "account-deletion-public",
+                            "name": email or "solicitud publica",
+                            "role": "public",
+                        },
+                        metadata={"email": email, "requestId": request_id},
+                        criticality="high",
+                    )
+                notify_admin(
+                    store,
+                    "Solicitud de eliminacion de cuenta",
+                    (
+                        f"Solicitud recibida para {email}. El correo coincide con multiples cuentas; revisar manualmente."
+                        if subject_type == "ambiguous"
+                        else f"Solicitud recibida para {email or 'correo no informado'}. Revisar manualmente."
+                    ),
+                    notification_type="warning",
+                    priority="high",
+                    module="admin_users",
+                    entity_type="account_deletion_request",
+                    entity_id=request_id,
+                    dedupe_key=f"account-deletion-web-{email}",
+                )
+            record_public_submission_rate_event(
                 store,
-                "account_deletion_requested_unknown",
-                "account_deletion_request",
-                request_id,
-                "Solicitud publica de eliminacion para un correo no encontrado.",
-                actor={"id": email or request_id, "name": email or "solicitud publica", "role": "public"},
-                metadata={"email": email, "channel": "web", "reason": reason[:500]},
-                criticality="medium",
+                "account_deletion_rate_events",
+                ip_address=ip_address,
+                email=email,
+                action="account_deletion",
+                window_seconds=window_seconds,
             )
-            notify_admin(
-                store,
-                "Solicitud de eliminacion de cuenta",
-                f"Solicitud recibida para {email or 'correo no informado'}. Revisar manualmente.",
-                notification_type="warning",
-                priority="high",
-                module="admin_users",
-                entity_type="account_deletion_request",
-                entity_id=request_id,
-                dedupe_key=f"account-deletion-web-{email}",
-            )
-        save_store(store)
-        submitted = True
-        message = "Solicitud recibida. FVENTAS revisara la cuenta y te contactara si necesita validar informacion comercial."
+            save_store(store)
+            submitted = True
+            message = "Solicitud recibida. FVENTAS revisara la cuenta y te contactara si necesita validar informacion comercial."
 
     return render_template(
         "account_deletion.html",
         submitted=submitted,
         request_id=request_id,
         message=message,
+        error=error,
         email=email,
-    )
+    ), (429 if error else 200)
 
 
 @app.get("/readyz")
 def readyz():
     try:
         store = load_store()
-        return jsonify(
-            {
-                "status": "ready",
-                "appVersion": app.config.get("APP_VERSION", "0.9.0"),
-                "buildSha": app.config.get("BUILD_SHA", ""),
-                "dataBackend": app.config.get("DATA_BACKEND"),
-                "storageBackend": app.config.get("STORAGE_BACKEND"),
-                "mobileTokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
-                "products": len(store.get("products", [])),
-                "clients": len(store.get("clients", [])),
-                "orders": len(store.get("orders", [])),
-                "quotes": len(store.get("quotes", [])),
-                "crm": len(store.get("crm_records", [])),
-            }
-        )
+        response = {
+            "status": "ready",
+            "appVersion": app.config.get("APP_VERSION", "0.9.0"),
+            "buildSha": app.config.get("BUILD_SHA", ""),
+        }
+        if app.config.get("READYZ_PUBLIC_DETAILS"):
+            response.update(
+                {
+                    "dataBackend": app.config.get("DATA_BACKEND"),
+                    "storageBackend": app.config.get("STORAGE_BACKEND"),
+                    "mobileTokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
+                    "products": len(store.get("products", [])),
+                    "clients": len(store.get("clients", [])),
+                    "orders": len(store.get("orders", [])),
+                    "quotes": len(store.get("quotes", [])),
+                    "crm": len(store.get("crm_records", [])),
+                    "runtime": runtime_capacity_snapshot(),
+                }
+            )
+        return jsonify(response)
     except Exception as exc:
-        return jsonify({"status": "not_ready", "error": str(exc)}), 503
+        response = {"status": "not_ready"}
+        if app.config.get("READYZ_PUBLIC_DETAILS"):
+            response["error"] = str(exc)
+        return jsonify(response), 503
 
 
 def mobile_token_serializer() -> URLSafeTimedSerializer:
@@ -3830,50 +4851,86 @@ def document_token_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="fventas-document-download")
 
 
-def mobile_device_id() -> str:
-    payload = request.get_json(silent=True) if request.method in {"POST", "PUT", "PATCH"} else {}
+def signup_success_token_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="fventas-signup-success")
+
+
+def issue_signup_success_token(company_id: str) -> str:
+    return signup_success_token_serializer().dumps({"companyId": company_id})
+
+
+def signup_success_token_company_id(token: str) -> str:
+    if not token:
+        return ""
+    try:
+        payload = signup_success_token_serializer().loads(token, max_age=60 * 30)
+    except (BadSignature, SignatureExpired):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("companyId") or "")
+
+
+def mobile_request_device_id(payload: dict | None = None) -> str:
     payload = payload or {}
     return (
         request.headers.get("X-FVENTAS-Device-Id")
         or request.headers.get("X-Device-Id")
         or str(payload.get("deviceId") or "")
+    )[:120]
+
+
+def mobile_device_id(payload: dict | None = None) -> str:
+    return (
+        mobile_request_device_id(payload)
         or request_device_hash()
     )[:120]
 
 
-def issue_mobile_token(client: dict) -> str:
+def issue_mobile_token(client: dict, device_id: str = "") -> str:
+    company_id = mobile_required_company_id(client)
     return mobile_token_serializer().dumps(
         {
             "type": "client",
             "clientId": client["id"],
             "id": client["id"],
+            "companyId": company_id,
             "role": "client",
             "sessionVersion": safe_int(client.get("mobileSessionVersion"), 0),
-            "deviceId": mobile_device_id(),
+            "deviceId": device_id or mobile_device_id(),
         }
     )
 
 
-def issue_mobile_admin_token(user: dict) -> str:
+def issue_mobile_admin_token(user: dict, device_id: str = "") -> str:
+    company_id = mobile_required_company_id(user)
     return mobile_token_serializer().dumps(
         {
             "type": "admin",
             "adminUserId": user["id"],
             "id": user["id"],
+            "companyId": company_id,
             "role": user.get("role", ""),
             "sessionVersion": user_session_version(user),
-            "deviceId": mobile_device_id(),
+            "deviceId": device_id or mobile_device_id(),
         }
     )
 
 
 def mobile_token_payload() -> dict:
+    if has_request_context() and hasattr(g, "mobile_token_payload"):
+        return g.mobile_token_payload
+
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
+        if has_request_context():
+            g.mobile_token_payload = {}
         return {}
 
     token = header.removeprefix("Bearer ").strip()
     if not token:
+        if has_request_context():
+            g.mobile_token_payload = {}
         return {}
 
     try:
@@ -3882,9 +4939,64 @@ def mobile_token_payload() -> dict:
             max_age=int(app.config.get("MOBILE_TOKEN_MAX_AGE_SECONDS", 60 * 60 * 24 * 7)),
         )
     except (BadSignature, SignatureExpired):
+        if has_request_context():
+            g.mobile_token_payload = {}
         return {}
 
-    return payload if isinstance(payload, dict) else {}
+    normalized_payload = payload if isinstance(payload, dict) else {}
+    if has_request_context():
+        g.mobile_token_payload = normalized_payload
+    return normalized_payload
+
+
+def mobile_token_company_id(payload: dict) -> str:
+    return str(payload.get("companyId") or "").strip()
+
+
+def mobile_required_company_id(record: dict | None) -> str:
+    return str((record or {}).get("companyId") or "").strip()
+
+
+def mobile_subject_matches_token_company(subject: dict | None, store: dict, payload: dict) -> bool:
+    if not subject:
+        return False
+    subject_company_id = mobile_required_company_id(subject)
+    if not subject_company_id:
+        return False
+    token_company_id = mobile_token_company_id(payload)
+    if not token_company_id:
+        return not bool(app.config.get("REJECT_LEGACY_MOBILE_TOKENS"))
+    return hmac.compare_digest(subject_company_id, token_company_id)
+
+
+def mobile_find_admin_for_token(store: dict, payload: dict) -> dict | None:
+    admin_id = payload.get("adminUserId") or payload.get("id", "")
+    token_company_id = mobile_token_company_id(payload)
+    candidates = [
+        user for user in store.get("admin_users", [])
+        if user.get("id") == admin_id
+    ]
+    if token_company_id:
+        candidates = [
+            user for user in candidates
+            if record_company_id(user, store) == token_company_id
+        ]
+    return candidates[0] if candidates else None
+
+
+def mobile_find_client_for_token(store: dict, payload: dict) -> dict | None:
+    client_id = payload.get("clientId") or payload.get("id", "")
+    token_company_id = mobile_token_company_id(payload)
+    candidates = [
+        client for client in store.get("clients", [])
+        if client.get("id") == client_id
+    ]
+    if token_company_id:
+        candidates = [
+            client for client in candidates
+            if record_company_id(client, store) == token_company_id
+        ]
+    return candidates[0] if candidates else None
 
 
 def mobile_subscription_response(company_id: str | None):
@@ -3900,10 +5012,38 @@ def mobile_subscription_response(company_id: str | None):
 
 def mobile_token_subject_company_id(store: dict, payload: dict) -> str:
     if payload.get("type") == "admin":
-        user = find_by_id(store.get("admin_users", []), payload.get("adminUserId") or payload.get("id", ""))
-        return record_company_id(user, store) if user else ""
-    client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
-    return record_company_id(client, store) if client else ""
+        user = mobile_find_admin_for_token(store, payload)
+        return mobile_required_company_id(user) if user else ""
+    client = mobile_find_client_for_token(store, payload)
+    return mobile_required_company_id(client) if client else ""
+
+
+@app.before_request
+def track_runtime_identity_seen():
+    if session.get("admin_authenticated"):
+        runtime_identity_seen(
+            "admin_panel",
+            str(session.get("company_id") or ""),
+            str(session.get("admin_user_id") or session.get("admin_session_id") or ""),
+            str(session.get("admin_role") or "admin"),
+        )
+
+    if not request.path.startswith(("/api/mobile/", "/api/v1/mobile/")):
+        return None
+
+    payload = mobile_token_payload()
+    if not payload:
+        return None
+
+    identity_type = "seller_app" if payload.get("type") == "admin" else "client_app"
+    subject_id = str(payload.get("adminUserId") or payload.get("clientId") or payload.get("id") or "")
+    runtime_identity_seen(
+        identity_type,
+        mobile_token_company_id(payload),
+        subject_id,
+        str(payload.get("role") or identity_type),
+    )
+    return None
 
 
 @app.before_request
@@ -3950,7 +5090,12 @@ def protect_mobile_company_subscription():
 
 def mobile_token_matches_device(payload: dict) -> bool:
     header_device = request.headers.get("X-FVENTAS-Device-Id") or request.headers.get("X-Device-Id")
-    return not header_device or not payload.get("deviceId") or hmac.compare_digest(str(payload.get("deviceId")), header_device[:120])
+    token_device = str(payload.get("deviceId") or "")[:120]
+    if not token_device:
+        return not bool(app.config.get("REJECT_LEGACY_MOBILE_TOKENS"))
+    if not header_device:
+        return not bool(app.config.get("REQUIRE_MOBILE_DEVICE_HEADER"))
+    return hmac.compare_digest(token_device, header_device[:120])
 
 
 def mobile_token_version_valid(subject: dict, payload: dict, version_key: str) -> bool:
@@ -4062,17 +5207,262 @@ def complete_client_account_deletion(store: dict, client: dict) -> tuple[dict, l
     return before, changed_orders
 
 
+ACCOUNT_DELETION_STATUS_LABELS = {
+    "requested": "Solicitada",
+    "processing": "En revision",
+    "approved": "Aprobada para cierre",
+    "rejected": "Rechazada",
+    "deleted": "Eliminada/anonimizada",
+    "closed_no_account": "Cerrada sin cuenta",
+}
+
+
+def account_deletion_status_label(status: str) -> str:
+    return ACCOUNT_DELETION_STATUS_LABELS.get(str(status or "").strip().lower(), status or "Sin estado")
+
+
+def account_deletion_status_badge(status: str) -> str:
+    return {
+        "requested": "text-bg-warning",
+        "processing": "text-bg-info",
+        "approved": "text-bg-primary",
+        "rejected": "text-bg-secondary",
+        "deleted": "text-bg-dark",
+        "closed_no_account": "text-bg-light",
+    }.get(str(status or "").strip().lower(), "text-bg-light")
+
+
+def complete_admin_user_account_deletion(store: dict, user: dict) -> tuple[dict, list[dict], list[dict]]:
+    """Anonymize a mobile/admin user while retaining commercial history by id."""
+    before = copy.deepcopy(user)
+    now = utc_now()
+    actor_id = session.get("admin_user_id", "")
+    actor_name = session.get("admin_name", "FVENTAS Admin")
+    actor_role = current_admin_role()
+    public_label = account_deletion_public_label(user.get("id", ""))
+    deleted_email = f"deleted+{user.get('id', secrets.token_hex(4))}@deleted.fventas.local"
+
+    user.update(
+        {
+            "firstName": "",
+            "lastName": "",
+            "name": public_label,
+            "email": deleted_email,
+            "phone": "",
+            "status": "inactive",
+            "mobileAccess": "deleted",
+            "mobileAccessEnabled": False,
+            "mobileAccessBlocked": True,
+            "mustChangePassword": True,
+            "passwordHash": generate_password_hash(secrets.token_urlsafe(32)),
+            "deletionStatus": "deleted",
+            "deletionCompletedAt": now,
+            "deletionCompletedById": actor_id,
+            "deletionCompletedByName": actor_name,
+            "updatedAt": now,
+            "updatedVia": "admin",
+            "updatedById": actor_id,
+            "updatedByName": actor_name,
+            "updatedByRole": actor_role,
+        }
+    )
+    bump_user_session_version(user)
+
+    changed_clients: list[dict] = []
+    changed_orders: list[dict] = []
+    subject_company_id = record_company_id(user, store)
+    for client in store.get("clients", []):
+        if record_company_id(client, store) != subject_company_id or client.get("assignedSellerId") != user.get("id"):
+            continue
+        client["assignedSellerName"] = public_label
+        client["updatedAt"] = now
+        client["updatedByName"] = actor_name
+        changed_clients.append(client)
+
+    for order in store.get("orders", []):
+        if record_company_id(order, store) != subject_company_id:
+            continue
+        touched = False
+        if order.get("sellerId") == user.get("id"):
+            order["sellerName"] = public_label
+            touched = True
+        if order.get("createdById") == user.get("id"):
+            order["createdByName"] = public_label
+            touched = True
+        if touched:
+            order["updatedAt"] = now
+            order["updatedByName"] = actor_name
+            changed_orders.append(order)
+
+    return before, changed_clients, changed_orders
+
+
+def register_unknown_account_deletion_request(
+    store: dict,
+    *,
+    email: str,
+    channel: str,
+    reason: str,
+    actor: dict | None = None,
+) -> str:
+    now = utc_now()
+    normalized_email = str(email or "").strip().lower()
+    existing = next(
+        (
+            item
+            for item in store.setdefault("account_deletion_requests", [])
+            if item.get("email", "").lower() == normalized_email
+            and item.get("subjectType") == "unknown"
+            and item.get("status") in {"requested", "processing", "approved"}
+        ),
+        None,
+    )
+    if existing:
+        existing["updatedAt"] = now
+        existing["lastRepeatedAt"] = now
+        existing["repeatCount"] = safe_int(existing.get("repeatCount"), 0) + 1
+        return existing["id"]
+
+    request_id = next_id("acctdel", normalized_email or now)
+    store.setdefault("account_deletion_requests", []).append(
+        {
+            "id": request_id,
+            "email": normalized_email,
+            "subjectType": "unknown",
+            "subjectId": "",
+            "companyId": "",
+            "channel": channel,
+            "reason": str(reason or "").strip()[:500],
+            "status": "requested",
+            "resolutionNote": "",
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )
+    record_audit_event(
+        store,
+        "account_deletion_requested_unknown",
+        "account_deletion_request",
+        request_id,
+        "Solicitud publica de eliminacion para un correo no encontrado.",
+        actor=actor or {"id": normalized_email or request_id, "name": normalized_email or "solicitud publica", "role": "public"},
+        metadata={"email": normalized_email, "channel": channel, "reason": str(reason or "").strip()[:500]},
+        criticality="medium",
+    )
+    return request_id
+
+
 def find_mobile_account_for_deletion(store: dict, email: str) -> tuple[str, dict | None]:
     normalized = email.strip().lower()
     if not normalized:
         return "", None
-    client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == normalized), None)
-    if client:
-        return "client", client
-    user = next((item for item in store.get("admin_users", []) if item.get("email", "").lower() == normalized), None)
-    if user:
-        return "admin_user", user
+    matches: list[tuple[str, dict]] = [
+        ("client", item)
+        for item in store.get("clients", [])
+        if item.get("email", "").lower() == normalized
+    ]
+    matches.extend(
+        ("admin_user", item)
+        for item in store.get("admin_users", [])
+        if item.get("email", "").lower() == normalized
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return "ambiguous", None
     return "", None
+
+
+def register_public_account_deletion_request(
+    store: dict,
+    *,
+    subject_type: str,
+    subject: dict,
+    email: str,
+    channel: str,
+    reason: str,
+    actor: dict | None = None,
+) -> str:
+    """Register a public erasure request without mutating the matched account yet."""
+    now = utc_now()
+    normalized_email = str(email or "").strip().lower()
+    subject_id = subject.get("id", "")
+    company_id = record_company_id(subject, store)
+    subject_label = subject.get("businessName") or subject.get("name") or subject.get("email", "")
+    role_label = "Cliente B2B" if subject_type == "client" else ROLE_LABELS.get(subject.get("role", ""), subject.get("role", ""))
+    existing = next(
+        (
+            item
+            for item in store.setdefault("account_deletion_requests", [])
+            if item.get("subjectType") == subject_type
+            and item.get("subjectId") == subject_id
+            and item.get("status") in {"requested", "processing", "approved"}
+        ),
+        None,
+    )
+    if existing:
+        before = copy.deepcopy(existing)
+        existing["updatedAt"] = now
+        existing["lastRepeatedAt"] = now
+        existing["repeatCount"] = safe_int(existing.get("repeatCount"), 0) + 1
+        if reason:
+            existing["reason"] = str(reason or "").strip()[:500]
+        record_change_event(
+            store,
+            "account_deletion_public_repeat",
+            "account_deletion_request",
+            existing["id"],
+            "Solicitud publica de eliminacion repetida; acceso movil sigue pendiente de verificacion.",
+            before,
+            existing,
+            actor=actor or {"id": normalized_email or subject_id, "name": normalized_email or "solicitud publica", "role": "public"},
+            criticality="medium",
+        )
+        return existing["id"]
+
+    request_id = next_id("acctdel", f"public-{subject_type}-{subject_id}-{now}")
+    request_record = {
+        "id": request_id,
+        "email": normalized_email,
+        "subjectType": subject_type,
+        "subjectId": subject_id,
+        "subjectLabel": subject_label,
+        "companyId": company_id,
+        "companyName": (find_by_id(store.get("companies", []), company_id) or {}).get("name", ""),
+        "role": role_label,
+        "channel": channel,
+        "reason": str(reason or "").strip()[:500],
+        "status": "requested",
+        "resolutionNote": "",
+        "requiresVerification": True,
+        "accessBlocked": False,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    store.setdefault("account_deletion_requests", []).append(request_record)
+    record_audit_event(
+        store,
+        "account_deletion_public_requested",
+        "account_deletion_request",
+        request_id,
+        "Solicitud publica de eliminacion registrada para verificacion antes de bloquear acceso movil.",
+        metadata={"after": request_record, "companyId": company_id},
+        actor=actor or {"id": normalized_email or subject_id, "name": normalized_email or "solicitud publica", "role": "public"},
+        criticality="medium",
+    )
+    notify_admin(
+        store,
+        "Solicitud publica de eliminacion",
+        f"{subject_label or normalized_email} solicito eliminar su cuenta desde web. Validar identidad antes de bloquear acceso movil.",
+        notification_type="warning",
+        priority="high",
+        module="platform_privacy",
+        entity_type="account_deletion_request",
+        entity_id=request_id,
+        dedupe_key=f"account-deletion-public-{subject_type}-{subject_id}",
+        metadata={"subjectType": subject_type, "subjectId": subject_id, "companyId": company_id, "channel": channel},
+    )
+    return request_id
 
 
 def request_mobile_account_deletion(
@@ -4085,6 +5475,7 @@ def request_mobile_account_deletion(
     actor: dict | None = None,
 ) -> tuple[str, bool]:
     now = utc_now()
+    company_id = record_company_id(subject, store)
     request_id = subject.get("deletionRequestId") or next_id("acctdel", f"{subject_type}-{subject.get('id', '')}-{now}")
     reason = str(reason or "").strip()[:500]
     actor = actor or {
@@ -4101,7 +5492,7 @@ def request_mobile_account_deletion(
             subject.get("id", ""),
             "Solicitud de eliminacion repetida sobre una cuenta ya bloqueada para revision.",
             actor=actor,
-            metadata={"requestId": request_id, "channel": channel, "reason": reason},
+            metadata={"companyId": company_id, "requestId": request_id, "channel": channel, "reason": reason},
             criticality="medium",
         )
         return request_id, False
@@ -4141,7 +5532,7 @@ def request_mobile_account_deletion(
         entity_type=subject_type,
         entity_id=subject.get("id", ""),
         dedupe_key=f"account-deletion-{subject_type}-{subject.get('id', '')}",
-        metadata={"requestId": request_id, "channel": channel},
+        metadata={"companyId": company_id, "requestId": request_id, "channel": channel},
     )
     return request_id, True
 
@@ -4162,14 +5553,15 @@ def mobile_token_admin_id() -> str:
 
 def require_mobile_sales_user(store: dict) -> tuple[dict | None, object | None]:
     payload = mobile_token_payload()
-    admin_id = payload.get("adminUserId") or payload.get("id", "") if payload.get("type") == "admin" else ""
-    user = find_by_id(store.get("admin_users", []), admin_id)
+    user = mobile_find_admin_for_token(store, payload) if payload.get("type") == "admin" else None
     if (
         not user
         or user.get("status") != "active"
         or user.get("role") not in MOBILE_SALES_ROLES
+        or not mobile_required_company_id(user)
         or user.get("mobileAccessEnabled", True) is False
         or mobile_account_access_blocked(user)
+        or not mobile_subject_matches_token_company(user, store, payload)
         or not mobile_token_version_valid(user, payload, "sessionVersion")
     ):
         return None, jsonify({"error": "Token de vendedor requerido."})
@@ -4177,9 +5569,8 @@ def require_mobile_sales_user(store: dict) -> tuple[dict | None, object | None]:
 
 
 def require_mobile_client_id() -> tuple[str, object | None]:
-    customer_id = mobile_token_client_id() or request.args.get("customerId", "").strip()
-    require_token = bool(app.config.get("REQUIRE_MOBILE_TOKEN"))
-    if require_token and not mobile_token_client_id():
+    customer_id = mobile_token_client_id()
+    if not customer_id:
         return "", jsonify({"error": "Token movil requerido."})
     return customer_id, None
 
@@ -4192,11 +5583,13 @@ def require_mobile_client(store: dict) -> tuple[dict | None, object | None]:
         return None, None
     if payload.get("type", "client") != "client":
         return None, jsonify({"error": "Token de cliente requerido."})
-    client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
+    client = mobile_find_client_for_token(store, payload)
     if (
         not client
         or client.get("status") != "active"
+        or client.get("mobileAccessEnabled", True) is False
         or mobile_account_access_blocked(client)
+        or not mobile_subject_matches_token_company(client, store, payload)
         or not mobile_token_version_valid(client, payload, "mobileSessionVersion")
     ):
         return None, jsonify({"error": "Token movil invalido."})
@@ -4212,36 +5605,171 @@ def require_mobile_catalog_access(store: dict) -> tuple[dict | None, object | No
         return None, jsonify({"error": "Token movil requerido."})
 
     if payload.get("type") == "admin":
-        user = find_by_id(store.get("admin_users", []), payload.get("adminUserId") or payload.get("id", ""))
+        user = mobile_find_admin_for_token(store, payload)
         if (
             user
             and user.get("status") == "active"
             and user.get("role") in MOBILE_SALES_ROLES
+            and mobile_required_company_id(user)
             and user.get("mobileAccessEnabled", True) is not False
             and not mobile_account_access_blocked(user)
+            and mobile_subject_matches_token_company(user, store, payload)
             and mobile_token_version_valid(user, payload, "sessionVersion")
         ):
             return user, None
         return None, jsonify({"error": "Token movil invalido."})
 
-    client = find_by_id(store.get("clients", []), payload.get("clientId") or payload.get("id", ""))
+    client = mobile_find_client_for_token(store, payload)
     if (
         client
         and client.get("status") == "active"
+        and mobile_required_company_id(client)
+        and client.get("mobileAccessEnabled", True) is not False
         and not mobile_account_access_blocked(client)
+        and mobile_subject_matches_token_company(client, store, payload)
         and mobile_token_version_valid(client, payload, "mobileSessionVersion")
     ):
         return client, None
     return None, jsonify({"error": "Token movil invalido."})
 
 
+def mobile_market_payload(store: dict, company_id: str | None = None) -> dict:
+    profile = active_market_profile_for_store(store, company_id)
+    company = get_company(store, company_id) if company_id else None
+    company_profile = company.get("marketProfile") if isinstance(company, dict) else None
+    if not isinstance(company_profile, dict):
+        company_profile = {}
+
+    sales_currency = normalize_currency_code(
+        (company or {}).get("baseCurrency")
+        or (company or {}).get("salesCurrency")
+        or company_profile.get("salesCurrency"),
+        profile.get("salesCurrency", "USD"),
+    )
+    local_currency = normalize_currency_code(
+        (company or {}).get("currency")
+        or (company or {}).get("localCurrency")
+        or company_profile.get("localCurrency"),
+        profile.get("localCurrency", "USD"),
+    )
+    exchange_rate = safe_float(
+        (company or {}).get("exchangeRateBaseToLocal")
+        or company_profile.get("exchangeRateBaseToLocal"),
+        profile.get("exchangeRateBaseToLocal", 1),
+    )
+
+    return {
+        "companyId": company_id or "",
+        "country": profile.get("code", "CL"),
+        "countryName": profile.get("label", "Mercado configurado"),
+        "salesCurrency": sales_currency,
+        "localCurrency": local_currency,
+        "exchangeRateBaseToLocal": exchange_rate,
+        "locale": profile.get("locale", "es"),
+        "timezone": profile.get("timezone", "UTC"),
+    }
+
+
+def purchase_terms_label(terms: list[int]) -> str:
+    normalized = normalized_payment_terms(terms, [0])
+    cash_enabled = 0 in normalized
+    credit_terms = [term for term in normalized if term > 0]
+    parts = []
+    if cash_enabled:
+        parts.append("Contado")
+    if credit_terms:
+        suffix = "dia" if len(credit_terms) == 1 and credit_terms[0] == 1 else "dias"
+        parts.append(f"{', '.join(str(term) for term in credit_terms)} {suffix}")
+    return " / ".join(parts) or "Contado"
+
+
+def purchase_conditions_payload(
+    store: dict,
+    company_id: str | None = None,
+    *,
+    allowed_terms=None,
+    default_sale_type: str = "",
+) -> dict:
+    settings = business_settings(store)
+    company = get_company(store, company_id) if company_id else None
+    settings_conditions = settings.get("purchaseConditions") if isinstance(settings.get("purchaseConditions"), dict) else {}
+    company_conditions = (company or {}).get("purchaseConditions") if isinstance((company or {}).get("purchaseConditions"), dict) else {}
+    condition_data = {**settings_conditions, **company_conditions}
+    market = mobile_market_payload(store, company_id)
+    terms = normalized_payment_terms(
+        allowed_terms
+        or condition_data.get("allowedPaymentTermsDays")
+        or settings.get("defaultPaymentTermsDays"),
+        PAYMENT_TERM_OPTIONS,
+    )
+    sale_type = str(
+        default_sale_type
+        or condition_data.get("defaultSaleType")
+        or settings.get("purchaseDefaultSaleType")
+        or "cash"
+    )
+    if sale_type not in dict(SALE_TYPE_OPTIONS):
+        sale_type = "cash"
+
+    rate = safe_float(market.get("exchangeRateBaseToLocal"), 1)
+    rate_label = ""
+    if market.get("salesCurrency") != market.get("localCurrency"):
+        rate_label = f"{rate:g} {market.get('localCurrency')}/{market.get('salesCurrency')}"
+
+    return {
+        "title": sanitize_text(
+            condition_data.get("title") or settings.get("purchaseConditionsTitle") or "Condiciones de compra",
+            max_length=80,
+            allow_newlines=False,
+        ),
+        "currency": market.get("localCurrency", "USD"),
+        "salesCurrency": market.get("salesCurrency", "USD"),
+        "localCurrency": market.get("localCurrency", "USD"),
+        "currencyLabel": f"$ {market.get('localCurrency', 'USD')}",
+        "exchangeRate": rate,
+        "exchangeRateLabel": rate_label,
+        "allowedPaymentTermsDays": terms,
+        "paymentTermsLabel": purchase_terms_label(terms),
+        "defaultSaleType": sale_type,
+        "defaultSaleTypeLabel": sale_type_label(sale_type),
+        "scopeLabel": sanitize_text(
+            condition_data.get("scopeLabel") or settings.get("purchaseConditionsScope") or "Solo datos de tu empresa",
+            max_length=120,
+            allow_newlines=False,
+        ),
+        "note": sanitize_text(
+            condition_data.get("note") or settings.get("purchaseConditionsNote") or settings.get("orderTermsText", ""),
+            max_length=500,
+        ),
+    }
+
+
 def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dict:
-    enriched = enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+    company_id = mobile_required_company_id(client)
+    orders = [
+        order
+        for order in store.get("orders", [])
+        if mobile_record_matches_company(order, company_id)
+    ]
+    movements = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if mobile_record_matches_company(movement, company_id)
+    ]
+    enriched = enrich_client(client, orders, movements)
+    market = mobile_market_payload(store, company_id)
+    purchase_conditions = purchase_conditions_payload(
+        store,
+        company_id,
+        allowed_terms=enriched.get("allowedPaymentTermsDays", [0]),
+        default_sale_type=enriched.get("defaultSaleType", "cash"),
+    )
     return {
         "accessToken": access_token,
         "tokenType": "Bearer",
         "customer": {
             "id": enriched["id"],
+            "companyId": company_id,
             "businessName": enriched["businessName"],
             "legalName": enriched.get("legalName", ""),
             "commercialName": enriched.get("commercialName", ""),
@@ -4260,7 +5788,14 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
             "shippingAddress": enriched.get("shippingAddress", ""),
             "city": enriched.get("city", ""),
             "state": enriched.get("state", ""),
-            "country": enriched.get("country", "CL"),
+            "country": market["country"],
+            "billingCountry": enriched.get("country", ""),
+            "marketCountry": market["country"],
+            "salesCurrency": market["salesCurrency"],
+            "localCurrency": market["localCurrency"],
+            "exchangeRateBaseToLocal": market["exchangeRateBaseToLocal"],
+            "market": market,
+            "purchaseConditions": purchase_conditions,
             "deliveryZone": enriched.get("deliveryZone", ""),
             "contactName": enriched.get("contactName", ""),
             "administrativeContact": enriched.get("administrativeContact", ""),
@@ -4303,20 +5838,31 @@ def mobile_customer_payload(client: dict, store: dict, access_token: str) -> dic
     }
 
 
-def mobile_admin_payload(user: dict, access_token: str) -> dict:
+def mobile_admin_payload(user: dict, store: dict, access_token: str) -> dict:
     role = user.get("role", "sales")
     assigned_seller_id = user.get("id", "") if role in MOBILE_SALES_ROLES else ""
     assigned_seller_name = user.get("name", "") if role in MOBILE_SALES_ROLES else ""
+    company_id = mobile_required_company_id(user)
+    market = mobile_market_payload(store, company_id)
+    purchase_conditions = purchase_conditions_payload(store, company_id)
     return {
         "accessToken": access_token,
         "tokenType": "Bearer",
         "customer": {
             "id": user["id"],
+            "companyId": company_id,
             "businessName": user.get("name", "Vendedor FVENTAS"),
             "email": user.get("email", ""),
             "clientType": role,
             "accountRole": role,
             "roleLabel": ROLE_LABELS.get(role, "Vendedor"),
+            "country": market["country"],
+            "marketCountry": market["country"],
+            "salesCurrency": market["salesCurrency"],
+            "localCurrency": market["localCurrency"],
+            "exchangeRateBaseToLocal": market["exchangeRateBaseToLocal"],
+            "market": market,
+            "purchaseConditions": purchase_conditions,
             "sellerCode": user.get("sellerCode", ""),
             "sellerZone": user.get("sellerZone", ""),
             "sellerTerritory": user.get("sellerTerritory", ""),
@@ -4763,6 +6309,20 @@ def mobile_paginated_response(items: list[dict], filters: dict | None = None, so
 
 
 def mobile_product_payload(product: dict) -> dict:
+    raw_notes = product.get("compatibilityNotes") or []
+    if isinstance(raw_notes, str):
+        compatibility_notes = split_lines(raw_notes)
+    elif isinstance(raw_notes, list):
+        compatibility_notes = [
+            sanitize_text(str(note), max_length=500)
+            for note in raw_notes
+            if sanitize_text(str(note), max_length=500)
+        ]
+    else:
+        compatibility_notes = []
+    if not compatibility_notes and product.get("requiresTechnicalValidation"):
+        compatibility_notes = ["Validar compatibilidad con soporte FVENTAS"]
+
     return {
         "id": product["id"],
         "sku": product["sku"],
@@ -4791,7 +6351,7 @@ def mobile_product_payload(product: dict) -> dict:
         "badge": "Cotizar" if product.get("requiresQuote") else "Comprar",
         "requiresQuote": bool(product.get("requiresQuote")),
         "requiresTechnicalValidation": bool(product.get("requiresTechnicalValidation")),
-        "compatibilityNotes": ["Validar compatibilidad con soporte FVENTAS"],
+        "compatibilityNotes": compatibility_notes,
         "imageUrl": product.get("imageUrl") or (product.get("imageUrls") or [""])[0],
         "imageUrls": product.get("imageUrls", []),
         "pdfUrls": product.get("pdfUrls", []),
@@ -4804,11 +6364,66 @@ def mobile_product_payload(product: dict) -> dict:
     }
 
 
-def mobile_visible_products(store: dict) -> list[dict]:
-    return [
-        enrich_inventory_product(item, store.get("orders", []))
+def mobile_catalog_company_id(store: dict, profile: dict | None = None) -> str:
+    if profile:
+        return mobile_required_company_id(profile)
+    return current_company_id(store)
+
+
+def mobile_visible_products(store: dict, company_id: str | None = None) -> list[dict]:
+    company_id = company_id or current_company_id(store)
+    orders = [
+        order
+        for order in store.get("orders", [])
+        if mobile_record_matches_company(order, company_id)
+    ]
+    products = [
+        item
         for item in store.get("products", [])
         if item.get("status") == "active" and item.get("visibleInApp")
+        and mobile_record_matches_company(item, company_id)
+    ]
+    return enrich_inventory_products(products, orders)
+
+
+def mobile_product_catalog_price(product: dict | None) -> float:
+    product = product or {}
+    return safe_float(product.get("b2bPriceUsd"), safe_float(product.get("publicPriceUsd"), 0))
+
+
+def mobile_product_commercial_blocker(product: dict | None) -> str:
+    if not product:
+        return "Producto no disponible."
+    if product.get("status") != "active":
+        return "Producto no disponible."
+    if not product.get("visibleInApp"):
+        return "Producto no publicado para venta movil."
+    if mobile_product_catalog_price(product) <= 0:
+        return "Producto sin precio comercial vigente."
+    return ""
+
+
+def mobile_visible_categories(store: dict, company_id: str | None = None) -> list[dict]:
+    company_id = company_id or current_company_id(store)
+    return [
+        enrich_category(item, store)
+        for item in store.get("categories", [])
+        if item.get("status", "active") == "active"
+        and mobile_record_matches_company(item, company_id)
+    ]
+
+
+def mobile_visible_service_technicians(
+    store: dict,
+    company_id: str | None = None,
+) -> list[dict]:
+    company_id = company_id or current_company_id(store)
+    return [
+        technician
+        for technician in store.get("service_technicians", [])
+        if technician.get("status") == "active"
+        and technician.get("visibleInApp")
+        and mobile_record_matches_company(technician, company_id)
     ]
 
 
@@ -4818,23 +6433,28 @@ def mobile_profile_from_token(store: dict) -> tuple[dict | None, object | None]:
         return None, jsonify({"error": "Token movil requerido."})
 
     if token_payload and token_payload.get("type") == "admin":
-        user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        user = mobile_find_admin_for_token(store, token_payload)
         if (
             not user
             or user.get("status") != "active"
             or user.get("role") not in MOBILE_SALES_ROLES
+            or not mobile_required_company_id(user)
             or user.get("mobileAccessEnabled", True) is False
             or mobile_account_access_blocked(user)
+            or not mobile_subject_matches_token_company(user, store, token_payload)
             or not mobile_token_version_valid(user, token_payload, "sessionVersion")
         ):
             return None, jsonify({"error": "Token movil invalido."})
-        return mobile_admin_payload(user, "")["customer"], None
+        return mobile_admin_payload(user, store, "")["customer"], None
 
-    client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    client = mobile_find_client_for_token(store, token_payload)
     if (
         not client
         or client.get("status") != "active"
+        or not mobile_required_company_id(client)
+        or client.get("mobileAccessEnabled", True) is False
         or mobile_account_access_blocked(client)
+        or not mobile_subject_matches_token_company(client, store, token_payload)
         or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion")
     ):
         return None, jsonify({"error": "Cliente no encontrado."})
@@ -4842,15 +6462,27 @@ def mobile_profile_from_token(store: dict) -> tuple[dict | None, object | None]:
 
 
 def mobile_user_company_id(store: dict, user: dict) -> str:
-    return str(user.get("companyId") or default_company_id(store))
+    return mobile_required_company_id(user)
+
+
+def mobile_record_company_id(record: dict | None) -> str:
+    return str((record or {}).get("companyId") or "").strip()
+
+
+def mobile_record_matches_company(record: dict | None, company_id: str | None) -> bool:
+    record_company_id_value = mobile_record_company_id(record)
+    expected_company_id = str(company_id or "").strip()
+    return bool(record_company_id_value and expected_company_id and hmac.compare_digest(record_company_id_value, expected_company_id))
 
 
 def mobile_company_records(store: dict, collection: str, user: dict) -> list[dict]:
     company_id = mobile_user_company_id(store, user)
+    if not company_id:
+        return []
     return [
         record
         for record in store.get(collection, [])
-        if record_company_id(record, store) == company_id
+        if mobile_record_matches_company(record, company_id)
     ]
 
 
@@ -4956,7 +6588,18 @@ def mobile_crm_record_payload(record: dict) -> dict:
 
 
 def mobile_seller_client_payload(client: dict, store: dict) -> dict:
-    enriched = enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+    company_id = mobile_record_company_id(client)
+    orders = [
+        order
+        for order in store.get("orders", [])
+        if mobile_record_matches_company(order, company_id)
+    ]
+    movements = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if mobile_record_matches_company(movement, company_id)
+    ]
+    enriched = enrich_client(client, orders, movements)
     return {
         "id": enriched.get("id", ""),
         "businessName": enriched.get("businessName", ""),
@@ -4980,6 +6623,8 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
         "clientCategory": enriched.get("clientCategory", "standard"),
         "priceList": enriched.get("priceList", "b2b"),
         "authorizedDiscountPercent": enriched.get("authorizedDiscountPercent", 0),
+        "discountRequestedPercent": enriched.get("discountRequestedPercent", 0),
+        "discountRequestStatus": enriched.get("discountRequestStatus", "none"),
         "status": enriched.get("status", ""),
         "statusLabel": enriched.get("statusLabel", ""),
         "creditEnabled": bool(enriched.get("creditEnabled")),
@@ -4988,8 +6633,11 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
         "creditLimitUsd": enriched.get("creditLimitUsd", 0.0),
         "creditAvailableUsd": enriched.get("creditAvailableUsd", 0.0),
         "creditExposureUsd": enriched.get("creditExposureUsd", 0.0),
+        "creditRequestedUsd": enriched.get("creditRequestedUsd", 0.0),
         "creditRequestStatus": enriched.get("creditRequestStatus", "none"),
         "creditRequestStatusLabel": enriched.get("creditRequestStatusLabel", ""),
+        "defaultSaleType": enriched.get("defaultSaleType", "cash"),
+        "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
         "creditRiskLevel": enriched.get("creditRiskLevel", "low"),
         "creditRiskLabel": enriched.get("creditRiskLabel", ""),
         "creditScore": enriched.get("creditScore", 0),
@@ -5016,7 +6664,13 @@ def mobile_seller_client_payload(client: dict, store: dict) -> dict:
 
 
 def mobile_seller_order_payload(order: dict, store: dict) -> dict:
-    enriched = enrich_order(order, store.get("credit_movements", []))
+    company_id = mobile_record_company_id(order)
+    movements = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if mobile_record_matches_company(movement, company_id)
+    ]
+    enriched = enrich_order(order, movements)
     return {
         "id": enriched.get("orderId") or enriched.get("id", ""),
         "orderId": enriched.get("orderId") or enriched.get("id", ""),
@@ -5086,6 +6740,17 @@ def enrich_product(product: dict) -> dict:
     enriched["onSale"] = bool(enriched.get("onSale", enriched["hasDiscount"]))
     enriched["requiresQuote"] = bool(enriched.get("requiresQuote", False))
     enriched["requiresTechnicalValidation"] = bool(enriched.get("requiresTechnicalValidation", False))
+    raw_notes = enriched.get("compatibilityNotes") or []
+    if isinstance(raw_notes, str):
+        enriched["compatibilityNotes"] = split_lines(raw_notes)
+    elif isinstance(raw_notes, list):
+        enriched["compatibilityNotes"] = [
+            sanitize_text(str(note), max_length=500)
+            for note in raw_notes
+            if sanitize_text(str(note), max_length=500)
+        ]
+    else:
+        enriched["compatibilityNotes"] = []
     if cost > 0 and price > 0 and not safe_float(enriched.get("marginPercent"), 0):
         enriched["marginPercent"] = round(((price - cost) / price) * 100, 1)
     else:
@@ -5117,6 +6782,17 @@ def sanitize_text(value, max_length: int = 2000, allow_newlines: bool = True) ->
         text = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines())
         text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()[:max_length]
+
+
+def masked_email(value: str) -> str:
+    email = sanitize_text(value, max_length=180, allow_newlines=False)
+    if "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    if not local or not domain:
+        return ""
+    visible = local[:2] if len(local) > 2 else local[:1]
+    return f"{visible}{'*' * max(3, len(local) - len(visible))}@{domain}"
 
 
 def sanitize_url(value: str, *, allow_deeplink: bool = False, allow_local: bool = True) -> str:
@@ -5392,6 +7068,18 @@ def create_import_draft(module: str, entity_type: str, rows: list[dict], result:
     return draft_id
 
 
+def import_draft_is_accessible(draft) -> bool:
+    if not draft:
+        return False
+    if is_platform_scope():
+        return True
+    result = dict(draft.result or {})
+    draft_company_id = str(result.get("companyId") or "").strip()
+    if draft_company_id:
+        return hmac.compare_digest(draft_company_id, current_company_id())
+    return str(draft.created_by_id or "") == str(session.get("admin_user_id", ""))
+
+
 def load_import_draft(module: str, draft_id: str):
     from core.db import SessionLocal, init_database
     from models import ImportDraft
@@ -5400,7 +7088,7 @@ def load_import_draft(module: str, draft_id: str):
     purge_expired_import_drafts()
     with SessionLocal() as db_session:
         draft = db_session.get(ImportDraft, draft_id)
-        if not draft or draft.module != module or draft.status != "preview":
+        if not draft or draft.module != module or draft.status != "preview" or not import_draft_is_accessible(draft):
             return None
         return {
             "id": draft.id,
@@ -5418,7 +7106,7 @@ def finish_import_draft(module: str, draft_id: str, status: str, result: dict | 
     init_database()
     with SessionLocal() as db_session:
         draft = db_session.get(ImportDraft, draft_id)
-        if not draft or draft.module != module:
+        if not draft or draft.module != module or not import_draft_is_accessible(draft):
             return False
         if status == "discarded":
             db_session.delete(draft)
@@ -5437,7 +7125,7 @@ def load_import_draft_record(module: str, draft_id: str) -> dict | None:
     init_database()
     with SessionLocal() as db_session:
         draft = db_session.get(ImportDraft, draft_id)
-        if not draft or draft.module != module:
+        if not draft or draft.module != module or not import_draft_is_accessible(draft):
             return None
         return {
             "id": draft.id,
@@ -5462,11 +7150,13 @@ def list_import_history(limit: int = 24) -> list[dict]:
         drafts = (
             db_session.query(ImportDraft)
             .order_by(ImportDraft.created_at.desc())
-            .limit(limit)
+            .limit(max(limit * 4, limit))
             .all()
         )
         history = []
         for draft in drafts:
+            if not import_draft_is_accessible(draft):
+                continue
             result = dict(draft.result or {})
             history.append(
                 {
@@ -5483,6 +7173,8 @@ def list_import_history(limit: int = 24) -> list[dict]:
                     "warnings": len(result.get("warnings") or result.get("warningRows") or []),
                 }
             )
+            if len(history) >= limit:
+                break
         return history
 
 
@@ -5834,6 +7526,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
             "variants": parse_import_list(row_value(row, "variants", "variantes", "tallas", "opciones")) or list(current.get("variants") or []),
             "specifications": parse_import_specs(row_value(row, "specifications", "especificaciones")) or dict(current.get("specifications") or {}),
             "relatedSkus": parse_import_list(row_value(row, "relatedSkus", "skus_relacionados", "relacionados")) or list(current.get("relatedSkus") or []),
+            "compatibilityNotes": parse_import_list(row_value(row, "compatibilityNotes", "notas_compatibilidad", "compatibilidad")) or list(current.get("compatibilityNotes") or []),
             "requiresQuote": parse_import_bool(row_value(row, "requiresQuote", "requiere_cotizacion"), bool(current.get("requiresQuote", False))),
             "requiresTechnicalValidation": parse_import_bool(
                 row_value(row, "requiresTechnicalValidation", "requiere_validacion_tecnica"),
@@ -5858,7 +7551,7 @@ def import_products_rows(store: dict, rows: list[dict]) -> dict:
         if existing:
             payload["id"] = existing["id"]
             payload["createdAt"] = existing.get("createdAt", utc_now())
-            store["products"] = [payload if item["id"] == existing["id"] else item for item in store.get("products", [])]
+            replace_company_record(store, "products", existing, payload)
             result["updated"] += 1
             bulk_row(result, "updated", row_number, f"{sku} - {title}")
         else:
@@ -5961,6 +7654,7 @@ def import_stock_rows(store: dict, rows: list[dict]) -> dict:
 
 def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
+    target_company_id = current_company_id(store)
     seen_emails: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
@@ -5974,16 +7668,37 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
         if duplicate_message:
             bulk_error(result, row_number, f"{email}: {duplicate_message}")
             continue
-        user = next((item for item in store.get("admin_users", []) if item.get("email", "").lower() == email), None)
+        user_matches = [
+            item
+            for item in store.get("admin_users", [])
+            if item.get("email", "").lower() == email
+        ]
+        user = next((item for item in user_matches if record_company_id(item, store) == target_company_id), None)
+        foreign_user = next((item for item in user_matches if record_company_id(item, store) != target_company_id), None)
+        if foreign_user:
+            bulk_error(result, row_number, f"{email} ya existe como vendedor de otra empresa.")
+            continue
         if user and user.get("role") != "sales":
             bulk_error(result, row_number, f"{email} ya existe con rol administrativo.")
+            continue
+        client_conflict = next(
+            (
+                client
+                for client in store.get("clients", [])
+                if client.get("email", "").lower() == email
+                and client.get("status") == "active"
+            ),
+            None,
+        )
+        if client_conflict:
+            bulk_error(result, row_number, f"{email} ya existe como cliente movil.")
             continue
         password = row_value(row, "password", "contrasena", "clave")
         if password and password_errors(password):
             bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
             continue
         if not password and not user:
-            password = secrets.token_urlsafe(12)
+            password = temporary_admin_password()
         status = row_value(row, "status", "estado", default=(user or {}).get("status", "active")) or "active"
         if status not in {key for key, _label in SELLER_STATUS_OPTIONS}:
             bulk_error(result, row_number, f"{status}: estado de vendedor no valido.")
@@ -5996,6 +7711,7 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             bulk_error(result, row_number, "la comision debe estar entre 0 y 100%.")
             continue
         payload = {
+            "companyId": target_company_id,
             "firstName": first_name or (user or {}).get("firstName", ""),
             "lastName": last_name or (user or {}).get("lastName", ""),
             "name": name,
@@ -6033,7 +7749,7 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
             payload["lastLoginIp"] = user.get("lastLoginIp", "")
             payload["lastMobileLoginAt"] = user.get("lastMobileLoginAt", "")
             payload["sessionVersion"] = user_session_version(user)
-            store["admin_users"] = [payload if item["id"] == user["id"] else item for item in store.get("admin_users", [])]
+            replace_company_record(store, "admin_users", user, payload)
             result["updated"] += 1
             bulk_row(result, "updated", row_number, f"{name} - {email}")
         else:
@@ -6056,13 +7772,14 @@ def import_sellers_rows(store: dict, rows: list[dict]) -> dict:
 def import_clients_rows(store: dict, rows: list[dict]) -> dict:
     result = blank_bulk_result()
     can_approve = role_allowed(CREDIT_APPROVAL_ROLES)
+    target_company_id = current_company_id(store)
     default_profile = active_market_profile_for_store(store)
     seen_emails: dict[str, int] = {}
     seen_tax_ids: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         email = row_value(row, "email", "correo").lower()
         business_name = row_value(row, "businessName", "razon_social", "nombre_comercial", "cliente")
-        row_country = normalize_market_country(row_value(row, "country", "pais", default=default_profile.get("code", "CL")))
+        row_country = normalize_market_country(default_profile.get("code", "CL"))
         row_profile = market_profile(row_country)
         raw_tax_id = row_value(row, "taxId", "documento_fiscal", "rif", "rut")
         tax_id = normalize_tax_id_for_market(raw_tax_id, row_profile)
@@ -6096,15 +7813,50 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         if duplicate_tax:
             bulk_error(result, row_number, f"{tax_id}: {duplicate_tax}")
             continue
-        client = next((item for item in store.get("clients", []) if item.get("email", "").lower() == email), None)
-        if not client:
-            client = next((item for item in store.get("clients", []) if normalize_tax_id_for_market(item.get("taxId", ""), row_profile).lower() == tax_id.lower()), None)
+        mobile_user_conflict = next(
+            (
+                user
+                for user in store.get("admin_users", [])
+                if user.get("email", "").lower() == email
+                and user.get("status") == "active"
+                and user.get("mobileAccessEnabled", True) is not False
+                and user.get("role") in MOBILE_SALES_ROLES
+            ),
+            None,
+        )
+        if mobile_user_conflict:
+            bulk_error(result, row_number, f"{email}: ya existe como usuario operativo movil.")
+            continue
+        client_matches = [
+            item
+            for item in store.get("clients", [])
+            if item.get("email", "").lower() == email
+        ]
+        client_by_email = next((item for item in client_matches if record_company_id(item, store) == target_company_id), None)
+        foreign_client_by_email = next((item for item in client_matches if record_company_id(item, store) != target_company_id), None)
+        if foreign_client_by_email:
+            bulk_error(result, row_number, f"{email}: ya existe como cliente movil de otra empresa.")
+            continue
+        client_by_tax = next(
+            (
+                item
+                for item in store.get("clients", [])
+                if record_company_id(item, store) == target_company_id
+                and normalize_market_country(item.get("country") or row_profile.get("code", "CL")) == row_profile.get("code", "CL")
+                and normalize_tax_id_for_market(item.get("taxId", ""), row_profile).lower() == tax_id.lower()
+            ),
+            None,
+        )
+        if client_by_email and client_by_tax and client_by_email.get("id") != client_by_tax.get("id"):
+            bulk_error(result, row_number, f"{business_name}: email y {row_profile.get('taxLabel', 'documento fiscal')} pertenecen a clientes distintos.")
+            continue
+        client = client_by_email or client_by_tax
         password = row_value(row, "password", "contrasena", "clave")
         if password and password_errors(password):
             bulk_error(result, row_number, "la clave no cumple la politica de seguridad.")
             continue
         if not password and not client:
-            password = secrets.token_urlsafe(12)
+            password = temporary_mobile_client_password()
         seller = find_seller_for_import(store, row)
         credit_requested = parse_import_float(row_value(row, "creditRequestedUsd", "credito_solicitado_usd", "solicitud_credito_usd"), float((client or {}).get("creditRequestedUsd") or 0))
         credit_limit = parse_import_float(row_value(row, "creditLimitUsd", "credito_limite_usd", "cupo_usd", "linea_credito_usd"), float((client or {}).get("creditLimitUsd") or 0))
@@ -6124,7 +7876,77 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             if term.strip().isdigit() and int(term) in payment_term_options(store)
         ] or list((client or {}).get("allowedPaymentTermsDays") or [0])
         payment_term = parse_import_int(row_value(row, "paymentTermsDays", "plazo_default", "dias_credito"), int((client or {}).get("paymentTermsDays") or 0))
+        client_type = row_value(
+            row,
+            "clientType",
+            "tipo_cliente",
+            default=normalize_option_value((client or {}).get("clientType"), CLIENT_TYPE_OPTIONS, "b2b"),
+        ) or "b2b"
+        client_category = row_value(
+            row,
+            "clientCategory",
+            "categoria_comercial",
+            default=normalize_option_value((client or {}).get("clientCategory"), CLIENT_CATEGORY_OPTIONS, "standard"),
+        ) or "standard"
+        price_list = row_value(
+            row,
+            "priceList",
+            "lista_precios",
+            default=normalize_option_value((client or {}).get("priceList"), PRICE_LIST_OPTIONS, "b2b"),
+        ) or "b2b"
+        status = row_value(row, "status", "estado", default=(client or {}).get("status", "active")) or "active"
+        default_sale_type = row_value(
+            row,
+            "defaultSaleType",
+            "tipo_venta_default",
+            default=normalize_option_value((client or {}).get("defaultSaleType"), SALE_TYPE_OPTIONS, "cash"),
+        ) or "cash"
+        collection_status = row_value(
+            row,
+            "collectionStatus",
+            "estado_cobranza",
+            default=normalize_option_value((client or {}).get("collectionStatus"), COLLECTION_STATUS_OPTIONS, "without_debt"),
+        ) or "without_debt"
+        credit_risk = row_value(
+            row,
+            "creditRiskLevel",
+            "riesgo_credito",
+            default=normalize_option_value((client or {}).get("creditRiskLevel"), CREDIT_RISK_OPTIONS, "low"),
+        ) or "low"
+        authorized_discount = parse_import_float(
+            row_value(row, "authorizedDiscountPercent", "descuento_autorizado"),
+            float((client or {}).get("authorizedDiscountPercent") or 0),
+        )
+        credit_score = parse_import_int(row_value(row, "creditScore", "score_credito"), int((client or {}).get("creditScore") or 0))
+        if client_type not in dict(CLIENT_TYPE_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: tipo_cliente no valido.")
+            continue
+        if client_category not in dict(CLIENT_CATEGORY_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: categoria_comercial no valida.")
+            continue
+        if price_list not in dict(PRICE_LIST_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: lista_precios no valida.")
+            continue
+        if status not in dict(CLIENT_STATUS_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: estado no valido.")
+            continue
+        if default_sale_type not in dict(SALE_TYPE_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: tipo_venta_default no valido.")
+            continue
+        if collection_status not in dict(COLLECTION_STATUS_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: estado_cobranza no valido.")
+            continue
+        if credit_risk not in dict(CREDIT_RISK_OPTIONS):
+            bulk_error(result, row_number, f"{business_name}: riesgo_credito no valido.")
+            continue
+        if authorized_discount < 0 or authorized_discount > 100:
+            bulk_error(result, row_number, f"{business_name}: descuento_autorizado debe estar entre 0 y 100%.")
+            continue
+        if credit_score < 0 or credit_score > 100:
+            bulk_error(result, row_number, f"{business_name}: score_credito debe estar entre 0 y 100.")
+            continue
         payload = {
+            "companyId": target_company_id,
             "legalName": row_value(row, "legalName", "razon_social", default=(client or {}).get("legalName", business_name)) or business_name,
             "commercialName": row_value(row, "commercialName", "nombre_comercial", default=(client or {}).get("commercialName", business_name)) or business_name,
             "businessName": business_name,
@@ -6135,25 +7957,25 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             "phone": phone,
             "whatsapp": whatsapp,
             "email": email,
-            "clientType": row_value(row, "clientType", "tipo_cliente", default=(client or {}).get("clientType", "b2b")) or "b2b",
-            "clientCategory": row_value(row, "clientCategory", "categoria_comercial", default=(client or {}).get("clientCategory", "standard")) or "standard",
-            "priceList": row_value(row, "priceList", "lista_precios", default=(client or {}).get("priceList", "b2b")) or "b2b",
-            "authorizedDiscountPercent": parse_import_float(row_value(row, "authorizedDiscountPercent", "descuento_autorizado"), float((client or {}).get("authorizedDiscountPercent") or 0)),
-            "status": row_value(row, "status", "estado", default=(client or {}).get("status", "active")) or "active",
+            "clientType": client_type,
+            "clientCategory": client_category,
+            "priceList": price_list,
+            "authorizedDiscountPercent": authorized_discount,
+            "status": status,
             "address": row_value(row, "address", "direccion", default=(client or {}).get("address", "")),
             "fiscalAddress": row_value(row, "fiscalAddress", "direccion_fiscal", default=(client or {}).get("fiscalAddress", "")),
             "shippingAddress": row_value(row, "shippingAddress", "direccion_despacho", "direccion_entrega", default=(client or {}).get("shippingAddress", "")),
-            "country": row_value(row, "country", "pais", default=(client or {}).get("country", row_profile.get("code", "CL"))) or row_profile.get("code", "CL"),
+            "country": row_profile.get("code", "CL"),
             "state": normalized_state,
             "city": normalized_city,
             "deliveryZone": row_value(row, "deliveryZone", "zona", default=(client or {}).get("deliveryZone", "")),
             "assignedSellerId": (seller or {}).get("id", (client or {}).get("assignedSellerId", "")),
             "assignedSellerName": (seller or {}).get("name", (client or {}).get("assignedSellerName", "")),
-            "defaultSaleType": row_value(row, "defaultSaleType", "tipo_venta_default", default=(client or {}).get("defaultSaleType", "cash")) or "cash",
+            "defaultSaleType": default_sale_type,
             "allowedPaymentTermsDays": sorted(set(terms)),
-            "collectionStatus": row_value(row, "collectionStatus", "estado_cobranza", default=(client or {}).get("collectionStatus", "without_debt")) or "without_debt",
-            "creditRiskLevel": row_value(row, "creditRiskLevel", "riesgo_credito", default=(client or {}).get("creditRiskLevel", "low")) or "low",
-            "creditScore": parse_import_int(row_value(row, "creditScore", "score_credito"), int((client or {}).get("creditScore") or 0)),
+            "collectionStatus": collection_status,
+            "creditRiskLevel": credit_risk,
+            "creditScore": credit_score,
             "creditManagerNote": row_value(row, "creditManagerNote", "observacion_gerencia", "nota_credito", default=(client or {}).get("creditManagerNote", "")),
             "creditReviewedBy": (client or {}).get("creditReviewedBy", ""),
             "creditReviewedAt": (client or {}).get("creditReviewedAt", ""),
@@ -6195,7 +8017,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
             payload["createdAt"] = client.get("createdAt", utc_now())
             payload["passwordHash"] = generate_password_hash(password) if password else client.get("passwordHash", "")
             payload["mustChangePassword"] = True if password else bool(client.get("mustChangePassword"))
-            store["clients"] = [payload if item["id"] == client["id"] else item for item in store.get("clients", [])]
+            replace_company_record(store, "clients", client, payload)
             result["updated"] += 1
             bulk_row(result, "updated", row_number, f"{business_name} - {email}")
         else:
@@ -6257,7 +8079,7 @@ def import_announcements_rows(store: dict, rows: list[dict]) -> dict:
         warn_invalid_urls(result, row_number, f"accion {title}", [raw_cta_url], allow_deeplink=True)
         if announcement:
             payload["id"] = announcement["id"]
-            store["announcements"] = [payload if item["id"] == announcement["id"] else item for item in store.get("announcements", [])]
+            replace_company_record(store, "announcements", announcement, payload)
             result["updated"] += 1
             bulk_row(result, "updated", row_number, title)
         else:
@@ -6740,10 +8562,7 @@ def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
         if technician:
             payload["id"] = technician["id"]
             payload["createdAt"] = technician.get("createdAt", utc_now())
-            store["service_technicians"] = [
-                payload if item["id"] == technician["id"] else item
-                for item in store.get("service_technicians", [])
-            ]
+            replace_company_record(store, "service_technicians", technician, payload)
             result["updated"] += 1
             bulk_row(result, "updated", row_number, name)
         else:
@@ -6758,6 +8577,7 @@ def import_service_technicians_rows(store: dict, rows: list[dict]) -> dict:
 def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoint: str):
     import_mode = request.form.get("importMode", "import")
     store = load_store()
+    import_company_id = current_company_id(store)
 
     if import_mode == "discard":
         draft_id = request.form.get("draftId", "")
@@ -6782,6 +8602,7 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
         rows = draft["rows"]
         result = importer(store, rows)
         result["module"] = module
+        result["companyId"] = import_company_id
         record_audit_event(
             store,
             "bulk_import_confirm",
@@ -6810,6 +8631,7 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
             preview_store = copy.deepcopy(store)
             result = importer(preview_store, rows)
             result["module"] = module
+            result["companyId"] = import_company_id
             result["preview"] = True
             result["draftId"] = create_import_draft(module, entity_type, rows, result)
             result["confirmEndpoint"] = request.endpoint
@@ -6820,6 +8642,7 @@ def handle_bulk_import(module: str, entity_type: str, importer, redirect_endpoin
 
         result = importer(store, rows)
         result["module"] = module
+        result["companyId"] = import_company_id
         record_audit_event(
             store,
             "bulk_import",
@@ -6847,13 +8670,22 @@ def order_actor() -> dict:
         "id": session.get("admin_user_id", ""),
         "name": session.get("admin_name", "Sistema"),
         "role": session.get("admin_role", "system"),
+        "companyId": session.get("company_id", ""),
     }
 
 
-def normalize_order_items(store: dict, raw_items: list[dict], *, company_id: str = "") -> tuple[list[dict], float, bool]:
+def normalize_order_items(
+    store: dict,
+    raw_items: list[dict],
+    *,
+    company_id: str = "",
+    strict_catalog: bool = False,
+    trusted_prices: bool = False,
+) -> tuple[list[dict], float, bool, str]:
     items: list[dict] = []
     total_usd = 0.0
     requires_operator_review = False
+    invalid_refs: list[str] = []
     if company_id:
         product_pool = [
             product
@@ -6871,17 +8703,31 @@ def normalize_order_items(store: dict, raw_items: list[dict], *, company_id: str
         quantity = int(raw_item.get("quantity") or 0)
         if quantity <= 0:
             continue
+        if strict_catalog and not product:
+            invalid_refs.append(sku or product_id or str(raw_item.get("title") or "linea sin SKU"))
+            continue
+        if strict_catalog and product:
+            blocker = mobile_product_commercial_blocker(product)
+            if blocker:
+                invalid_refs.append(sku or product_id or product.get("sku") or product.get("title") or "linea sin SKU")
+                continue
         if product:
             product_id = product.get("id", product_id)
             sku = product.get("sku", sku)
             title = product.get("title") or product.get("name") or raw_item.get("title") or sku
-            unit_price = float(raw_item.get("unitPriceUsd") or product.get("b2bPriceUsd") or product.get("publicPriceUsd") or 0)
+            catalog_price = mobile_product_catalog_price(product)
+            if strict_catalog and trusted_prices and "unitPriceUsd" in raw_item:
+                unit_price = max(0.0, safe_float(raw_item.get("unitPriceUsd"), catalog_price))
+            elif strict_catalog:
+                unit_price = catalog_price
+            else:
+                unit_price = safe_float(raw_item.get("unitPriceUsd"), catalog_price)
             image_url = raw_item.get("imageUrl") or product.get("imageUrl", "")
             requires_quote = bool(product.get("requiresQuote"))
             requires_validation = bool(product.get("requiresTechnicalValidation"))
         else:
             title = str(raw_item.get("title") or sku or product_id or "Producto FVENTAS")
-            unit_price = float(raw_item.get("unitPriceUsd") or 0)
+            unit_price = safe_float(raw_item.get("unitPriceUsd"), 0)
             image_url = raw_item.get("imageUrl", "")
             requires_quote = bool(raw_item.get("requiresQuote"))
             requires_validation = bool(raw_item.get("requiresTechnicalValidation"))
@@ -6901,7 +8747,11 @@ def normalize_order_items(store: dict, raw_items: list[dict], *, company_id: str
                 "requiresTechnicalValidation": requires_validation,
             }
         )
-    return items, round(total_usd, 2), requires_operator_review
+    error = ""
+    if invalid_refs:
+        refs = ", ".join(invalid_refs[:3])
+        error = f"Producto no disponible para esta empresa: {refs}."
+    return items, round(total_usd, 2), requires_operator_review, error
 
 
 def build_commercial_order(
@@ -6910,39 +8760,67 @@ def build_commercial_order(
     *,
     actor: dict | None = None,
     default_channel: str = "mobile",
+    trusted_pricing: bool = False,
 ) -> tuple[dict | None, str]:
     actor = actor or {"id": "", "name": "Sistema", "role": "system"}
     preview = payload.get("preview") or {}
     customer_payload = payload.get("customer") or {}
     customer_id = str(payload.get("customerId") or customer_payload.get("id") or "").strip()
-    client = find_by_id(store.get("clients", []), customer_id)
+    actor_company_id = actor.get("companyId") or ""
+    if actor.get("role") in MOBILE_SALES_ROLES:
+        seller_user = seller_record_for(store, actor.get("id", ""), actor_company_id)
+        actor_company_id = actor_company_id or record_company_id(seller_user, store) or current_company_id(store)
+    elif actor.get("role") != "client":
+        actor_company_id = actor_company_id or current_company_id(store)
+    client_candidates = [
+        item
+        for item in store.get("clients", [])
+        if item.get("id") == customer_id
+    ]
+    if actor_company_id:
+        client_candidates = [
+            item
+            for item in client_candidates
+            if record_company_id(item, store) == actor_company_id
+        ]
+    client = client_candidates[0] if client_candidates else None
     if not client:
         return None, "Cliente no encontrado."
     client_company_id = record_company_id(client, store)
-    actor_company_id = actor.get("companyId") or ""
-    if actor.get("role") in MOBILE_SALES_ROLES:
-        seller_user = find_by_id(store.get("admin_users", []), actor.get("id", ""))
-        actor_company_id = actor_company_id or record_company_id(seller_user, store) or current_company_id(store)
-        if actor_company_id and actor_company_id != client_company_id:
-            return None, "El cliente no pertenece a tu empresa."
+    if not client_company_id:
+        return None, "Cliente sin empresa asignada."
+    if actor_company_id and actor_company_id != client_company_id:
+        return None, "El cliente no pertenece a tu empresa."
     if actor.get("role") == "client" and actor.get("id") != client.get("id"):
         return None, "No puedes crear ordenes para otro cliente."
     if client.get("mustChangePassword") and actor.get("role") == "client":
         return None, "Debes cambiar la contrasena temporal antes de crear ordenes."
 
-    items, calculated_total_usd, requires_operator_review = normalize_order_items(
+    items, calculated_total_usd, requires_operator_review, items_error = normalize_order_items(
         store,
         payload.get("items") or [],
         company_id=client_company_id,
+        strict_catalog=True,
+        trusted_prices=trusted_pricing,
     )
+    if items_error:
+        return None, items_error
     if not items:
         return None, "La orden no tiene productos validos."
 
-    total_usd = float(preview.get("totalUsd") or preview.get("subtotalUsd") or calculated_total_usd)
-    gross_usd = float(preview.get("grossUsd") or preview.get("subtotalUsd") or calculated_total_usd)
-    discount_usd = max(0.0, float(preview.get("discountUsd") or max(gross_usd - total_usd, 0)))
-    exchange_rate = float(preview.get("exchangeRateUsdClp") or preview.get("exchangeRateUsdVes") or current_rate())
-    total_clp = float(preview.get("totalClp") or preview.get("totalVes") or round(total_usd * exchange_rate, 2))
+    total_usd = calculated_total_usd
+    gross_usd = calculated_total_usd
+    discount_usd = 0.0
+    if trusted_pricing:
+        preview_total = safe_float(preview.get("totalUsd"), calculated_total_usd)
+        if abs(preview_total - calculated_total_usd) > 0.01:
+            return None, "El total de la cotizacion no coincide con sus lineas."
+        preview_gross = safe_float(preview.get("grossUsd") or preview.get("subtotalUsd"), calculated_total_usd)
+        gross_usd = max(calculated_total_usd, round(preview_gross, 2))
+        discount_usd = round(max(0.0, gross_usd - calculated_total_usd), 2)
+    market = mobile_market_payload(store, client_company_id)
+    exchange_rate = safe_float(market.get("exchangeRateBaseToLocal"), current_rate())
+    total_clp = round(total_usd * exchange_rate, 2)
     company_orders = [
         order_item
         for order_item in store.get("orders", [])
@@ -6962,29 +8840,18 @@ def build_commercial_order(
         or "cash"
     )
     sale_type = requested_sale_type if requested_sale_type in dict(SALE_TYPE_OPTIONS) else "cash"
-    blocker = client_sales_blocker(client, sale_type)
-    if blocker:
-        return None, blocker
-    allowed_terms = [
-        int(term)
-        for term in client.get("allowedPaymentTermsDays", [0])
-        if str(term).isdigit()
-    ] or [0]
     raw_payment_term_days = payload.get("paymentTermDays")
     if raw_payment_term_days in (None, ""):
         payment_term_days = int(client.get("paymentTermsDays") or 0)
     else:
         payment_term_days = int(raw_payment_term_days or 0)
-    if sale_type == "cash":
-        payment_term_days = 0
-    if sale_type == "term_credit" and payment_term_days not in allowed_terms:
-        return None, "El plazo solicitado no esta autorizado para este cliente."
-    if sale_type == "credit_line" and payment_term_days == 0:
-        payment_term_days = int(client.get("paymentTermsDays") or 0)
+    condition_error, sale_type, payment_term_days = validate_client_purchase_conditions(client, sale_type, payment_term_days)
+    if condition_error:
+        return None, condition_error
     due_date = add_days_iso(utc_now(), payment_term_days) if payment_term_days > 0 else ""
 
     seller_id = client.get("assignedSellerId", "")
-    seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
+    seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id, client_company_id)
     if (
         default_channel == "seller_mobile"
         and not seller_id
@@ -6992,7 +8859,7 @@ def build_commercial_order(
     ):
         seller_id = actor.get("id", "")
         seller_name = actor.get("name", "Vendedor FVENTAS")
-    commission_rate = seller_commission_rate(store, seller_id) if seller_id else 0.0
+    commission_rate = seller_commission_rate(store, seller_id, client_company_id) if seller_id else 0.0
     commission_usd = round(total_usd * commission_rate / 100, 2)
     commission_rule = business_settings(store).get("defaultCommissionRule") or "sale_generated"
     can_use_credit = (
@@ -7095,6 +8962,79 @@ def build_commercial_order(
     return order, ""
 
 
+AUDIT_ENTITY_COLLECTIONS = {
+    "admin_user": "admin_users",
+    "seller": "admin_users",
+    "client": "clients",
+    "order": "orders",
+    "quote": "quotes",
+    "crm_record": "crm_records",
+    "product": "products",
+    "category": "categories",
+    "document": "media_assets",
+    "media_asset": "media_assets",
+    "announcement": "announcements",
+    "service_technician": "service_technicians",
+    "notification": "notifications",
+    "account_deletion_request": "account_deletion_requests",
+}
+
+
+def audit_company_id_for_entity(store: dict, entity_type: str, entity_id: str) -> str:
+    if not entity_id:
+        return ""
+    if entity_type == "company" and get_company(store, entity_id):
+        return entity_id
+    if entity_type == "subscription":
+        subscriptions = [
+            subscription
+            for subscription in store.get("subscriptions", [])
+            if subscription.get("id") == entity_id
+        ]
+        session_company_id = current_company_id(store)
+        session_subscription = next(
+            (
+                subscription
+                for subscription in subscriptions
+                if record_company_id(subscription, store) == session_company_id
+            ),
+            None,
+        )
+        if session_subscription:
+            return session_company_id
+        subscription_company_ids = [
+            record_company_id(subscription, store)
+            for subscription in subscriptions
+            if record_company_id(subscription, store)
+        ]
+        if len(set(subscription_company_ids)) == 1:
+            return subscription_company_ids[0]
+        if get_company(store, entity_id):
+            return entity_id
+    collection = AUDIT_ENTITY_COLLECTIONS.get(entity_type)
+    if not collection:
+        return ""
+    company_ids: list[str] = []
+    for record in store.get(collection, []):
+        if record.get("id") != entity_id:
+            continue
+        raw_company_id = str(record.get("companyId") or "").strip()
+        if raw_company_id:
+            company_id = raw_company_id
+        elif collection == "account_deletion_requests":
+            continue
+        else:
+            company_id = record_company_id(record, store)
+        if company_id and company_id not in company_ids:
+            company_ids.append(company_id)
+    if len(company_ids) == 1:
+        return company_ids[0]
+    session_company_id = session.get("company_id", "")
+    if session_company_id and session_company_id in company_ids:
+        return session_company_id
+    return ""
+
+
 def record_audit_event(
     store: dict,
     action: str,
@@ -7110,11 +9050,13 @@ def record_audit_event(
     metadata_payload = metadata or {}
     metadata_after = metadata_payload.get("after") if isinstance(metadata_payload.get("after"), dict) else {}
     metadata_before = metadata_payload.get("before") if isinstance(metadata_payload.get("before"), dict) else {}
+    entity_company_id = audit_company_id_for_entity(store, entity_type, entity_id)
     company_id = (
         actor_payload.get("companyId")
         or metadata_payload.get("companyId")
         or metadata_after.get("companyId")
         or metadata_before.get("companyId")
+        or entity_company_id
         or session.get("company_id", "")
         or current_company_id(store)
     )
@@ -7200,18 +9142,22 @@ def record_change_event(
     after: dict | None,
     actor: dict | None = None,
     criticality: str | None = None,
+    metadata: dict | None = None,
 ) -> None:
+    metadata_payload = {
+        "changedFields": changed_fields(before, after),
+        "before": audit_snapshot(before or {}),
+        "after": audit_snapshot(after or {}),
+    }
+    if metadata:
+        metadata_payload.update(audit_snapshot(metadata))
     record_audit_event(
         store,
         action,
         entity_type,
         entity_id,
         detail,
-        metadata={
-            "changedFields": changed_fields(before, after),
-            "before": audit_snapshot(before or {}),
-            "after": audit_snapshot(after or {}),
-        },
+        metadata=metadata_payload,
         actor=actor,
         criticality=criticality,
     )
@@ -7224,8 +9170,9 @@ def record_create_event(
     detail: str,
     after: dict | None,
     actor: dict | None = None,
+    criticality: str | None = None,
 ) -> None:
-    record_change_event(store, "create", entity_type, entity_id, detail, None, after, actor=actor)
+    record_change_event(store, "create", entity_type, entity_id, detail, None, after, actor=actor, criticality=criticality)
 
 
 NOTIFICATION_TYPE_LABELS = {
@@ -7260,6 +9207,7 @@ NOTIFICATION_PRIORITY_LABELS = {
     "high": "Alta",
     "critical": "Critica",
 }
+UNRESOLVED_NOTIFICATION_COMPANY_ID = "__unresolved_notification_company__"
 NOTIFICATION_STATUS_LABELS = {
     "unread": "Pendiente",
     "read": "Leida",
@@ -7425,23 +9373,58 @@ def infer_notification_company_id(
         "media_asset": "media_assets",
         "service_technician": "service_technicians",
         "notification": "notifications",
+        "account_deletion_request": "account_deletion_requests",
     }
     collection = entity_collection_by_type.get(entity_type)
     if collection and entity_id:
-        record = find_by_id(store.get(collection, []), entity_id)
-        if record:
-            return record_company_id(record, store)
+        entity_company_ids = notification_company_ids_for_record(store, collection, entity_id)
+    else:
+        entity_company_ids = []
     if recipient_type in {"seller", "admin_user", "user"} and recipient_id:
-        user = find_by_id(store.get("admin_users", []), recipient_id)
-        if user:
-            return record_company_id(user, store)
-    if recipient_type == "client" and recipient_id:
-        client = find_by_id(store.get("clients", []), recipient_id)
-        if client:
-            return record_company_id(client, store)
+        recipient_company_ids = notification_company_ids_for_record(store, "admin_users", recipient_id)
+    elif recipient_type == "client" and recipient_id:
+        recipient_company_ids = notification_company_ids_for_record(store, "clients", recipient_id)
+    else:
+        recipient_company_ids = []
+
+    session_company_id = ""
+    if session.get("admin_authenticated"):
+        session_company_id = current_company_id(store)
+        if session_company_id:
+            scoped_candidates = set(entity_company_ids or recipient_company_ids)
+            if not scoped_candidates or session_company_id in scoped_candidates:
+                return session_company_id
+
+    if entity_company_ids and recipient_company_ids:
+        intersection = [company_id for company_id in entity_company_ids if company_id in recipient_company_ids]
+        if len(intersection) == 1:
+            return intersection[0]
+    if len(entity_company_ids) == 1:
+        return entity_company_ids[0]
+    if len(recipient_company_ids) == 1:
+        return recipient_company_ids[0]
+    if entity_company_ids or recipient_company_ids:
+        return UNRESOLVED_NOTIFICATION_COMPANY_ID
     if session.get("admin_authenticated"):
         return current_company_id(store)
     return default_company_id(store)
+
+
+def notification_company_ids_for_record(store: dict, collection: str, record_id: str) -> list[str]:
+    company_ids: list[str] = []
+    for record in store.get(collection, []):
+        if record.get("id") != record_id:
+            continue
+        raw_company_id = str(record.get("companyId") or "").strip()
+        if raw_company_id:
+            company_id = raw_company_id
+        elif collection == "account_deletion_requests":
+            continue
+        else:
+            company_id = record_company_id(record, store)
+        if company_id and company_id not in company_ids:
+            company_ids.append(company_id)
+    return company_ids
 
 
 def notify_admin(store: dict, title: str, body: str, **kwargs) -> dict:
@@ -7543,13 +9526,48 @@ def mobile_notification_payload(notification: dict) -> dict:
     }
 
 
-def mobile_notifications_for_subject(store: dict, subject_type: str, subject_id: str, role: str = "") -> list[dict]:
+def mobile_subject_record_for_company(
+    store: dict,
+    subject_type: str,
+    subject_id: str,
+    company_id: str = "",
+) -> dict | None:
+    collection = "admin_users" if subject_type == "seller" else "clients" if subject_type == "client" else ""
+    if not collection:
+        return None
+    candidates = [
+        item
+        for item in store.get(collection, [])
+        if item.get("id") == subject_id
+    ]
+    if company_id:
+        candidates = [
+            item
+            for item in candidates
+            if record_company_id(item, store) == company_id
+        ]
+    return candidates[0] if candidates else None
+
+
+def mobile_notifications_for_subject(
+    store: dict,
+    subject_type: str,
+    subject_id: str,
+    role: str = "",
+    company_id: str = "",
+) -> list[dict]:
     visible = []
-    subject_company_id = ""
+    subject_company_id = company_id
     if subject_type == "seller":
-        subject_company_id = record_company_id(find_by_id(store.get("admin_users", []), subject_id), store)
+        subject_company_id = subject_company_id or record_company_id(
+            mobile_subject_record_for_company(store, subject_type, subject_id, company_id),
+            store,
+        )
     elif subject_type == "client":
-        subject_company_id = record_company_id(find_by_id(store.get("clients", []), subject_id), store)
+        subject_company_id = subject_company_id or record_company_id(
+            mobile_subject_record_for_company(store, subject_type, subject_id, company_id),
+            store,
+        )
     for notification in store.get("notifications", []):
         if notification.get("status") == "archived" or notification_is_expired(notification):
             continue
@@ -7565,24 +9583,30 @@ def mobile_notifications_for_subject(store: dict, subject_type: str, subject_id:
     return sorted(visible, key=lambda item: item.get("createdAt", ""), reverse=True)
 
 
-def mobile_notification_subject(store: dict) -> tuple[str, str, str, object | None]:
+def mobile_notification_subject(store: dict) -> tuple[str, str, str, str, object | None]:
     payload = mobile_token_payload()
     if payload.get("type") == "admin":
         user, auth_error = require_mobile_sales_user(store)
         if auth_error:
-            return "", "", "", auth_error
-        return "seller", user["id"], user.get("role", ""), None
+            return "", "", "", "", auth_error
+        return "seller", user["id"], user.get("role", ""), mobile_required_company_id(user), None
     client, auth_error = require_mobile_client(store)
     if auth_error or not client:
-        return "", "", "", auth_error or jsonify({"error": "Token movil requerido."})
-    return "client", client["id"], "client", None
+        return "", "", "", "", auth_error or jsonify({"error": "Token movil requerido."})
+    return "client", client["id"], "client", mobile_required_company_id(client), None
 
 
-def generate_mobile_subject_notifications(store: dict, subject_type: str, subject_id: str, role: str = "") -> bool:
+def generate_mobile_subject_notifications(
+    store: dict,
+    subject_type: str,
+    subject_id: str,
+    role: str = "",
+    company_id: str = "",
+) -> bool:
     before_count = len(store.setdefault("notifications", []))
     current_month = datetime.now(timezone.utc).strftime("%Y-%m")
-    subject_user = find_by_id(store.get("admin_users", []), subject_id) if subject_type == "seller" else None
-    subject_client = find_by_id(store.get("clients", []), subject_id) if subject_type == "client" else None
+    subject_user = mobile_subject_record_for_company(store, subject_type, subject_id, company_id) if subject_type == "seller" else None
+    subject_client = mobile_subject_record_for_company(store, subject_type, subject_id, company_id) if subject_type == "client" else None
     subject_company_id = record_company_id(subject_user or subject_client, store)
     orders = [
         order for order in store.get("orders", [])
@@ -7682,6 +9706,7 @@ def generate_mobile_subject_notifications(store: dict, subject_type: str, subjec
 
 def notify_order_created(store: dict, order: dict) -> None:
     order_id = order.get("orderId") or order.get("id", "")
+    company_id = record_company_id(order, store)
     customer = order.get("customer") or {}
     customer_name = customer.get("name") or customer.get("businessName") or "Cliente FVENTAS"
     total = money_usd(order.get("totalUsd") or order.get("netUsd") or 0)
@@ -7700,7 +9725,7 @@ def notify_order_created(store: dict, order: dict) -> None:
         entity_id=order_id,
         href=notification_url("orders", q=order_id),
         deep_link=f"fventas://orders/{order_id}",
-        metadata={"orderId": order_id, "saleType": order.get("saleType", ""), "status": status},
+        metadata={"companyId": company_id, "orderId": order_id, "saleType": order.get("saleType", ""), "status": status},
         dedupe_key=f"admin-order-created-{order_id}",
     )
     notify_client(
@@ -7714,7 +9739,7 @@ def notify_order_created(store: dict, order: dict) -> None:
         entity_type="order",
         entity_id=order_id,
         deep_link=f"fventas://orders/{order_id}",
-        metadata={"orderId": order_id, "status": status},
+        metadata={"companyId": company_id, "orderId": order_id, "status": status},
         dedupe_key=f"client-order-received-{order_id}",
     )
     notify_seller(
@@ -7728,7 +9753,7 @@ def notify_order_created(store: dict, order: dict) -> None:
         entity_type="order",
         entity_id=order_id,
         deep_link=f"fventas://seller/orders/{order_id}",
-        metadata={"orderId": order_id, "customerId": order.get("customerId", "")},
+        metadata={"companyId": company_id, "orderId": order_id, "customerId": order.get("customerId", "")},
         dedupe_key=f"seller-order-created-{order_id}",
     )
 
@@ -7738,6 +9763,7 @@ def notify_order_status_change(store: dict, order: dict, before_status: str) -> 
     if not after_status or before_status == after_status:
         return
     order_id = order.get("orderId") or order.get("id", "")
+    company_id = record_company_id(order, store)
     total = money_usd(order.get("totalUsd") or 0)
     status_label = order_status_label(after_status)
     type_by_status = {
@@ -7768,7 +9794,7 @@ def notify_order_status_change(store: dict, order: dict, before_status: str) -> 
         entity_type="order",
         entity_id=order_id,
         deep_link=f"fventas://orders/{order_id}",
-        metadata={"orderId": order_id, "beforeStatus": before_status, "status": after_status},
+        metadata={"companyId": company_id, "orderId": order_id, "beforeStatus": before_status, "status": after_status},
         dedupe_key=f"client-order-status-{order_id}-{after_status}",
     )
     notify_seller(
@@ -7782,13 +9808,14 @@ def notify_order_status_change(store: dict, order: dict, before_status: str) -> 
         entity_type="order",
         entity_id=order_id,
         deep_link=f"fventas://seller/orders/{order_id}",
-        metadata={"orderId": order_id, "beforeStatus": before_status, "status": after_status},
+        metadata={"companyId": company_id, "orderId": order_id, "beforeStatus": before_status, "status": after_status},
         dedupe_key=f"seller-order-status-{order_id}-{after_status}",
     )
 
 
 def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
     client_id = client.get("id", "")
+    company_id = record_company_id(client, store)
     approved = decision in {"approved", "reactivate", "adjust"} and safe_float(client.get("creditLimitUsd"), 0) > 0
     rejected = decision in {"rejected", "suspended", "blocked_debt", "blocked_limit"}
     if not approved and not rejected:
@@ -7811,7 +9838,7 @@ def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
         entity_type="client",
         entity_id=client_id,
         deep_link="fventas://credit",
-        metadata={"clientId": client_id, "decision": decision},
+        metadata={"companyId": company_id, "clientId": client_id, "decision": decision},
         dedupe_key=f"client-credit-{client_id}-{client.get('creditReviewedAt', '')}",
     )
     notify_seller(
@@ -7825,7 +9852,7 @@ def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
         entity_type="client",
         entity_id=client_id,
         deep_link=f"fventas://seller/clients/{client_id}",
-        metadata={"clientId": client_id, "decision": decision},
+        metadata={"companyId": company_id, "clientId": client_id, "decision": decision},
         dedupe_key=f"seller-credit-{client_id}-{client.get('creditReviewedAt', '')}",
     )
     if decision in {"suspended", "blocked_debt", "blocked_limit"}:
@@ -7839,13 +9866,14 @@ def notify_credit_decision(store: dict, client: dict, decision: str) -> None:
             entity_type="client",
             entity_id=client_id,
             href=notification_url("clients", q=client.get("businessName", "")),
-            metadata={"clientId": client_id, "decision": decision},
+            metadata={"companyId": company_id, "clientId": client_id, "decision": decision},
             dedupe_key=f"admin-client-blocked-{client_id}-{client.get('creditReviewedAt', '')}",
         )
 
 
 def notify_credit_requested(store: dict, client: dict) -> None:
     client_id = client.get("id", "")
+    company_id = record_company_id(client, store)
     amount = safe_float(client.get("creditRequestedUsd"), 0)
     if amount <= 0:
         return
@@ -7861,13 +9889,14 @@ def notify_credit_requested(store: dict, client: dict) -> None:
         entity_type="client",
         entity_id=client_id,
         href=notification_url("credit", q=client.get("businessName", "")),
-        metadata={"clientId": client_id, "requestedUsd": amount},
+        metadata={"companyId": company_id, "clientId": client_id, "requestedUsd": amount},
         dedupe_key=f"admin-credit-requested-{client_id}-{client.get('updatedAt', client.get('createdAt', ''))}",
     )
 
 
 def notify_payment_registered(store: dict, order: dict, movement: dict) -> None:
     order_id = order.get("orderId") or order.get("id", "")
+    company_id = record_company_id(order, store)
     amount = money_usd(movement.get("amountUsd") or 0)
     notify_admin(
         store,
@@ -7879,7 +9908,7 @@ def notify_payment_registered(store: dict, order: dict, movement: dict) -> None:
         entity_type="order",
         entity_id=order_id,
         href=notification_url("collections", q=order_id),
-        metadata={"orderId": order_id, "movementId": movement.get("id", "")},
+        metadata={"companyId": company_id, "orderId": order_id, "movementId": movement.get("id", "")},
         dedupe_key=f"admin-payment-{movement.get('id', '')}",
     )
     notify_client(
@@ -7893,7 +9922,7 @@ def notify_payment_registered(store: dict, order: dict, movement: dict) -> None:
         entity_type="order",
         entity_id=order_id,
         deep_link=f"fventas://orders/{order_id}",
-        metadata={"orderId": order_id, "movementId": movement.get("id", "")},
+        metadata={"companyId": company_id, "orderId": order_id, "movementId": movement.get("id", "")},
         dedupe_key=f"client-payment-{movement.get('id', '')}",
     )
 
@@ -7902,6 +9931,7 @@ def notify_commission_status(store: dict, order: dict, status: str) -> None:
     if status not in {"commission_approved", "commission_paid"}:
         return
     order_id = order.get("orderId") or order.get("id", "")
+    company_id = record_company_id(order, store)
     notification_type = "commission_paid" if status == "commission_paid" else "commission_approved"
     title = "Comision pagada" if status == "commission_paid" else "Comision aprobada"
     notify_seller(
@@ -7915,13 +9945,18 @@ def notify_commission_status(store: dict, order: dict, status: str) -> None:
         entity_type="order",
         entity_id=order_id,
         deep_link=f"fventas://seller/commissions/{order_id}",
-        metadata={"orderId": order_id, "commissionStatus": status},
+        metadata={"companyId": company_id, "orderId": order_id, "commissionStatus": status},
         dedupe_key=f"seller-commission-{order_id}-{status}",
     )
 
 
 def notify_stock_state(store: dict, product: dict) -> None:
-    enriched = enrich_inventory_product(product, store.get("orders", []), store.get("stock_movements", []))
+    company_id = record_company_id(product, store)
+    enriched = enrich_inventory_product(
+        product,
+        records_for_company_id(store, "orders", company_id),
+        records_for_company_id(store, "stock_movements", company_id),
+    )
     status = enriched.get("stockStatus")
     if status not in {"low", "out"}:
         return
@@ -7939,7 +9974,12 @@ def notify_stock_state(store: dict, product: dict) -> None:
         entity_type="product",
         entity_id=enriched.get("id", ""),
         href=notification_url("stock", q=enriched.get("sku", "")),
-        metadata={"productId": enriched.get("id", ""), "sku": enriched.get("sku", ""), "stockStatus": status},
+        metadata={
+            "companyId": company_id,
+            "productId": enriched.get("id", ""),
+            "sku": enriched.get("sku", ""),
+            "stockStatus": status,
+        },
         dedupe_key=f"stock-{enriched.get('id', '')}-{status}",
     )
 
@@ -7947,6 +9987,7 @@ def notify_stock_state(store: dict, product: dict) -> None:
 def notify_quote_accepted(store: dict, quote: dict, order: dict | None = None) -> None:
     quote_id = quote.get("id", "")
     order_id = (order or {}).get("orderId", "")
+    company_id = record_company_id(order or quote, store)
     notify_admin(
         store,
         "Cotizacion aceptada",
@@ -7957,7 +9998,7 @@ def notify_quote_accepted(store: dict, quote: dict, order: dict | None = None) -
         entity_type="quote",
         entity_id=quote_id,
         href=notification_url("quotes", q=quote.get("quoteNumber", "")),
-        metadata={"quoteId": quote_id, "orderId": order_id},
+        metadata={"companyId": company_id, "quoteId": quote_id, "orderId": order_id},
         dedupe_key=f"quote-accepted-{quote_id}-{order_id}",
     )
 
@@ -8035,6 +10076,30 @@ def client_sales_blocker(client: dict | None, sale_type: str = "") -> str:
     if sale_type in {"credit_line", "term_credit"} and client.get("creditRequestStatus") in CLIENT_CREDIT_BLOCKING_STATUSES:
         return f"Cliente no habilitado para comprar por credito: {credit_status_label(client.get('creditRequestStatus', ''))}."
     return ""
+
+
+def validate_client_purchase_conditions(client: dict | None, sale_type: str, payment_term_days: int) -> tuple[str, str, int]:
+    normalized_sale_type = sale_type if sale_type in dict(SALE_TYPE_OPTIONS) else "cash"
+    normalized_term_days = safe_int(payment_term_days, 0)
+    blocker = client_sales_blocker(client, normalized_sale_type)
+    if blocker:
+        return blocker, normalized_sale_type, normalized_term_days
+    if not client:
+        return "Cliente no encontrado.", normalized_sale_type, normalized_term_days
+    if normalized_sale_type == "cash":
+        return "", normalized_sale_type, 0
+    if normalized_sale_type == "credit_line" and not client.get("creditEnabled"):
+        return "El cliente no tiene linea de credito aprobada."
+    if normalized_sale_type == "credit_line" and normalized_term_days == 0:
+        normalized_term_days = safe_int(client.get("paymentTermsDays"), 0)
+    allowed_terms = [
+        safe_int(term, -1)
+        for term in client.get("allowedPaymentTermsDays", [0])
+        if str(term).isdigit()
+    ] or [0]
+    if normalized_sale_type in {"term_credit", "credit_line"} and normalized_term_days not in allowed_terms:
+        return "El plazo solicitado no esta autorizado para este cliente.", normalized_sale_type, normalized_term_days
+    return "", normalized_sale_type, normalized_term_days
 
 
 def enrich_client(
@@ -8189,6 +10254,34 @@ def enrich_client(
     return enriched
 
 
+def enrich_clients(
+    clients: list[dict],
+    orders: list[dict] | None = None,
+    movements: list[dict] | None = None,
+) -> list[dict]:
+    orders_by_client: dict[str, list[dict]] = {}
+    for order in orders or []:
+        orders_by_client.setdefault(order.get("customerId", ""), []).append(order)
+
+    movements_by_client: dict[str, list[dict]] = {}
+    unassigned_movements: list[dict] = []
+    for movement in movements or []:
+        client_id = movement.get("clientId", "")
+        if client_id:
+            movements_by_client.setdefault(client_id, []).append(movement)
+        else:
+            unassigned_movements.append(movement)
+
+    enriched_clients = []
+    for client in clients:
+        client_id = client.get("id", "")
+        client_movements = movements_by_client.get(client_id, [])
+        if unassigned_movements:
+            client_movements = [*client_movements, *unassigned_movements]
+        enriched_clients.append(enrich_client(client, orders_by_client.get(client_id, []), client_movements))
+    return enriched_clients
+
+
 def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched = dict(order)
     order_id = enriched.get("orderId") or enriched.get("id", "")
@@ -8282,6 +10375,29 @@ def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched["itemsCount"] = len(enriched.get("items") or [])
     enriched["statusHistory"] = sorted(enriched.get("statusHistory") or [], key=lambda item: item.get("createdAt", ""), reverse=True)
     return enriched
+
+
+def enrich_orders(orders: list[dict], movements: list[dict] | None = None) -> list[dict]:
+    movements_by_order: dict[str, list[dict]] = {}
+    for movement in movements or []:
+        order_id = movement.get("orderId", "")
+        if order_id:
+            movements_by_order.setdefault(order_id, []).append(movement)
+
+    enriched_orders = []
+    for order in orders:
+        order_movements: list[dict] = []
+        seen_movements: set[str] = set()
+        for key in (order.get("orderId", ""), order.get("id", "")):
+            for movement in movements_by_order.get(key, []):
+                movement_id = movement.get("id", "")
+                if movement_id and movement_id in seen_movements:
+                    continue
+                if movement_id:
+                    seen_movements.add(movement_id)
+                order_movements.append(movement)
+        enriched_orders.append(enrich_order(order, order_movements))
+    return enriched_orders
 
 
 def append_order_history(order: dict, status: str, note: str = "") -> None:
@@ -8392,8 +10508,10 @@ def append_stock_movement(
     location: str = "",
 ) -> None:
     normalized_type = normalize_stock_movement_type(movement_type)
+    company_id = record_company_id(order, store) if order else record_company_id(product, store)
     movement = {
         "id": next_id("mov", f"{product.get('sku', '')}-{normalized_type}"),
+        "companyId": company_id,
         "productId": product.get("id", ""),
         "sku": product.get("sku", ""),
         "type": normalized_type,
@@ -8410,8 +10528,14 @@ def append_stock_movement(
     touch_product_stock_metadata(product, normalized_type, note, location)
 
 
-def enrich_inventory_product(product: dict, orders: list[dict], movements: list[dict] | None = None) -> dict:
-    reserved_by_product = stock_reserved_quantities(orders)
+def enrich_inventory_product(
+    product: dict,
+    orders: list[dict],
+    movements: list[dict] | None = None,
+    reserved_by_product: dict[str, int] | None = None,
+) -> dict:
+    if reserved_by_product is None:
+        reserved_by_product = stock_reserved_quantities(orders)
     enriched = enrich_product(product)
     physical_stock = int(enriched.get("stock") or 0)
     committed = int(reserved_by_product.get(enriched["id"], 0))
@@ -8450,16 +10574,62 @@ def enrich_inventory_product(product: dict, orders: list[dict], movements: list[
     return enriched
 
 
+def enrich_inventory_products(
+    products: list[dict],
+    orders: list[dict],
+    movements: list[dict] | None = None,
+) -> list[dict]:
+    reserved_by_product = stock_reserved_quantities(orders)
+    return [
+        enrich_inventory_product(
+            product,
+            orders,
+            movements,
+            reserved_by_product=reserved_by_product,
+        )
+        for product in products
+    ]
+
+
 def available_stock_for_product(product: dict, orders: list[dict]) -> int:
     enriched = enrich_inventory_product(product, orders)
     return int(enriched.get("availableStock") or 0)
 
 
+def records_for_company_id(store: dict, collection: str, company_id: str) -> list[dict]:
+    return [
+        record
+        for record in store.get(collection, [])
+        if record_company_id(record, store) == company_id
+    ]
+
+
+def inventory_company_id_for_order(store: dict, order: dict) -> str:
+    return record_company_id(order, store)
+
+
+def inventory_products_for_order(store: dict, order: dict) -> dict[str, dict]:
+    company_id = inventory_company_id_for_order(store, order)
+    return {
+        product["id"]: product
+        for product in records_for_company_id(store, "products", company_id)
+    }
+
+
+def inventory_orders_for_order(store: dict, order: dict) -> list[dict]:
+    return records_for_company_id(store, "orders", inventory_company_id_for_order(store, order))
+
+
+def inventory_movements_for_order(store: dict, order: dict) -> list[dict]:
+    return records_for_company_id(store, "credit_movements", inventory_company_id_for_order(store, order))
+
+
 def order_has_sufficient_stock(store: dict, order: dict) -> bool:
-    products = {product["id"]: product for product in store.get("products", [])}
+    products = inventory_products_for_order(store, order)
+    scoped_orders = inventory_orders_for_order(store, order)
     for product_id, quantity in order_item_quantities(order).items():
         product = products.get(product_id)
-        if not product or available_stock_for_product(product, store.get("orders", [])) < quantity:
+        if not product or available_stock_for_product(product, scoped_orders) < quantity:
             return False
     return True
 
@@ -8474,7 +10644,7 @@ def reserve_stock_for_order(store: dict, order: dict) -> bool:
         order["stockStatus"] = "insufficient_stock"
         return False
 
-    products = {product["id"]: product for product in store.get("products", [])}
+    products = inventory_products_for_order(store, order)
     for product_id, quantity in order_item_quantities(order).items():
         product = products.get(product_id)
         if product:
@@ -8492,7 +10662,7 @@ def release_stock_for_order(store: dict, order: dict) -> None:
         order["stockStatus"] = "released"
         return
 
-    products = {product["id"]: product for product in store.get("products", [])}
+    products = inventory_products_for_order(store, order)
     for product_id, quantity in order_item_quantities(order).items():
         product = products.get(product_id)
         if product:
@@ -8506,7 +10676,7 @@ def release_stock_for_order(store: dict, order: dict) -> None:
 def deliver_stock_for_order(store: dict, order: dict) -> bool:
     if order.get("inventoryStatus") == "delivered":
         return True
-    payment_block_reason = order_release_block_reason(order, store.get("credit_movements", []))
+    payment_block_reason = order_release_block_reason(order, inventory_movements_for_order(store, order))
     if payment_block_reason:
         order["dispatchStatus"] = "payment_hold"
         order["stockStatus"] = "payment_hold"
@@ -8521,7 +10691,7 @@ def deliver_stock_for_order(store: dict, order: dict) -> bool:
     if order.get("inventoryStatus") != "reserved" and not reserve_stock_for_order(store, order):
         return False
 
-    products = {product["id"]: product for product in store.get("products", [])}
+    products = inventory_products_for_order(store, order)
     for product_id, quantity in order_item_quantities(order).items():
         product = products.get(product_id)
         if not product:
@@ -8547,11 +10717,18 @@ def apply_inventory_transition(store: dict, order: dict, target_status: str) -> 
     return True
 
 
-def save_upload(file_storage, folder: str = "library") -> str:
+def save_upload(
+    file_storage,
+    folder: str = "library",
+    *,
+    public: bool = True,
+    allowed_extensions: set[str] | frozenset[str] | None = None,
+) -> str:
     if not file_storage or not file_storage.filename:
         return ""
 
     try:
+        s3_acl = app.config.get("S3_ACL", "") if public else ""
         return save_uploaded_file(
             file_storage=file_storage,
             folder=folder,
@@ -8562,8 +10739,9 @@ def save_upload(file_storage, folder: str = "library") -> str:
             s3_region=app.config.get("S3_REGION", "us-east-1"),
             s3_endpoint_url=app.config.get("S3_ENDPOINT_URL", ""),
             s3_prefix=app.config.get("S3_PREFIX", "fventas"),
-            s3_acl=app.config.get("S3_ACL", ""),
+            s3_acl=s3_acl,
             max_bytes=int(app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)),
+            allowed_extensions=allowed_extensions,
         )
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
@@ -8579,10 +10757,10 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
     primary_image = sanitize_url(request.form.get("imageUrl", ""))
     image_urls = sanitize_url_list(split_lines(request.form.get("imageUrls", "")))
     pdf_urls = sanitize_url_list(split_lines(request.form.get("pdfUrls", "")))
-    uploaded_image = save_upload(request.files.get("imageFile"), "products")
-    uploaded_pdf = save_upload(request.files.get("pdfFile"), "products")
+    uploaded_image = save_upload(request.files.get("imageFile"), "products", allowed_extensions=IMAGE_UPLOAD_EXTENSIONS)
+    uploaded_pdf = save_upload(request.files.get("pdfFile"), "products", allowed_extensions=PDF_UPLOAD_EXTENSIONS)
     uploaded_gallery = [
-        save_upload(file_storage, "products")
+        save_upload(file_storage, "products", allowed_extensions=IMAGE_UPLOAD_EXTENSIONS)
         for file_storage in request.files.getlist("galleryFiles")
         if file_storage and file_storage.filename
     ]
@@ -8631,13 +10809,14 @@ def product_payload(store: dict, existing: dict | None = None) -> dict:
         "minimumStock": safe_int(request.form.get("minimumStock"), 0),
         "maximumStock": safe_int(request.form.get("maximumStock"), 0),
         "reserved": safe_int(request.form.get("reserved") or (existing or {}).get("reserved"), 0),
-        "status": request.form.get("status", "active"),
+        "status": normalize_option_value(request.form.get("status"), CLIENT_STATUS_OPTIONS, "active"),
         "imageUrl": primary_image,
         "imageUrls": image_urls,
         "pdfUrls": pdf_urls,
         "variants": split_lines(request.form.get("variants", "")),
         "specifications": parse_specs(request.form.get("specifications", "")),
         "relatedSkus": split_lines(request.form.get("relatedSkus", "")),
+        "compatibilityNotes": split_lines(request.form.get("compatibilityNotes", "")),
         "requiresQuote": request.form.get("requiresQuote") == "on",
         "requiresTechnicalValidation": request.form.get("requiresTechnicalValidation") == "on",
         "visibleInApp": "on" in visible_values if visible_values else bool((existing or {}).get("visibleInApp", True)),
@@ -8692,6 +10871,7 @@ def product_form_snapshot() -> dict:
         "variants": split_lines(request.form.get("variants", "")),
         "specifications": parse_specs(request.form.get("specifications", "")),
         "relatedSkus": split_lines(request.form.get("relatedSkus", "")),
+        "compatibilityNotes": split_lines(request.form.get("compatibilityNotes", "")),
         "requiresQuote": request.form.get("requiresQuote") == "on",
         "requiresTechnicalValidation": request.form.get("requiresTechnicalValidation") == "on",
         "visibleInApp": "on" in request.form.getlist("visibleInApp"),
@@ -8775,7 +10955,7 @@ def enrich_category(category: dict, store: dict) -> dict:
         and item.get("status") != "deleted"
         and record_company_id(item, store) == category_company_id
     ]
-    parent = find_by_id(store.get("categories", []), category.get("parentId", ""))
+    parent = find_company_record(store, "categories", category.get("parentId", ""))
     if parent and record_company_id(parent, store) != category_company_id:
         parent = None
     enriched["slug"] = category_slug(enriched.get("slug") or enriched.get("name", ""))
@@ -8798,7 +10978,7 @@ def enrich_category(category: dict, store: dict) -> dict:
 def category_payload(store: dict, existing: dict | None = None) -> dict:
     target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
     name = sanitize_text(request.form.get("name", ""), max_length=140, allow_newlines=False)
-    uploaded_image = save_upload(request.files.get("imageFile"), "categories")
+    uploaded_image = save_upload(request.files.get("imageFile"), "categories", allowed_extensions=IMAGE_UPLOAD_EXTENSIONS)
     image_url = uploaded_image or sanitize_url(request.form.get("imageUrl", "")) or (existing or {}).get("imageUrl", "")
     status = request.form.get("status", "active")
     visible_in_app = request.form.get("visibleInApp") == "on"
@@ -8849,7 +11029,7 @@ def category_form_snapshot() -> dict:
 
 def category_descendant_ids(store: dict, category_id: str, company_id: str | None = None) -> set[str]:
     if company_id is None:
-        category = find_by_id(store.get("categories", []), category_id)
+        category = find_company_record(store, "categories", category_id)
         company_id = record_company_id(category, store) if category else current_company_id(store)
     descendants: set[str] = set()
     pending = [category_id]
@@ -9373,6 +11553,12 @@ def seller_form_error(store: dict, existing: dict | None = None) -> str:
     )
     if duplicated:
         return f"Ya existe un usuario con el email {email}."
+    client_conflict = any(
+        str(client.get("email") or "").lower() == email and client.get("status") == "active"
+        for client in store.get("clients", [])
+    )
+    if client_conflict:
+        return f"Ya existe un cliente movil con el email {email}."
     seller_code = sanitize_text(request.form.get("sellerCode", ""), max_length=80, allow_newlines=False).upper()
     target_company_id = record_company_id(existing, store) if existing else current_company_id(store)
     duplicated_code = any(
@@ -9416,11 +11602,55 @@ def client_form_error(store: dict, existing: dict | None = None) -> str:
         return f"El telefono no es valido. Ejemplo: {profile.get('phonePlaceholder', '+ codigo pais telefono')}."
     if location_error:
         return location_error
+    if request.form.get("clientType", "b2b") not in dict(CLIENT_TYPE_OPTIONS):
+        return "El tipo de cliente no es valido."
+    if request.form.get("clientCategory", "standard") not in dict(CLIENT_CATEGORY_OPTIONS):
+        return "La categoria comercial no es valida."
+    if request.form.get("priceList", "b2b") not in dict(PRICE_LIST_OPTIONS):
+        return "La lista de precios no es valida."
+    if request.form.get("status", "active") not in dict(CLIENT_STATUS_OPTIONS):
+        return "El estado del cliente no es valido."
+    if request.form.get("defaultSaleType", "cash") not in dict(SALE_TYPE_OPTIONS):
+        return "El tipo de venta default no es valido."
+    if request.form.get("collectionStatus", "without_debt") not in dict(COLLECTION_STATUS_OPTIONS):
+        return "El estado de cobranza no es valido."
+    if request.form.get("creditRiskLevel", "low") not in dict(CREDIT_RISK_OPTIONS):
+        return "El riesgo comercial no es valido."
+    discount = safe_float(request.form.get("authorizedDiscountPercent"), 0)
+    if discount < 0 or discount > 100:
+        return "El descuento autorizado debe estar entre 0 y 100%."
+    credit_score = safe_int(request.form.get("creditScore"), safe_int((existing or {}).get("creditScore"), 0))
+    if credit_score < 0 or credit_score > 100:
+        return "El score comercial debe estar entre 0 y 100."
     scoped_clients = [
         client
         for client in store.get("clients", [])
         if record_company_id(client, store) == target_company_id
     ]
+    global_email_owner = next(
+        (
+            client
+            for client in store.get("clients", [])
+            if str(client.get("email") or "").lower() == email
+            and (existing is None or client.get("id") != existing.get("id"))
+        ),
+        None,
+    )
+    if global_email_owner and record_company_id(global_email_owner, store) != target_company_id:
+        return "Ese email ya esta registrado como acceso movil de otra empresa."
+    mobile_user_conflict = next(
+        (
+            user
+            for user in store.get("admin_users", [])
+            if str(user.get("email") or "").lower() == email
+            and user.get("status") == "active"
+            and user.get("mobileAccessEnabled", True) is not False
+            and user.get("role") in MOBILE_SALES_ROLES
+        ),
+        None,
+    )
+    if mobile_user_conflict:
+        return "Ese email ya esta registrado como usuario operativo movil."
     duplicated = any(
         str(client.get("email") or "").lower() == email
         and (existing is None or client.get("id") != existing.get("id"))
@@ -9448,6 +11678,35 @@ def selected_payment_terms() -> list[int]:
         if value in payment_term_options() and value not in terms:
             terms.append(value)
     return terms or [0]
+
+
+def normalize_option_value(value: str | None, options: list[tuple[str, str]], default: str) -> str:
+    normalized = str(value or default).strip()
+    return normalized if normalized in dict(options) else default
+
+
+def client_status_blocks_mobile_access(status: str) -> bool:
+    return str(status or "").strip() in CLIENT_SALE_BLOCKING_STATUSES
+
+
+def sync_client_mobile_access_state(
+    client: dict,
+    existing: dict | None = None,
+    *,
+    force_revoke: bool = False,
+    allow_reenable: bool = False,
+) -> None:
+    previous = existing or {}
+    previous_enabled = bool(previous.get("mobileAccessEnabled", True))
+    previous_version = safe_int(previous.get("mobileSessionVersion"), 0)
+    desired_enabled = bool(client.get("mobileAccessEnabled", previous_enabled))
+    if client_status_blocks_mobile_access(client.get("status", "")) or mobile_account_access_blocked(client):
+        desired_enabled = False
+    elif allow_reenable and client.get("status") == "active":
+        desired_enabled = True
+    client["mobileAccessEnabled"] = desired_enabled
+    should_revoke = bool(existing) and (force_revoke or (previous_enabled and not desired_enabled))
+    client["mobileSessionVersion"] = previous_version + (1 if should_revoke else 0)
 
 
 def admin_user_payload(existing: dict | None = None) -> dict:
@@ -9564,11 +11823,7 @@ def client_payload(existing: dict | None = None) -> dict:
     active_store = load_store()
     company_id = record_company_id(existing, active_store) if existing else current_company_id(active_store)
     base_profile = active_market_profile_for_store(active_store, company_id=company_id)
-    requested_country = normalize_market_country(
-        request.form.get("country")
-        or (existing or {}).get("country")
-        or base_profile.get("code", "CL")
-    )
+    requested_country = normalize_market_country(base_profile.get("code", "CL"))
     client_profile = market_profile(requested_country)
     seller_id = request.form.get("assignedSellerId", "").strip()
     current_seller_id, current_seller_name = current_seller_assignment(active_store)
@@ -9625,10 +11880,10 @@ def client_payload(existing: dict | None = None) -> dict:
         "phone": normalized_phone,
         "whatsapp": normalized_whatsapp,
         "email": email,
-        "clientType": request.form.get("clientType", "b2b"),
-        "clientCategory": request.form.get("clientCategory", "standard"),
-        "priceList": request.form.get("priceList", "b2b"),
-        "authorizedDiscountPercent": float(request.form.get("authorizedDiscountPercent") or 0),
+        "clientType": normalize_option_value(request.form.get("clientType"), CLIENT_TYPE_OPTIONS, "b2b"),
+        "clientCategory": normalize_option_value(request.form.get("clientCategory"), CLIENT_CATEGORY_OPTIONS, "standard"),
+        "priceList": normalize_option_value(request.form.get("priceList"), PRICE_LIST_OPTIONS, "b2b"),
+        "authorizedDiscountPercent": max(0.0, min(100.0, safe_float(request.form.get("authorizedDiscountPercent"), 0))),
         "status": request.form.get("status", "active"),
         "address": sanitize_text(request.form.get("address", ""), max_length=400),
         "fiscalAddress": sanitize_text(request.form.get("fiscalAddress", ""), max_length=400),
@@ -9639,11 +11894,11 @@ def client_payload(existing: dict | None = None) -> dict:
         "deliveryZone": sanitize_text(request.form.get("deliveryZone", ""), max_length=120, allow_newlines=False),
         "assignedSellerId": seller_id,
         "assignedSellerName": seller_name,
-        "defaultSaleType": request.form.get("defaultSaleType", "cash"),
+        "defaultSaleType": normalize_option_value(request.form.get("defaultSaleType"), SALE_TYPE_OPTIONS, "cash"),
         "allowedPaymentTermsDays": selected_payment_terms(),
-        "collectionStatus": request.form.get("collectionStatus", "without_debt"),
-        "creditRiskLevel": request.form.get("creditRiskLevel", "low"),
-        "creditScore": int(float(request.form.get("creditScore") or (existing or {}).get("creditScore") or 0)),
+        "collectionStatus": normalize_option_value(request.form.get("collectionStatus"), COLLECTION_STATUS_OPTIONS, "without_debt"),
+        "creditRiskLevel": normalize_option_value(request.form.get("creditRiskLevel"), CREDIT_RISK_OPTIONS, "low"),
+        "creditScore": max(0, min(100, safe_int(request.form.get("creditScore"), safe_int((existing or {}).get("creditScore"), 0)))),
         "creditManagerNote": sanitize_text(request.form.get("creditManagerNote", (existing or {}).get("creditManagerNote", "")), max_length=1200),
         "creditReviewedBy": (existing or {}).get("creditReviewedBy", ""),
         "creditReviewedAt": (existing or {}).get("creditReviewedAt", ""),
@@ -9654,6 +11909,7 @@ def client_payload(existing: dict | None = None) -> dict:
         "creditUsedUsd": float(request.form.get("creditUsedUsd") or (existing or {}).get("creditUsedUsd") or 0),
         "paymentTermsDays": payment_terms_days,
         "notes": sanitize_text(request.form.get("notes", ""), max_length=1500),
+        "mobileAccessEnabled": bool((existing or {}).get("mobileAccessEnabled", True)),
         "updatedVia": "admin",
         "updatedById": actor_id,
         "updatedByName": actor_name,
@@ -9693,16 +11949,28 @@ def client_payload(existing: dict | None = None) -> dict:
             generate_password_hash(password) if password else existing.get("passwordHash", "")
         )
         payload["mustChangePassword"] = True if password else bool(existing.get("mustChangePassword"))
+        for key in (
+            "deletionStatus",
+            "deletionRequestId",
+            "deletionRequestedAt",
+            "deletionRequestChannel",
+            "deletionRequestReason",
+            "deletionApprovedAt",
+            "deletionCompletedAt",
+            "mobileAccess",
+            "passwordRecoveryRequestedAt",
+            "passwordRecoveryStatus",
+        ):
+            if key in existing:
+                payload[key] = existing.get(key)
+    sync_client_mobile_access_state(payload, existing, force_revoke=bool(existing and password))
     return payload
 
 
 def clients_page_context(store: dict, error: str = "") -> dict:
     scoped_orders = visible_records_for_current_company(store, "orders")
     scoped_credit_movements = visible_records_for_current_company(store, "credit_movements")
-    clients_list = [
-        enrich_client(client, scoped_orders, scoped_credit_movements)
-        for client in visible_clients_for_current_user(store)
-    ]
+    clients_list = enrich_clients(visible_clients_for_current_user(store), scoped_orders, scoped_credit_movements)
     filters = {
         "q": request.args.get("q", "").strip(),
         "status": request.args.get("status", "").strip(),
@@ -9736,7 +12004,17 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         clients_list = [client for client in clients_list if client.get("collectionStatus") == filters["collection"]]
     if filters["credit"]:
         clients_list = [client for client in clients_list if client.get("creditStatus") == filters["credit"] or client.get("creditRequestStatus") == filters["credit"]]
-    client_ids = {client.get("id", "") for client in clients_list}
+    clients_list = sorted(clients_list, key=lambda item: item.get("businessName", ""))
+    page_clients, pagination = api_list_pagination(clients_list, default_limit=24)
+    total_pages = max(1, math.ceil((pagination.get("total") or 0) / max(1, pagination.get("limit") or 1)))
+    pagination.update({
+        "pages": total_pages,
+        "start": (pagination.get("offset") or 0) + 1 if pagination.get("total") else 0,
+        "end": (pagination.get("offset") or 0) + len(page_clients),
+        "previousPage": (pagination.get("page") or 1) - 1 if (pagination.get("page") or 1) > 1 else None,
+        "nextPage": (pagination.get("page") or 1) + 1 if pagination.get("hasMore") else None,
+    })
+    client_ids = {client.get("id", "") for client in page_clients}
     orders_by_client: dict[str, list[dict]] = {}
     for order in sorted(scoped_orders, key=lambda item: item.get("createdAt", ""), reverse=True):
         if order.get("customerId") not in client_ids:
@@ -9754,8 +12032,9 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         "open_balance": sum(float(client.get("openBalanceUsd") or 0) for client in clients_list),
         "overdue_balance": sum(float(client.get("overdueBalanceUsd") or 0) for client in clients_list),
     }
+    active_profile = active_market_profile_for_store(store, current_company_id(store))
     return {
-        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "clients": page_clients,
         "sellers": sales_users(store),
         "payment_terms": payment_term_options(store),
         "sale_type_options": SALE_TYPE_OPTIONS,
@@ -9766,12 +12045,17 @@ def clients_page_context(store: dict, error: str = "") -> dict:
         "collection_status_options": COLLECTION_STATUS_OPTIONS,
         "credit_status_options": CREDIT_REQUEST_STATUS_OPTIONS,
         "credit_risk_options": CREDIT_RISK_OPTIONS,
-        "chile_locations": CHILE_REGION_CITIES,
+        "country_locations": country_location_options(active_profile.get("code")),
+        "country_location_labels": country_location_labels(active_profile.get("code")),
+        "client_market_profile": active_profile,
+        "chile_locations": country_location_options("CL"),
         "can_approve_credit": can_module_action("credit", "approve"),
         "can_edit_clients": can_module_action("clients", "edit"),
         "can_create_clients": can_module_action("clients", "create"),
         "metrics": metrics,
         "filters": filters,
+        "pagination": pagination,
+        "total_clients": len(clients_list),
         "orders_by_client": orders_by_client,
         "error": error,
         "bulk_result": consume_bulk_result("clients") if not error else None,
@@ -9950,16 +12234,21 @@ def sellers_page_context(store: dict, error: str = "") -> dict:
 
 
 def assisted_order_page_context(store: dict, error: str = "") -> dict:
+    orders = visible_orders_for_current_user(store)
+    movements = visible_records_for_current_company(store, "credit_movements")
     clients_list = [
-        enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+        enrich_client(client, orders, movements)
         for client in visible_clients_for_current_user(store)
         if client.get("status") == "active"
     ]
-    products = [
-        enrich_inventory_product(product, store.get("orders", []))
-        for product in store.get("products", [])
-        if product.get("status") == "active"
-    ]
+    products = enrich_inventory_products(
+        [
+            product
+            for product in visible_records_for_current_company(store, "products")
+            if product.get("status") == "active"
+        ],
+        orders,
+    )
     return {
         "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
         "products": sorted(products, key=lambda item: item.get("title", "")),
@@ -9977,10 +12266,13 @@ def products_page_context(store: dict, error: str = "", include_bulk: bool = Tru
         "stock": request.args.get("stock", "").strip(),
         "visibility": request.args.get("visibility", "").strip(),
     }
-    all_products = [
-        enrich_inventory_product(product, store.get("orders", []), store.get("stock_movements", []))
-        for product in store.get("products", [])
-    ]
+    orders = visible_orders_for_current_user(store)
+    movements = visible_records_for_current_company(store, "stock_movements")
+    all_products = enrich_inventory_products(
+        visible_records_for_current_company(store, "products"),
+        orders,
+        movements,
+    )
     products = all_products
     if filters["q"]:
         products = [
@@ -10064,11 +12356,13 @@ def stock_page_context(store: dict, error: str = "", include_bulk: bool = True) 
         "location": request.args.get("location", "").strip(),
         "movement": request.args.get("movement", "").strip(),
     }
-    movements = [enrich_stock_movement(movement) for movement in store.get("stock_movements", [])]
-    all_products = [
-        enrich_inventory_product(product, store.get("orders", []), movements)
-        for product in store.get("products", [])
-    ]
+    movements = [enrich_stock_movement(movement) for movement in visible_records_for_current_company(store, "stock_movements")]
+    orders = visible_orders_for_current_user(store)
+    all_products = enrich_inventory_products(
+        visible_records_for_current_company(store, "products"),
+        orders,
+        movements,
+    )
     products = all_products
     if filters["q"]:
         products = [
@@ -10267,8 +12561,9 @@ def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[
         return None, "Agrega al menos un producto a la cotizacion."
 
     exchange_rate = safe_float(request.form.get("exchangeRateUsdClp"), current_rate())
+    client_company_id = record_company_id(client, store)
     seller_id = client.get("assignedSellerId", "") if client else ""
-    seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id)
+    seller_name = client.get("assignedSellerName", "") or seller_name_for(store, seller_id, client_company_id)
     status = request.form.get("status", (existing or {}).get("status", "draft"))
     if status not in dict(QUOTE_STATUS_OPTIONS):
         status = "draft"
@@ -10276,8 +12571,9 @@ def quote_payload_from_form(store: dict, existing: dict | None = None) -> tuple[
     if sale_type not in dict(SALE_TYPE_OPTIONS):
         sale_type = "cash"
     payment_term_days = safe_int(request.form.get("paymentTermDays"), safe_int((existing or {}).get("paymentTermDays"), 0))
-    if sale_type == "cash":
-        payment_term_days = 0
+    condition_error, sale_type, payment_term_days = validate_client_purchase_conditions(client, sale_type, payment_term_days)
+    if condition_error:
+        return None, condition_error
 
     quote = copy.deepcopy(existing or {})
     now = utc_now()
@@ -10396,11 +12692,14 @@ def quote_form_context(store: dict, quote: dict | None = None, error: str = "") 
         for client in visible_clients_for_current_user(store)
         if client.get("status") in {"active", "prospect", "review"}
     ]
-    products = [
-        enrich_inventory_product(product, scoped_orders)
-        for product in visible_records_for_current_company(store, "products")
-        if product.get("status") == "active"
-    ]
+    products = enrich_inventory_products(
+        [
+            product
+            for product in visible_records_for_current_company(store, "products")
+            if product.get("status") == "active"
+        ],
+        scoped_orders,
+    )
     default_valid_until = (datetime.now(timezone.utc) + timedelta(days=7)).date().isoformat()
     return {
         "quote": enrich_quote(quote) if quote else None,
@@ -10652,7 +12951,7 @@ def crm_page_context(store: dict, error: str = "") -> dict:
         stage_counts[stage] = stage_counts.get(stage, 0) + 1
         value_by_stage[stage] = value_by_stage.get(stage, 0.0) + safe_float(record.get("weightedValueUsd"), 0)
     sellers = [
-        seller for seller in store.get("admin_users", [])
+        seller for seller in visible_records_for_current_company(store, "admin_users")
         if seller.get("role") == "sales" and seller.get("status") != "deleted"
     ]
     metrics = {
@@ -10697,11 +12996,11 @@ def orders_page_context(store: dict, error: str = "") -> dict:
         "channel": request.args.get("channel", "").strip(),
         "due": request.args.get("due", "").strip(),
     }
-    movements = store.get("credit_movements", [])
-    all_orders = [
-        enrich_order(order, movements)
-        for order in sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True)
-    ]
+    movements = visible_records_for_current_company(store, "credit_movements")
+    all_orders = enrich_orders(
+        sorted(visible_orders_for_current_user(store), key=lambda item: item.get("createdAt", ""), reverse=True),
+        movements,
+    )
     orders_list = all_orders
     if filters["q"]:
         orders_list = [
@@ -10749,7 +13048,7 @@ def orders_page_context(store: dict, error: str = "") -> dict:
 
     sellers = [
         seller
-        for seller in store.get("admin_users", [])
+        for seller in visible_records_for_current_company(store, "admin_users")
         if seller.get("role") == "sales" and seller.get("status") != "deleted"
     ]
     metrics = {
@@ -10768,11 +13067,22 @@ def orders_page_context(store: dict, error: str = "") -> dict:
             2,
         ),
     }
+    page_orders, pagination = api_list_pagination(orders_list, default_limit=24)
+    total_pages = max(1, math.ceil((pagination.get("total") or 0) / max(1, pagination.get("limit") or 1)))
+    pagination.update({
+        "pages": total_pages,
+        "start": (pagination.get("offset") or 0) + 1 if pagination.get("total") else 0,
+        "end": (pagination.get("offset") or 0) + len(page_orders),
+        "previousPage": (pagination.get("page") or 1) - 1 if (pagination.get("page") or 1) > 1 else None,
+        "nextPage": (pagination.get("page") or 1) + 1 if pagination.get("hasMore") else None,
+    })
     return {
-        "orders": orders_list,
+        "orders": page_orders,
         "all_orders": all_orders,
         "metrics": metrics,
         "filters": filters,
+        "pagination": pagination,
+        "total_orders": len(orders_list),
         "status_options": ORDER_STATUS_OPTIONS,
         "payment_methods": PAYMENT_METHOD_OPTIONS,
         "sale_type_options": SALE_TYPE_OPTIONS,
@@ -10827,7 +13137,7 @@ def enrich_commission_order(order: dict, client_lookup: dict[str, dict]) -> dict
 
 
 def commissions_page_context(store: dict, error: str = "") -> dict:
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
     filters = {
         "q": request.args.get("q", "").strip(),
         "status": request.args.get("status", "").strip(),
@@ -10836,8 +13146,8 @@ def commissions_page_context(store: dict, error: str = "") -> dict:
         "release": request.args.get("release", "").strip(),
     }
     client_lookup = {
-        client.get("id", ""): enrich_client(client, store.get("orders", []), movements)
-        for client in store.get("clients", [])
+        client.get("id", ""): enrich_client(client, visible_orders_for_current_user(store), movements)
+        for client in visible_clients_for_current_user(store)
     }
     all_orders = [
         enrich_commission_order(enrich_order(order, movements), client_lookup)
@@ -10900,7 +13210,7 @@ def commissions_page_context(store: dict, error: str = "") -> dict:
         "filters": filters,
         "status_options": COMMISSION_STATUS_OPTIONS,
         "rule_options": COMMISSION_RULE_OPTIONS,
-        "seller_options": sorted(store.get("sellers", []), key=lambda item: item.get("name", "")),
+        "seller_options": sales_users(store),
         "commission_charts": {
             "status": insights_from_pairs([(commission_status_label(key), value) for key, value in status_totals.items()], 8),
             "seller": insights_from_pairs(list(seller_totals.items()), 8),
@@ -10929,8 +13239,8 @@ def reports_filters_from_request() -> dict[str, str]:
 
 
 def report_orders(store: dict, filters: dict[str, str]) -> list[dict]:
-    movements = store.get("credit_movements", [])
-    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
+    movements = visible_records_for_current_company(store, "credit_movements")
+    products_by_id, products_by_sku = product_lookup_maps(visible_records_for_current_company(store, "products"))
     dashboard_filters = {
         "date_from": filters.get("date_from", ""),
         "date_to": filters.get("date_to", ""),
@@ -11028,7 +13338,8 @@ def report_columns_for(report_type: str) -> list[tuple[str, str]]:
 
 def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) -> list[dict]:
     report_type = filters["type"]
-    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
+    scoped_products = visible_records_for_current_company(store, "products")
+    products_by_id, products_by_sku = product_lookup_maps(scoped_products)
     if report_type == "commercial":
         rows = []
         for order in sorted(orders, key=lambda item: item.get("createdAt", ""), reverse=True):
@@ -11066,7 +13377,7 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
             if safe_float(order.get("balanceUsd"), 0) > 0
         ]
     if report_type == "inventory":
-        products = [enrich_product(product) for product in store.get("products", [])]
+        products = [enrich_product(product) for product in scoped_products]
         if filters.get("category"):
             products = [product for product in products if product.get("categoryId") == filters["category"]]
         if filters.get("product"):
@@ -11086,7 +13397,11 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
             }
             for product in sorted(products, key=lambda item: (item.get("categoryName", ""), item.get("title", "")))
         ]
-    sellers = [enrich_seller(store, seller) for seller in store.get("sellers", []) if seller.get("status") != "deleted"]
+    sellers = [
+        enrich_seller(store, seller)
+        for seller in visible_records_for_current_company(store, "admin_users")
+        if seller.get("role") == "sales" and seller.get("status") != "deleted"
+    ]
     if filters.get("seller"):
         sellers = [seller for seller in sellers if seller.get("id") == filters["seller"]]
     return [
@@ -11109,11 +13424,19 @@ def build_report_rows(store: dict, filters: dict[str, str], orders: list[dict]) 
 def reports_page_context(store: dict) -> dict:
     filters = reports_filters_from_request()
     orders = report_orders(store, filters)
-    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
+    scoped_products = visible_records_for_current_company(store, "products")
+    scoped_clients = visible_clients_for_current_user(store)
+    scoped_movements = visible_records_for_current_company(store, "credit_movements")
+    scoped_sellers = [
+        seller
+        for seller in visible_records_for_current_company(store, "admin_users")
+        if seller.get("role") == "sales" and seller.get("status") != "deleted"
+    ]
+    products_by_id, products_by_sku = product_lookup_maps(scoped_products)
     rows = build_report_rows(store, filters, orders)
     payments = [
         movement
-        for movement in store.get("credit_movements", [])
+        for movement in scoped_movements
         if movement.get("movementType") == "payment"
     ]
     seller_totals: dict[str, float] = {}
@@ -11134,7 +13457,7 @@ def reports_page_context(store: dict) -> dict:
         seller_commissions[seller] = seller_commissions.get(seller, 0) + safe_float(order.get("commissionUsd"), 0)
         for line in reports_product_lines(order, products_by_id, products_by_sku):
             category_totals[line["category"]] = category_totals.get(line["category"], 0) + safe_float(line.get("lineTotalUsd"), 0)
-    for product in store.get("products", []):
+    for product in scoped_products:
         category = product.get("categoryName") or "Sin categoria"
         available = max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0))
         stock_by_category[category] = stock_by_category.get(category, 0) + available
@@ -11145,7 +13468,7 @@ def reports_page_context(store: dict) -> dict:
         "overdue": round(sum(safe_float(order.get("balanceUsd"), 0) for order in orders if order.get("dueStatus") == "overdue"), 2),
         "payments": round(sum(safe_float(payment.get("amountUsd"), 0) for payment in payments), 2),
         "commission": round(sum(safe_float(order.get("commissionUsd"), 0) for order in orders), 2),
-        "stock_units": sum(max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)) for product in store.get("products", [])),
+        "stock_units": sum(max(0, safe_int(product.get("stock"), 0) - safe_int(product.get("reserved"), 0)) for product in scoped_products),
     }
     return {
         "filters": filters,
@@ -11156,10 +13479,10 @@ def reports_page_context(store: dict) -> dict:
         "metrics": metrics,
         "now": utc_now(),
         "orders": orders,
-        "seller_options": sorted(store.get("sellers", []), key=lambda item: item.get("name", "")),
-        "client_options": sorted(store.get("clients", []), key=lambda item: item.get("businessName", "")),
+        "seller_options": sorted(scoped_sellers, key=lambda item: item.get("name", "")),
+        "client_options": sorted(scoped_clients, key=lambda item: item.get("businessName", "")),
         "category_options": product_category_options(store),
-        "product_options": sorted(store.get("products", []), key=lambda item: item.get("title", "")),
+        "product_options": sorted(scoped_products, key=lambda item: item.get("title", "")),
         "order_status_options": ORDER_STATUS_OPTIONS,
         "charts": {
             "sales_by_day": insights_from_pairs(list(sales_by_day.items()), 8),
@@ -11176,11 +13499,14 @@ def reports_page_context(store: dict) -> dict:
 def report_response_csv(context: dict) -> Response:
     output = io.StringIO()
     columns = context["columns"]
-    writer = csv.DictWriter(output, fieldnames=[key for key, _label in columns], lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=[key for key, _label in columns], lineterminator="\n")
     writer.writeheader()
     for row in context["rows"]:
         writer.writerow({key: row.get(key, "") for key, _label in columns})
-    filename = f"reporte_{context['filters']['type']}_fventas.csv"
+    filename = safe_download_filename(
+        f"reporte_{context['filters']['type']}_fventas.csv",
+        "reporte_fventas.csv",
+    )
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
@@ -11206,7 +13532,7 @@ def report_response_xlsx(context: dict):
         cell.fill = header_fill
         cell.font = header_font
     for row in context["rows"]:
-        sheet.append([row.get(key, "") for key, _label in columns])
+        sheet.append(safe_export_values([row.get(key, "") for key, _label in columns]))
     for index, (_key, label) in enumerate(columns, start=1):
         sheet.column_dimensions[sheet.cell(row=4, column=index).column_letter].width = min(max(len(label) + 8, 16), 34)
     buffer = io.BytesIO()
@@ -11215,7 +13541,10 @@ def report_response_xlsx(context: dict):
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=f"reporte_{context['filters']['type']}_fventas.xlsx",
+        download_name=safe_download_filename(
+            f"reporte_{context['filters']['type']}_fventas.xlsx",
+            "reporte_fventas.xlsx",
+        ),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -11251,7 +13580,7 @@ def service_technician_payload(existing: dict | None = None) -> dict:
 
 def service_technicians_page_context(store: dict, error: str = "") -> dict:
     technicians = sorted(
-        [item for item in store.get("service_technicians", []) if item.get("status") != "deleted"],
+        [item for item in visible_records_for_current_company(store, "service_technicians") if item.get("status") != "deleted"],
         key=lambda item: (item.get("state", ""), item.get("city", ""), item.get("name", "")),
     )
     metrics = {
@@ -11268,13 +13597,18 @@ def service_technicians_page_context(store: dict, error: str = "") -> dict:
     }
 
 
-def active_announcements(placement: str | None = None, store: dict | None = None) -> list[dict]:
+def active_announcements(
+    placement: str | None = None,
+    store: dict | None = None,
+    company_id: str | None = None,
+) -> list[dict]:
     store = store or load_store()
     announcements = [
         announcement
-        for announcement in store["announcements"]
+        for announcement in store.get("announcements", [])
         if announcement.get("status") == "active"
         and (placement is None or announcement.get("placement") == placement)
+        and (company_id is None or mobile_record_matches_company(announcement, company_id))
     ]
     return sorted(announcements, key=lambda item: int(item.get("priority") or 0), reverse=True)
 
@@ -11282,12 +13616,15 @@ def active_announcements(placement: str | None = None, store: dict | None = None
 @app.get("/dashboard")
 def dashboard():
     store = load_store()
-    orders = store["orders"]
-    products = [enrich_inventory_product(product, orders) for product in store["products"]]
-    products_by_id, products_by_sku = product_lookup_maps(store.get("products", []))
-    movements = store.get("credit_movements", [])
-    enriched_orders = [enrich_order(order, movements) for order in orders]
-    clients_list = [enrich_client(client, orders, movements) for client in store.get("clients", [])]
+    orders = visible_orders_for_current_user(store)
+    products_source = visible_records_for_current_company(store, "products")
+    stock_movements = visible_records_for_current_company(store, "stock_movements")
+    products = enrich_inventory_products(products_source, orders, stock_movements)
+    products_by_id, products_by_sku = product_lookup_maps(products_source)
+    movements = visible_records_for_current_company(store, "credit_movements")
+    enriched_orders = enrich_orders(orders, movements)
+    clients_list = enrich_clients(visible_clients_for_current_user(store), orders, movements)
+    announcements = visible_records_for_current_company(store, "announcements")
     filters = dashboard_filters_from_request()
     filtered_orders = [
         order
@@ -11305,14 +13642,14 @@ def dashboard():
             "credit_requested": sum(1 for client in clients_list if client.get("creditRequestStatus") == "pending"),
             "low_stock": metrics["stock_critical"],
             "orders": len(filtered_orders),
-            "announcements": len(store["announcements"]),
+            "announcements": len(announcements),
         }
     )
     filter_options = {
         "sellers": sellers,
         "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
-        "categories": sorted(store.get("categories", []), key=lambda item: item.get("name", "")),
-        "products": sorted(store.get("products", []), key=lambda item: item.get("title", "")),
+        "categories": sorted(visible_records_for_current_company(store, "categories"), key=lambda item: item.get("name", "")),
+        "products": sorted(products_source, key=lambda item: item.get("title", "")),
         "order_statuses": ORDER_STATUS_OPTIONS + [("rejected", "Rechazada")],
         "credit_statuses": [
             ("approved", "Aprobado"),
@@ -11405,7 +13742,7 @@ def import_issues_export(module: str, draft_id: str):
     result = draft.get("result") or {}
     output = io.StringIO()
     fieldnames = ["tipo", "fila", "detalle"]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for key, label in (
         ("errorRows", "error"),
@@ -11423,7 +13760,12 @@ def import_issues_export(module: str, draft_id: str):
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename=incidencias_{module}_{draft_id}.csv"},
+        headers={
+            "Content-Disposition": (
+                "attachment; filename="
+                f"{safe_download_filename(f'incidencias_{module}_{draft_id}.csv', 'incidencias_importacion.csv')}"
+            )
+        },
     )
 
 
@@ -11460,6 +13802,9 @@ def platform_companies_page_context(
             and user.get("role") in WEB_ADMIN_ROLES
             and user.get("status") != "deleted"
         ]
+        setup = company_setup_checklist(company, subscription, store)
+        access_preference = company.get("desktopAccessPreference") or company.get("accessPreference")
+        mobile_requested = bool(company.get("mobileAppAccessRequested"))
         rows.append(
             {
                 "company": company,
@@ -11470,6 +13815,10 @@ def platform_companies_page_context(
                 "subscriptionCurrency": subscription_currency,
                 "subscriptionPrice": subscription_price,
                 "subscriptionDisplay": money_currency(subscription_price, subscription_currency),
+                "accessPreference": access_preference,
+                "accessPreferenceLabel": access_preference_label(access_preference),
+                "mobileRequested": mobile_requested,
+                "setup": setup,
             }
         )
 
@@ -11489,10 +13838,12 @@ def platform_companies_page_context(
     for row in active_rows:
         currency = row["subscriptionCurrency"]
         mrr_by_currency[currency] = mrr_by_currency.get(currency, 0.0) + row["subscriptionPrice"]
-    mrr_summary = " / ".join(
-        money_currency(amount, currency)
+    mrr_summary = [
+        {"currency": currency, "amount": amount, "display": money_currency(amount, currency)}
         for currency, amount in sorted(mrr_by_currency.items())
-    ) or money_currency(0, SAAS_PLAN_CURRENCY)
+    ]
+    if not mrr_summary:
+        mrr_summary = [{"currency": SAAS_PLAN_CURRENCY, "amount": 0, "display": money_currency(0, SAAS_PLAN_CURRENCY)}]
     metrics = {
         "companies": len(rows),
         "active": len(active_rows),
@@ -11531,6 +13882,23 @@ def platform_companies():
         support_phone = sanitize_text(request.form.get("supportPhone", ""), max_length=80, allow_newlines=False)
         status = request.form.get("subscriptionStatus", "active")
         next_payment_at = sanitize_text(request.form.get("nextPaymentAt", ""), max_length=32, allow_newlines=False)
+        access_preference = sanitize_text(
+            request.form.get("desktopAccessPreference", ""),
+            max_length=80,
+            allow_newlines=False,
+        )
+        if access_preference not in {
+            "desktop_download_started",
+            "desktop_download_cancelled",
+            "mobile_first",
+            "mobile_only",
+        }:
+            access_preference = ""
+        mobile_app_access_requested = request.form.get("mobileAppAccessRequested") == "on" or access_preference in {
+            "desktop_download_cancelled",
+            "mobile_first",
+            "mobile_only",
+        }
         password = request.form.get("password", "").strip() or temporary_admin_password()
         generated_password = not bool(request.form.get("password", "").strip())
         error = ""
@@ -11571,6 +13939,13 @@ def platform_companies():
             "taxLabel": profile["taxLabel"],
             "planCurrency": pricing["currency"],
             "planPrice": pricing["price"],
+            "purchaseConditions": {
+                "title": "Condiciones de compra",
+                "defaultSaleType": "cash",
+                "allowedPaymentTermsDays": list(PAYMENT_TERM_OPTIONS),
+                "scopeLabel": "Solo datos de tu empresa",
+                "note": "Pedidos sujetos a validacion de stock, credito y despacho.",
+            },
             "status": company_status,
             "planId": SAAS_PLAN_ID,
             "planName": SAAS_PLAN_NAME,
@@ -11578,6 +13953,8 @@ def platform_companies():
             "ownerName": owner_name,
             "ownerEmail": owner_email,
             "supportPhone": support_phone,
+            "desktopAccessPreference": access_preference,
+            "mobileAppAccessRequested": mobile_app_access_requested,
             "createdAt": now,
             "updatedAt": now,
         }
@@ -11616,7 +13993,7 @@ def platform_companies():
             "sellerTerritory": "",
             "sellerSupervisor": "",
             "phone": support_phone,
-            "mobileAccessEnabled": False,
+            "mobileAccessEnabled": mobile_app_access_requested,
             "internalNotes": "Administrador inicial creado desde Empresas SaaS.",
             "commissionRatePercent": 0,
             "salesGoalUsd": 0,
@@ -11662,6 +14039,7 @@ def company_subscription_update(company_id: str):
         return redirect(url_for("platform_companies"))
 
     next_payment_at = sanitize_text(request.form.get("nextPaymentAt", ""), max_length=32, allow_newlines=False)
+    enable_mobile_access = request.form.get("enableMobileAccess") == "on"
     profile = market_profile(company.get("country") or "CL")
     pricing = plan_pricing_for_country(profile["code"])
     now = utc_now()
@@ -11691,6 +14069,8 @@ def company_subscription_update(company_id: str):
     company["planCurrency"] = pricing["currency"]
     company["planPrice"] = pricing["price"]
     company["planPriceClp"] = pricing["priceClp"]
+    if enable_mobile_access:
+        company["mobileAppAccessRequested"] = True
     company["updatedAt"] = now
     subscription["status"] = status
     subscription["country"] = profile["code"]
@@ -11701,6 +14081,11 @@ def company_subscription_update(company_id: str):
     subscription["updatedAt"] = now
     if status == "active" and not subscription.get("lastPaymentAt"):
         subscription["lastPaymentAt"] = now
+    if enable_mobile_access:
+        for user in store.get("admin_users", []):
+            if user.get("companyId") == company_id and user.get("role") in WEB_ADMIN_ROLES and user.get("status") == "active":
+                user["mobileAccessEnabled"] = True
+                user["updatedAt"] = now
 
     record_change_event(
         store,
@@ -11714,6 +14099,474 @@ def company_subscription_update(company_id: str):
     save_store(store)
     push_admin_toast("Suscripcion actualizada.", "success", "Empresa SaaS")
     return redirect(url_for("platform_companies"))
+
+
+def account_deletion_subject_for_company(
+    store: dict,
+    subject_type: str,
+    subject_id: str,
+    company_id: str = "",
+) -> dict | None:
+    collection = "clients" if subject_type == "client" else "admin_users" if subject_type == "admin_user" else ""
+    if not collection:
+        return None
+    matches = [
+        subject
+        for subject in store.get(collection, [])
+        if subject.get("id") == subject_id
+    ]
+    if company_id:
+        matches = [
+            subject
+            for subject in matches
+            if record_company_id(subject, store) == company_id
+        ]
+    return matches[0] if matches else None
+
+
+def account_deletion_open_orders_for_client(store: dict, client_id: str, company_id: str = "") -> int:
+    return sum(
+        1
+        for order in store.get("orders", [])
+        if order.get("customerId") == client_id
+        and (not company_id or record_company_id(order, store) == company_id)
+        and order.get("status") not in {"cancelled", "rejected", "paid"}
+    )
+
+
+def account_deletion_subject_rows(store: dict) -> list[dict]:
+    companies_by_id = {company.get("id"): company for company in store.get("companies", [])}
+    rows: list[dict] = []
+    for subject_type, collection in (("client", "clients"), ("admin_user", "admin_users")):
+        for subject in store.get(collection, []):
+            status = mobile_account_deletion_status(subject)
+            if not status:
+                continue
+            company_id = record_company_id(subject, store)
+            company = companies_by_id.get(company_id, {})
+            rows.append(
+                {
+                    "id": subject.get("deletionRequestId") or subject.get("id", ""),
+                    "subjectType": subject_type,
+                    "subjectId": subject.get("id", ""),
+                    "subjectLabel": subject.get("businessName") or subject.get("name") or subject.get("email", ""),
+                    "email": subject.get("email", ""),
+                    "companyId": company_id,
+                    "companyName": company.get("name", "Empresa sin nombre"),
+                    "role": "Cliente B2B" if subject_type == "client" else ROLE_LABELS.get(subject.get("role", ""), subject.get("role", "")),
+                    "status": status,
+                    "statusLabel": account_deletion_status_label(status),
+                    "badgeClass": account_deletion_status_badge(status),
+                    "channel": subject.get("deletionRequestChannel", ""),
+                    "reason": subject.get("deletionRequestReason", ""),
+                    "requestedAt": subject.get("deletionRequestedAt", ""),
+                    "updatedAt": subject.get("updatedAt", ""),
+                    "completedAt": subject.get("deletionCompletedAt", ""),
+                    "resolutionNote": subject.get("deletionResolutionNote", ""),
+                    "requiresVerification": False,
+                    "accessBlocked": mobile_account_access_blocked(subject),
+                    "openOrders": (
+                        account_deletion_open_orders_for_client(store, subject.get("id", ""), company_id)
+                        if subject_type == "client"
+                        else 0
+                    ),
+                }
+            )
+    for request_record in store.get("account_deletion_requests", []):
+        status = str(request_record.get("status") or "requested").strip().lower()
+        subject_type = str(request_record.get("subjectType") or "unknown").strip().lower()
+        if subject_type not in {"client", "admin_user", "unknown"}:
+            subject_type = "unknown"
+        subject_id = request_record.get("subjectId", "")
+        request_company_id = request_record.get("companyId", "")
+        subject = account_deletion_subject_for_company(store, subject_type, subject_id, request_company_id)
+        if subject and mobile_account_deletion_status(subject):
+            continue
+        company_id = request_company_id
+        if subject and not company_id:
+            company_id = record_company_id(subject, store)
+        company = companies_by_id.get(company_id, {})
+        open_orders = (
+            account_deletion_open_orders_for_client(store, subject_id, company_id)
+            if subject_type == "client"
+            else 0
+        )
+        rows.append(
+            {
+                "id": request_record.get("id", ""),
+                "subjectType": subject_type,
+                "subjectId": subject_id if subject_type != "unknown" else request_record.get("id", ""),
+                "subjectLabel": request_record.get("subjectLabel") or "Correo no encontrado",
+                "email": request_record.get("email", ""),
+                "companyId": company_id,
+                "companyName": request_record.get("companyName") or company.get("name", "") or "Sin empresa asociada",
+                "role": request_record.get("role") or "Solicitud publica",
+                "status": status,
+                "statusLabel": account_deletion_status_label(status),
+                "badgeClass": account_deletion_status_badge(status),
+                "channel": request_record.get("channel", ""),
+                "reason": request_record.get("reason", ""),
+                "requestedAt": request_record.get("createdAt", ""),
+                "updatedAt": request_record.get("updatedAt", ""),
+                "completedAt": request_record.get("closedAt", ""),
+                "resolutionNote": request_record.get("resolutionNote", ""),
+                "requiresVerification": bool(request_record.get("requiresVerification", subject_type != "unknown")),
+                "accessBlocked": bool(request_record.get("accessBlocked", False)),
+                "openOrders": open_orders,
+            }
+        )
+    return sorted(rows, key=lambda row: row.get("requestedAt") or row.get("updatedAt") or "", reverse=True)
+
+
+def platform_privacy_context(store: dict) -> dict:
+    rows = account_deletion_subject_rows(store)
+    selected_status = request.args.get("status", "").strip().lower()
+    selected_type = request.args.get("type", "").strip().lower()
+    selected_company = request.args.get("company", "").strip()
+    query = normalize_search_text(request.args.get("q", ""))
+    filtered_rows = []
+    for row in rows:
+        if selected_status and row["status"] != selected_status:
+            continue
+        if selected_type and row["subjectType"] != selected_type:
+            continue
+        if selected_company and row["companyId"] != selected_company:
+            continue
+        searchable = normalize_search_text(" ".join([row["subjectLabel"], row["email"], row["companyName"], row["role"]]))
+        if query and query not in searchable:
+            continue
+        filtered_rows.append(row)
+
+    pending_statuses = {"requested", "processing", "approved"}
+    metrics = {
+        "total": len(rows),
+        "pending": sum(1 for row in rows if row["status"] in pending_statuses),
+        "completed": sum(1 for row in rows if row["status"] in {"deleted", "closed_no_account"}),
+        "rejected": sum(1 for row in rows if row["status"] == "rejected"),
+    }
+    return {
+        "heading": "Privacidad plataforma",
+        "description": "Gestiona solicitudes de eliminacion de cuenta, bloqueo movil y trazabilidad normativa por empresa.",
+        "rows": filtered_rows,
+        "metrics": metrics,
+        "filters": {
+            "q": request.args.get("q", ""),
+            "status": selected_status,
+            "type": selected_type,
+            "company": selected_company,
+        },
+        "status_options": [
+            ("", "Todos"),
+            ("requested", "Solicitadas"),
+            ("processing", "En revision"),
+            ("approved", "Aprobadas"),
+            ("deleted", "Eliminadas"),
+            ("rejected", "Rechazadas"),
+            ("closed_no_account", "Sin cuenta"),
+        ],
+        "type_options": [
+            ("", "Todos"),
+            ("client", "Clientes"),
+            ("admin_user", "Vendedores/admin"),
+            ("unknown", "No encontradas"),
+        ],
+        "companies": sorted(store.get("companies", []), key=lambda company: company.get("name", "")),
+    }
+
+
+@app.get("/platform/privacy")
+@require_roles("platform_admin")
+def platform_privacy():
+    store = load_store()
+    return render_template("platform_privacy.html", **platform_privacy_context(store))
+
+
+@app.get("/platform/privacy/export")
+@require_roles("platform_admin")
+def platform_privacy_export():
+    store = load_store()
+    output = io.StringIO()
+    fieldnames = [
+        "solicitud",
+        "tipo",
+        "cuenta",
+        "email",
+        "empresa",
+        "estado",
+        "canal",
+        "solicitada",
+        "actualizada",
+        "cerrada",
+        "ordenes_abiertas",
+        "motivo",
+        "resolucion",
+    ]
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for row in platform_privacy_context(store)["rows"]:
+        writer.writerow(
+            {
+                "solicitud": row["id"],
+                "tipo": row["role"],
+                "cuenta": row["subjectLabel"],
+                "email": row["email"],
+                "empresa": row["companyName"],
+                "estado": row["statusLabel"],
+                "canal": row["channel"],
+                "solicitada": row["requestedAt"],
+                "actualizada": row["updatedAt"],
+                "cerrada": row["completedAt"],
+                "ordenes_abiertas": row["openOrders"],
+                "motivo": row["reason"],
+                "resolucion": row["resolutionNote"],
+            }
+        )
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=privacidad_solicitudes_eliminacion.csv"},
+    )
+
+
+def pending_account_deletion_request_for_subject(
+    store: dict,
+    subject_type: str,
+    subject_id: str,
+    company_id: str = "",
+) -> dict | None:
+    return next(
+        (
+            item
+            for item in store.get("account_deletion_requests", [])
+            if item.get("subjectType") == subject_type
+            and item.get("subjectId") == subject_id
+            and (not company_id or item.get("companyId") == company_id)
+            and item.get("status") in {"requested", "processing", "approved"}
+        ),
+        None,
+    )
+
+
+@app.post("/platform/privacy/account-deletion/<subject_type>/<subject_id>/<action>")
+@require_roles("platform_admin")
+def platform_privacy_deletion_action(subject_type: str, subject_id: str, action: str):
+    store = load_store()
+    note = sanitize_text(request.form.get("resolutionNote", ""), max_length=500, allow_newlines=True)
+    request_company_id = sanitize_text(request.form.get("companyId", ""), max_length=120, allow_newlines=False)
+    now = utc_now()
+    actor = {
+        "id": session.get("admin_user_id", ""),
+        "name": session.get("admin_name", "FVENTAS Admin"),
+        "role": current_admin_role(),
+    }
+
+    if subject_type == "unknown":
+        request_record = find_by_id(store.get("account_deletion_requests", []), subject_id)
+        if not request_record:
+            push_admin_toast("No se encontro la solicitud.", "warning", "Privacidad")
+            return redirect(url_for("platform_privacy"))
+        if request_company_id and request_record.get("companyId", "") != request_company_id:
+            push_admin_toast("La solicitud no pertenece a la empresa indicada.", "danger", "Privacidad")
+            return redirect(url_for("platform_privacy"))
+        before = copy.deepcopy(request_record)
+        if action == "processing":
+            request_record["status"] = "processing"
+        elif action == "approve":
+            request_record["status"] = "approved"
+        elif action == "reject":
+            request_record["status"] = "rejected"
+            request_record["rejectedAt"] = now
+        elif action == "complete":
+            request_record["status"] = "closed_no_account"
+            request_record["closedAt"] = now
+        else:
+            push_admin_toast("Accion no valida.", "danger", "Privacidad")
+            return redirect(url_for("platform_privacy"))
+        request_record["resolutionNote"] = note
+        request_record["updatedAt"] = now
+        record_change_event(
+            store,
+            f"account_deletion_{action}",
+            "account_deletion_request",
+            subject_id,
+            "Solicitud de eliminacion sin cuenta asociada actualizada por plataforma.",
+            before,
+            request_record,
+            actor=actor,
+            criticality="medium",
+        )
+        save_store(store)
+        push_admin_toast("Solicitud actualizada.", "success", "Privacidad")
+        return redirect(url_for("platform_privacy"))
+
+    subject = account_deletion_subject_for_company(store, subject_type, subject_id, request_company_id)
+    if not subject:
+        push_admin_toast("No se encontro la cuenta solicitada.", "warning", "Privacidad")
+        return redirect(url_for("platform_privacy"))
+
+    subject_company_id = record_company_id(subject, store)
+    linked_request = pending_account_deletion_request_for_subject(
+        store,
+        subject_type,
+        subject_id,
+        request_company_id or subject_company_id,
+    )
+    status = mobile_account_deletion_status(subject)
+    if linked_request and not status:
+        if action == "reject":
+            before_request = copy.deepcopy(linked_request)
+            linked_request["status"] = "rejected"
+            linked_request["rejectedAt"] = now
+            linked_request["rejectedById"] = actor["id"]
+            linked_request["rejectedByName"] = actor["name"]
+            linked_request["resolutionNote"] = note
+            linked_request["updatedAt"] = now
+            record_change_event(
+                store,
+                "account_deletion_reject",
+                "account_deletion_request",
+                linked_request["id"],
+                "Solicitud publica de eliminacion rechazada sin bloquear la cuenta asociada.",
+                before_request,
+                linked_request,
+                actor=actor,
+                criticality="medium",
+            )
+            save_store(store)
+            push_admin_toast("Solicitud rechazada sin cambios en la cuenta.", "success", "Privacidad")
+            return redirect(url_for("platform_privacy"))
+        if action == "complete":
+            push_admin_toast("Primero valida la solicitud para bloquear acceso antes del cierre.", "warning", "Privacidad")
+            return redirect(url_for("platform_privacy"))
+        if action in {"processing", "approve"}:
+            request_id, _ = request_mobile_account_deletion(
+                store,
+                subject_type,
+                subject,
+                channel=linked_request.get("channel") or "web",
+                reason=linked_request.get("reason", ""),
+                actor=actor,
+            )
+            linked_request["linkedRequestId"] = request_id
+            linked_request["accessBlocked"] = True
+            linked_request["requiresVerification"] = False
+            linked_request["verifiedAt"] = now
+            linked_request["verifiedById"] = actor["id"]
+            linked_request["verifiedByName"] = actor["name"]
+            linked_request["updatedAt"] = now
+            status = mobile_account_deletion_status(subject)
+    if status not in {"requested", "processing", "approved"} and action not in {"processing", "approve"}:
+        push_admin_toast("La cuenta no tiene una solicitud pendiente.", "warning", "Privacidad")
+        return redirect(url_for("platform_privacy"))
+
+    before = copy.deepcopy(subject)
+    if action == "processing":
+        subject["deletionStatus"] = "processing"
+        subject["deletionProcessingAt"] = now
+        subject["mobileAccess"] = "deletion_requested"
+        subject["mobileAccessEnabled"] = False
+        subject["mobileAccessBlocked"] = True
+        if subject_type == "client":
+            sync_client_mobile_access_state(subject, before)
+        elif before.get("mobileAccessEnabled", True) is not False:
+            bump_user_session_version(subject)
+        detail = "Solicitud de eliminacion marcada en revision por plataforma."
+    elif action == "approve":
+        subject["deletionStatus"] = "approved"
+        subject["deletionApprovedAt"] = now
+        subject["deletionApprovedById"] = actor["id"]
+        subject["deletionApprovedByName"] = actor["name"]
+        subject["mobileAccess"] = "deletion_requested"
+        subject["mobileAccessEnabled"] = False
+        subject["mobileAccessBlocked"] = True
+        if subject_type == "client":
+            sync_client_mobile_access_state(subject, before)
+        elif before.get("mobileAccessEnabled", True) is not False:
+            bump_user_session_version(subject)
+        detail = "Solicitud de eliminacion aprobada para cierre por plataforma."
+    elif action == "reject":
+        subject["deletionStatus"] = "rejected"
+        subject["deletionRejectedAt"] = now
+        subject["deletionRejectedById"] = actor["id"]
+        subject["deletionRejectedByName"] = actor["name"]
+        subject["deletionResolutionNote"] = note
+        subject["mobileAccess"] = ""
+        subject["mobileAccessBlocked"] = False
+        if subject_type == "admin_user":
+            subject["mobileAccessEnabled"] = subject.get("status") == "active"
+            bump_user_session_version(subject)
+        else:
+            subject["mobileAccessEnabled"] = subject.get("status") == "active"
+            subject["mobileSessionVersion"] = safe_int(subject.get("mobileSessionVersion"), 0) + 1
+        detail = "Solicitud de eliminacion rechazada y acceso movil restablecido si la cuenta sigue activa."
+    elif action == "complete":
+        if subject_type == "client":
+            before, changed_orders = complete_client_account_deletion(store, subject)
+            metadata = {
+                "requestId": before.get("deletionRequestId", ""),
+                "ordersAnonymized": len(changed_orders),
+                "policy": "account-erasure-platform-review",
+            }
+        else:
+            before, changed_clients, changed_orders = complete_admin_user_account_deletion(store, subject)
+            metadata = {
+                "requestId": before.get("deletionRequestId", ""),
+                "clientsRelabeled": len(changed_clients),
+                "ordersRelabeled": len(changed_orders),
+                "policy": "account-erasure-platform-review",
+            }
+        subject["deletionResolutionNote"] = note
+        if linked_request:
+            linked_request["status"] = "deleted"
+            linked_request["linkedRequestId"] = subject.get("deletionRequestId", linked_request.get("linkedRequestId", ""))
+            linked_request["accessBlocked"] = True
+            linked_request["requiresVerification"] = False
+            linked_request["closedAt"] = subject.get("deletionCompletedAt", now)
+            linked_request["resolutionNote"] = note
+            linked_request["updatedAt"] = now
+        record_change_event(
+            store,
+            "account_deletion_completed",
+            subject_type,
+            subject_id,
+            "Solicitud de eliminacion cerrada por plataforma: cuenta anonima y acceso movil bloqueado.",
+            before,
+            subject,
+            actor=actor,
+            criticality="high",
+            metadata=metadata,
+        )
+        save_store(store)
+        push_admin_toast("Cuenta anonimizada y cerrada.", "success", "Privacidad")
+        return redirect(url_for("platform_privacy"))
+    else:
+        push_admin_toast("Accion no valida.", "danger", "Privacidad")
+        return redirect(url_for("platform_privacy"))
+
+    subject["deletionResolutionNote"] = note
+    subject["updatedAt"] = now
+    if linked_request:
+        linked_request["status"] = subject.get("deletionStatus", linked_request.get("status", ""))
+        linked_request["linkedRequestId"] = subject.get("deletionRequestId", linked_request.get("linkedRequestId", ""))
+        linked_request["accessBlocked"] = mobile_account_access_blocked(subject)
+        linked_request["requiresVerification"] = False
+        linked_request["resolutionNote"] = note
+        linked_request["updatedAt"] = now
+    record_change_event(
+        store,
+        f"account_deletion_{action}",
+        subject_type,
+        subject_id,
+        detail,
+        before,
+        subject,
+        actor=actor,
+        criticality="high",
+        metadata={"requestId": before.get("deletionRequestId", "")},
+    )
+    save_store(store)
+    push_admin_toast("Solicitud actualizada.", "success", "Privacidad")
+    return redirect(url_for("platform_privacy"))
 
 
 @app.get("/permissions")
@@ -11762,7 +14615,7 @@ def admin_user_edit(user_id: str):
             return render_template("admin_users.html", **admin_users_page_context(store, error))
         before = copy.deepcopy(user)
         updated = admin_user_payload(user)
-        store["admin_users"] = [updated if item["id"] == user_id else item for item in store["admin_users"]]
+        replace_company_record(store, "admin_users", user, updated)
         record_change_event(
             store,
             "update",
@@ -11907,10 +14760,7 @@ def sellers():
         store["admin_users"].append(seller)
         record_create_event(store, "seller", seller["id"], f"Vendedor creado: {seller['name']}.", seller)
         if not persist_seller_action(store, [seller], audit_events_start, "crear vendedor"):
-            store["admin_users"] = [
-                item for item in store.get("admin_users", [])
-                if item.get("id") != seller.get("id")
-            ]
+            remove_company_record(store, "admin_users", seller)
             error = "No se pudo guardar el vendedor. Intenta nuevamente."
             return render_template("sellers.html", **sellers_page_context(store, error))
         return redirect(url_for("sellers"))
@@ -11936,10 +14786,7 @@ def seller_edit(seller_id: str):
         before = copy.deepcopy(seller)
         updated = admin_user_payload(seller)
         updated["role"] = "sales"
-        store["admin_users"] = [
-            updated if item["id"] == seller_id else item
-            for item in store["admin_users"]
-        ]
+        replace_company_record(store, "admin_users", seller, updated)
         changed_clients: list[dict] = []
         for client in visible_records_for_current_company(store, "clients"):
             if client.get("assignedSellerId") == seller_id:
@@ -11970,10 +14817,7 @@ def seller_edit(seller_id: str):
             changed_clients=changed_clients,
             changed_orders=changed_orders,
         ):
-            store["admin_users"] = [
-                before if item["id"] == seller_id else item
-                for item in store["admin_users"]
-            ]
+            replace_company_record(store, "admin_users", updated, before)
             error = "No se pudo actualizar el vendedor. Intenta nuevamente."
             return render_template("sellers.html", **sellers_page_context(store, error))
     return redirect(url_for("sellers"))
@@ -11995,7 +14839,7 @@ def seller_delete(seller_id: str):
         seller["updatedAt"] = utc_now()
         after = seller
     else:
-        store["admin_users"] = [item for item in store.get("admin_users", []) if item.get("id") != seller_id]
+        remove_company_record(store, "admin_users", seller)
         after = None
     audit_events_start = len(store.get("audit_events", []))
     record_change_event(
@@ -12059,7 +14903,7 @@ def clients():
             dedupe_key=f"seller-client-assigned-{client['id']}",
         )
         if not persist_client_action(store, [client], audit_events_start, "crear cliente", notifications_start):
-            store["clients"] = [item for item in store.get("clients", []) if item.get("id") != client.get("id")]
+            remove_company_record(store, "clients", client)
             store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
             store["notifications"] = store.get("notifications", [])[:notifications_start]
             error = "No se pudo guardar el cliente. Intenta nuevamente."
@@ -12090,7 +14934,7 @@ def client_edit(client_id: str):
         audit_events_start = len(store.get("audit_events", []))
         notifications_start = len(store.get("notifications", []))
         updated = client_payload(client)
-        store["clients"] = [updated if item["id"] == client_id else item for item in store["clients"]]
+        replace_company_record(store, "clients", client, updated)
         record_change_event(
             store,
             "update",
@@ -12124,7 +14968,7 @@ def client_edit(client_id: str):
                 dedupe_key=f"seller-client-assigned-{updated['id']}-{updated.get('updatedAt', '')}",
             )
         if not persist_client_action(store, [updated], audit_events_start, "editar cliente", notifications_start):
-            store["clients"] = [before if item["id"] == client_id else item for item in store["clients"]]
+            replace_company_record(store, "clients", updated, before)
             store["audit_events"] = store.get("audit_events", [])[:audit_events_start]
             store["notifications"] = store.get("notifications", [])[:notifications_start]
             error = "No se pudo actualizar el cliente. Intenta nuevamente."
@@ -12152,6 +14996,7 @@ def client_status_update(client_id: str):
     client["updatedById"] = session.get("admin_user_id", "")
     client["updatedByName"] = session.get("admin_name", "FVENTAS Admin")
     client["updatedByRole"] = current_admin_role()
+    sync_client_mobile_access_state(client, before, allow_reenable=True)
     if target_status == "blocked_debt":
         client["collectionStatus"] = "blocked"
     elif target_status == "active" and client.get("collectionStatus") == "blocked":
@@ -12284,7 +15129,7 @@ def client_delete(client_id: str):
         client["updatedByRole"] = current_admin_role()
         after = client
     else:
-        store["clients"] = [item for item in store.get("clients", []) if item.get("id") != client_id]
+        remove_company_record(store, "clients", client)
         after = None
     record_change_event(
         store,
@@ -12350,8 +15195,9 @@ def products_export():
         "oferta",
         "imagenes",
         "pdfs",
+        "notas_compatibilidad",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for product in context["products"]:
         writer.writerow(
@@ -12378,6 +15224,7 @@ def products_export():
                 "oferta": "si" if product.get("onSale") or product.get("hasDiscount") else "no",
                 "imagenes": "|".join(product.get("imageUrls") or []),
                 "pdfs": "|".join(product.get("pdfUrls") or []),
+                "notas_compatibilidad": "|".join(product.get("compatibilityNotes") or []),
             }
         )
     return Response(
@@ -12398,8 +15245,10 @@ def products_import():
 def products_starter_fventas():
     store = load_store()
     before = {
-        "products": len(store.get("products", [])),
-        "categories": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
+        "products": len(visible_records_for_current_company(store, "products")),
+        "categories": len(
+            [category for category in visible_records_for_current_company(store, "categories") if category.get("status") != "deleted"]
+        ),
     }
     try:
         result = create_fventas_starter_products(store)
@@ -12431,8 +15280,10 @@ def products_starter_fventas():
             category for category in store.get("categories", []) if category.get("id") in created_category_ids
         ]
         after = {
-            "products": len(store.get("products", [])),
-            "categories": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
+            "products": len(visible_records_for_current_company(store, "products")),
+            "categories": len(
+                [category for category in visible_records_for_current_company(store, "categories") if category.get("status") != "deleted"]
+            ),
             "created": result["created"],
             "existing": result["existing"],
             "missingCategories": result["missingCategories"],
@@ -12539,7 +15390,7 @@ def product_edit(product_id: str):
 
         before = copy.deepcopy(product)
         updated = product_payload(store, product)
-        store["products"] = [updated if item["id"] == product_id else item for item in store["products"]]
+        replace_company_record(store, "products", product, updated)
         record_change_event(
             store,
             "update",
@@ -12625,7 +15476,7 @@ def product_delete(product_id: str):
         product["updatedAt"] = utc_now()
         after = product
     else:
-        store["products"] = [item for item in store["products"] if item["id"] != product_id]
+        remove_company_record(store, "products", product)
         store["media_assets"] = [
             item
             for item in store.get("media_assets", [])
@@ -12794,7 +15645,7 @@ def stock_export():
         "responsable",
         "observacion",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for product in context["products"]:
         writer.writerow(
@@ -12859,7 +15710,11 @@ def categories():
 @require_roles(*roles_for_action("categories", "create"))
 def categories_starter_fventas():
     store = load_store()
-    before = {"total": len([category for category in store.get("categories", []) if category.get("status") != "deleted"])}
+    before = {
+        "total": len(
+            [category for category in visible_records_for_current_company(store, "categories") if category.get("status") != "deleted"]
+        )
+    }
     audit_events_start = len(store.get("audit_events", []))
     result = create_fventas_starter_categories(store)
     created_count = len(result["created"])
@@ -12869,7 +15724,9 @@ def categories_starter_fventas():
             category for category in store.get("categories", []) if category.get("id") in created_ids
         ]
         after = {
-            "total": len([category for category in store.get("categories", []) if category.get("status") != "deleted"]),
+            "total": len(
+                [category for category in visible_records_for_current_company(store, "categories") if category.get("status") != "deleted"]
+            ),
             "created": result["created"],
             "existing": result["existing"],
         }
@@ -12906,7 +15763,7 @@ def categories_export():
     }
     categories_list = [
         enrich_category(category, store)
-        for category in store.get("categories", [])
+        for category in visible_records_for_current_company(store, "categories")
         if category.get("status") != "deleted"
     ]
     if filters["q"]:
@@ -12942,7 +15799,7 @@ def categories_export():
         "estado",
         "productos",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for category in sorted(categories_list, key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", ""))):
         writer.writerow(
@@ -13090,7 +15947,7 @@ def category_delete(category_id: str):
     category["deletedAt"] = deleted_at
     category["updatedAt"] = deleted_at
     changed_categories.append(category)
-    store["categories"] = [item for item in store["categories"] if item.get("id") != category_id]
+    remove_company_record(store, "categories", category)
     record_change_event(
         store,
         "delete",
@@ -13128,9 +15985,12 @@ def media_library():
                 bulk_result=consume_bulk_result("media_library"),
                 error="Selecciona un producto valido para asociar el recurso.",
             ), 400
-        uploaded_asset = save_upload(request.files.get("assetFile"), "library")
+        asset_type = normalize_import_key(request.form.get("assetType", "image"))
+        if asset_type not in {"image", "pdf"}:
+            asset_type = "image"
+        upload_extensions = PDF_UPLOAD_EXTENSIONS if asset_type == "pdf" else IMAGE_UPLOAD_EXTENSIONS
+        uploaded_asset = save_upload(request.files.get("assetFile"), "library", allowed_extensions=upload_extensions)
         asset_url = uploaded_asset or sanitize_url(request.form.get("assetUrl", ""))
-        asset_type = request.form.get("assetType", "image")
         title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False) or "Activo FVENTAS"
         if asset_url:
             asset = {
@@ -13189,10 +16049,7 @@ def media_asset_delete(asset_id: str):
     asset = find_company_record(store, "media_assets", asset_id)
     if asset:
         before = copy.deepcopy(asset)
-        store["media_assets"] = [
-            item for item in store.get("media_assets", [])
-            if item.get("id") != asset_id or not can_access_company_record(item, store)
-        ]
+        remove_company_record(store, "media_assets", asset)
         product = find_company_record(store, "products", asset.get("productId", ""))
         if product:
             url = asset.get("url", "")
@@ -13225,7 +16082,13 @@ def documents():
         if not can_module_action("documents", "create"):
             return forbidden_response()
         title = sanitize_text(request.form.get("title", ""), max_length=180, allow_newlines=False)
-        uploaded_document = save_upload(request.files.get("documentFile"), "documents")
+        visibility = normalize_document_visibility(request.form.get("visibility", "internal"))
+        uploaded_document = save_upload(
+            request.files.get("documentFile"),
+            "documents",
+            public=visibility == "public",
+            allowed_extensions=DOCUMENT_UPLOAD_EXTENSIONS,
+        )
         document_url = uploaded_document or sanitize_url(request.form.get("documentUrl", ""))
         document_type = normalize_document_type(request.form.get("documentType", "administrative"))
         subject_type, subject_id = parse_document_subject_ref(request.form.get("subjectRef", "admin:"))
@@ -13247,7 +16110,7 @@ def documents():
                 "subjectType": subject_type,
                 "subjectId": subject_id,
                 "subjectLabel": subject_label,
-                "visibility": normalize_document_visibility(request.form.get("visibility", "internal")),
+                "visibility": visibility,
                 "expiresAt": sanitize_text(request.form.get("expiresAt", ""), max_length=32, allow_newlines=False),
                 "status": request.form.get("status", "active") if request.form.get("status", "active") in dict(DOCUMENT_STATUS_OPTIONS) else "active",
                 "notes": sanitize_text(request.form.get("notes", ""), max_length=1200),
@@ -13362,7 +16225,7 @@ def documents_export():
         "creado_por",
         "fecha",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for asset in document_assets(store):
         writer.writerow(
@@ -13453,10 +16316,7 @@ def service_technician_edit(technician_id: str):
     if technician:
         before = copy.deepcopy(technician)
         updated = service_technician_payload(technician)
-        store["service_technicians"] = [
-            updated if item["id"] == technician_id else item
-            for item in store.get("service_technicians", [])
-        ]
+        replace_company_record(store, "service_technicians", technician, updated)
         record_change_event(
             store,
             "update",
@@ -13495,7 +16355,7 @@ def service_technician_delete(technician_id: str):
 
 
 def credit_dashboard_context(store: dict) -> dict:
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
     visible_clients = visible_clients_for_current_user(store)
     visible_orders = visible_orders_for_current_user(store)
     filters = {
@@ -13506,10 +16366,7 @@ def credit_dashboard_context(store: dict) -> dict:
         "collection": request.args.get("collection", "").strip(),
         "due": request.args.get("due", "").strip(),
     }
-    clients_list = [
-        enrich_client(client, store.get("orders", []), movements)
-        for client in visible_clients
-    ]
+    clients_list = enrich_clients(visible_clients, visible_orders, movements)
     if filters["q"]:
         query = filters["q"].lower()
         clients_list = [
@@ -13553,7 +16410,7 @@ def credit_dashboard_context(store: dict) -> dict:
         payments.append(enriched_movement)
     due_orders = [
         order
-        for order in [enrich_order(order, movements) for order in visible_orders]
+        for order in enrich_orders(visible_orders, movements)
         if order.get("balanceUsd", 0) > 0
         and order.get("saleType") in {"term_credit", "credit_line"}
         and order.get("status") != "cancelled"
@@ -13590,12 +16447,24 @@ def credit_dashboard_context(store: dict) -> dict:
         "open_orders": len(due_orders),
         "average_score": round(sum(int(client.get("creditScore") or 0) for client in clients_list) / len(clients_list), 1) if clients_list else 0,
     }
+    clients_list = sorted(clients_list, key=lambda item: item.get("businessName", ""))
+    page_clients, pagination = api_list_pagination(clients_list, default_limit=24)
+    total_pages = max(1, math.ceil((pagination.get("total") or 0) / max(1, pagination.get("limit") or 1)))
+    pagination.update({
+        "pages": total_pages,
+        "start": (pagination.get("offset") or 0) + 1 if pagination.get("total") else 0,
+        "end": (pagination.get("offset") or 0) + len(page_clients),
+        "previousPage": (pagination.get("page") or 1) - 1 if (pagination.get("page") or 1) > 1 else None,
+        "nextPage": (pagination.get("page") or 1) + 1 if pagination.get("hasMore") else None,
+    })
     return {
-        "clients": sorted(clients_list, key=lambda item: item.get("businessName", "")),
+        "clients": page_clients,
         "payments": sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
         "due_orders": sorted(due_orders, key=lambda item: item.get("dueDate", "")),
         "metrics": metrics,
         "filters": filters,
+        "pagination": pagination,
+        "total_clients": len(clients_list),
         "status_graph": status_graph,
         "risk_graph": risk_graph,
         "sellers": sales_users(store),
@@ -13671,7 +16540,7 @@ def credit_export():
     store = load_store()
     context = credit_dashboard_context(store)
     output = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         output,
         fieldnames=[
             "cliente",
@@ -13732,7 +16601,7 @@ def credit_due_export():
     store = load_store()
     context = credit_dashboard_context(store)
     output = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         output,
         fieldnames=["vence", "orden", "cliente", "vendedor", "condicion", "saldo_usd", "dias", "estado"],
         lineterminator="\n",
@@ -13764,7 +16633,7 @@ def credit_history_export():
     store = load_store()
     context = credit_dashboard_context(store)
     output = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         output,
         fieldnames=["fecha", "orden", "cliente", "metodo", "referencia", "monto_usd", "monto_clp", "usuario", "nota"],
         lineterminator="\n",
@@ -13964,8 +16833,15 @@ def notifications():
 @require_roles(*roles_for_action("notifications", "edit"))
 def notification_read(notification_id: str):
     store = load_store()
-    notification = find_by_id(store.get("notifications", []), notification_id)
-    if not notification or not notification_visible_to_current_admin(store, notification):
+    notification = next(
+        (
+            item
+            for item in store.get("notifications", [])
+            if item.get("id") == notification_id and notification_visible_to_current_admin(store, item)
+        ),
+        None,
+    )
+    if not notification:
         return redirect(url_for("notifications"))
     before = copy.deepcopy(notification)
     notification["status"] = "read"
@@ -13981,7 +16857,7 @@ def notification_read(notification_id: str):
         notification,
     )
     save_store(store)
-    return redirect(request.form.get("next") or url_for("notifications"))
+    return redirect(safe_internal_url(request.form.get("next"), "notifications"))
 
 
 @app.post("/notifications/read-all")
@@ -14005,7 +16881,7 @@ def notifications_read_all():
             f"{updated} notificaciones marcadas como leidas.",
         )
         save_store(store)
-    return redirect(request.form.get("next") or url_for("notifications"))
+    return redirect(safe_internal_url(request.form.get("next"), "notifications"))
 
 
 def business_rule_badge(status: str) -> str:
@@ -14072,11 +16948,15 @@ def add_business_rule(
 
 
 def business_rules_page_context(store: dict) -> dict:
-    products = [product for product in store.get("products", []) if product.get("status") != "deleted"]
-    clients = [client for client in store.get("clients", []) if client.get("status") != "deleted"]
-    orders = store.get("orders", [])
-    movements = store.get("credit_movements", [])
-    audit_events = store.get("audit_events", [])
+    products = [product for product in visible_records_for_current_company(store, "products") if product.get("status") != "deleted"]
+    clients = [client for client in visible_records_for_current_company(store, "clients") if client.get("status") != "deleted"]
+    sellers = [
+        user for user in visible_records_for_current_company(store, "admin_users")
+        if user.get("role") == "sales" and user.get("status") != "deleted"
+    ]
+    orders = visible_orders_for_current_user(store)
+    movements = visible_records_for_current_company(store, "credit_movements")
+    audit_events = visible_records_for_current_company(store, "audit_events")
     products_by_id = {product.get("id", ""): product for product in products}
     clients_by_id = {client.get("id", ""): client for client in clients}
     rules: list[dict] = []
@@ -14186,6 +17066,29 @@ def business_rules_page_context(store: dict) -> dict:
         description="Clientes bloqueados, suspendidos o con cobranza critica no pueden generar ventas nuevas.",
         count=len(blocked_client_orders),
         examples=blocked_client_orders,
+        href=business_rule_href("clients", "clients"),
+    )
+
+    clients_mobile_access_inconsistent = [
+        f"{client.get('businessName', client.get('id', 'Cliente'))}: {client_status_label(client.get('status', ''))}"
+        for client in clients
+        if client.get("mobileAccessEnabled", True) is not False
+        and (client_status_blocks_mobile_access(client.get("status", "")) or mobile_account_access_blocked(client))
+    ]
+    sellers_mobile_access_inconsistent = [
+        f"{seller.get('name', seller.get('id', 'Vendedor'))}: {ROLE_LABELS.get(seller.get('role', ''), seller.get('role', 'sales'))}"
+        for seller in sellers
+        if seller.get("mobileAccessEnabled", True) is not False
+        and (seller.get("status") != "active" or mobile_account_access_blocked(seller))
+    ]
+    add_business_rule(
+        rules,
+        code="mobile.access.blocked_accounts",
+        title="Acceso movil respeta bloqueos",
+        module="Clientes",
+        description="Clientes o vendedores bloqueados, suspendidos o con solicitud de eliminacion no deben conservar acceso movil activo.",
+        count=len(clients_mobile_access_inconsistent) + len(sellers_mobile_access_inconsistent),
+        examples=clients_mobile_access_inconsistent + sellers_mobile_access_inconsistent,
         href=business_rule_href("clients", "clients"),
     )
 
@@ -14403,6 +17306,7 @@ def maintenance_page_context(store: dict) -> dict:
     is_production = app.config.get("ENV") == "production"
     storage_backend = str(app.config.get("STORAGE_BACKEND", "")).lower()
     data_backend = str(app.config.get("DATA_BACKEND", "")).lower()
+    runtime_snapshot = runtime_capacity_snapshot(current_company_id(store))
 
     areas: list[dict] = []
     production_ready = (
@@ -14463,7 +17367,7 @@ def maintenance_page_context(store: dict) -> dict:
         title="Logs de errores y actividad",
         module="Auditoria",
         status="ok",
-        detail=f"Auditoria: {len(store.get('audit_events', []))} eventos. Notificaciones: {len(store.get('notifications', []))}.",
+        detail=f"Auditoria: {len(visible_records_for_current_company(store, 'audit_events'))} eventos. Notificaciones: {len(visible_admin_notifications(store))}.",
         href=url_for("audit") if can_access_module("audit") else "",
         action="Ver auditoria",
     )
@@ -14516,14 +17420,31 @@ def maintenance_page_context(store: dict) -> dict:
         href=url_for("settings") if can_access_module("settings") else "",
         action="Ver configuracion",
     )
+    configured_slots = safe_int(runtime_snapshot.get("configuredRequestSlots"), 0)
+    active_requests = safe_int(runtime_snapshot.get("activeRequests"), 0)
+    peak_requests = safe_int(runtime_snapshot.get("peakActiveRequests"), 0)
+    capacity_status = "warning" if configured_slots and peak_requests >= configured_slots else "ok"
+    add_maintenance_area(
+        areas,
+        key="runtime-capacity",
+        title="Concurrencia por instancia",
+        module="Operacion",
+        status=capacity_status,
+        detail=(
+            f"{configured_slots} request(s) simultaneos configurados; "
+            f"{active_requests} activos ahora, pico observado {peak_requests}. "
+            f"App 15 min: {runtime_snapshot.get('mobileUsers15m', 0)} usuarios."
+        ),
+        action="Escalar workers/instancia" if capacity_status != "ok" else "",
+    )
 
     counts = {
-        "products": len([item for item in store.get("products", []) if item.get("status") != "deleted"]),
-        "clients": len([item for item in store.get("clients", []) if item.get("status") != "deleted"]),
-        "orders": len(store.get("orders", [])),
-        "sellers": len([item for item in store.get("admin_users", []) if item.get("role") == "sales" and item.get("status") != "deleted"]),
-        "audit": len(store.get("audit_events", [])),
-        "notifications": len(store.get("notifications", [])),
+        "products": len([item for item in visible_records_for_current_company(store, "products") if item.get("status") != "deleted"]),
+        "clients": len([item for item in visible_records_for_current_company(store, "clients") if item.get("status") != "deleted"]),
+        "orders": len(visible_orders_for_current_user(store)),
+        "sellers": len([item for item in visible_records_for_current_company(store, "admin_users") if item.get("role") == "sales" and item.get("status") != "deleted"]),
+        "audit": len(visible_records_for_current_company(store, "audit_events")),
+        "notifications": len(visible_admin_notifications(store)),
     }
     metrics = {
         "areas": len(areas),
@@ -14542,6 +17463,16 @@ def maintenance_page_context(store: dict) -> dict:
         ("Token movil", "Obligatorio" if app.config.get("REQUIRE_MOBILE_TOKEN") else "No obligatorio"),
         ("Fallback JSON", "Activo" if app.config.get("SQL_FALLBACK_TO_JSON") else "Desactivado"),
         ("Pool SQL", f"{app.config.get('DB_POOL_SIZE')} + {app.config.get('DB_MAX_OVERFLOW')} overflow"),
+        ("Workers/threads", f"{runtime_snapshot['workers']} x {runtime_snapshot['threads']}"),
+        ("Req simultaneos", runtime_snapshot["configuredRequestSlots"]),
+        ("Req activos", f"{runtime_snapshot['activeRequests']} actual / {runtime_snapshot['peakActiveRequests']} pico"),
+        ("Requests proceso", runtime_snapshot["totalRequests"]),
+        ("RPM proceso", runtime_snapshot["requestsPerMinute"]),
+        ("App activos 5m", runtime_snapshot["mobileUsers5m"]),
+        ("App activos 15m", runtime_snapshot["mobileUsers15m"]),
+        ("Clientes app 15m", runtime_snapshot["clientUsers15m"]),
+        ("Vendedores app 15m", runtime_snapshot["sellerUsers15m"]),
+        ("Admins panel 15m", runtime_snapshot["adminUsers15m"]),
         ("Upload max", f"{int(app.config.get('MAX_CONTENT_LENGTH', 0) / 1024 / 1024)} MB"),
         ("Import max", f"{app.config.get('MAX_IMPORT_ROWS')} filas"),
         ("Log level", app.config.get("LOG_LEVEL")),
@@ -14588,7 +17519,7 @@ def maintenance_export():
     store = load_store()
     context = maintenance_page_context(store)
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["area", "modulo", "estado", "detalle", "accion"])
+    writer = safe_csv_dict_writer(output, fieldnames=["area", "modulo", "estado", "detalle", "accion"])
     writer.writeheader()
     for area in context["areas"]:
         writer.writerow(
@@ -14676,7 +17607,11 @@ def audit_event_label(value: str) -> str:
 
 
 def audit_page_context(store: dict) -> dict:
-    all_events = sorted(store.get("audit_events", []), key=lambda item: item.get("createdAt", ""), reverse=True)
+    all_events = sorted(
+        visible_records_for_current_company(store, "audit_events"),
+        key=lambda item: item.get("createdAt", ""),
+        reverse=True,
+    )
     for event in all_events:
         event["severity"] = audit_event_severity(event)
         event["severityLabel"] = audit_event_label(event["severity"])
@@ -14807,6 +17742,21 @@ def settings_payload_from_form(existing: dict) -> dict:
             "planPrice": pricing["price"],
             "planPriceClp": pricing["priceClp"],
             "defaultPaymentTermsDays": payment_terms_from_text(request.form.get("defaultPaymentTermsDays", "")),
+            "purchaseConditionsTitle": sanitize_text(
+                request.form.get("purchaseConditionsTitle", ""),
+                max_length=80,
+                allow_newlines=False,
+            ) or "Condiciones de compra",
+            "purchaseDefaultSaleType": request.form.get("purchaseDefaultSaleType", "cash"),
+            "purchaseConditionsScope": sanitize_text(
+                request.form.get("purchaseConditionsScope", ""),
+                max_length=120,
+                allow_newlines=False,
+            ) or "Solo datos de tu empresa",
+            "purchaseConditionsNote": sanitize_text(
+                request.form.get("purchaseConditionsNote", ""),
+                max_length=500,
+            ),
             "creditApprovalThresholdUsd": safe_float(request.form.get("creditApprovalThresholdUsd"), 0),
             "overdueBlockDays": max(0, safe_int(request.form.get("overdueBlockDays"), 15)),
             "defaultCommissionRule": request.form.get("defaultCommissionRule", "sale_generated"),
@@ -14822,7 +17772,47 @@ def settings_payload_from_form(existing: dict) -> dict:
     payload.setdefault("createdAt", existing.get("createdAt") or now)
     if payload["defaultCommissionRule"] not in dict(COMMISSION_RULE_OPTIONS):
         payload["defaultCommissionRule"] = "sale_generated"
+    if payload["purchaseDefaultSaleType"] not in dict(SALE_TYPE_OPTIONS):
+        payload["purchaseDefaultSaleType"] = "cash"
+    payload["purchaseConditions"] = {
+        "title": payload["purchaseConditionsTitle"],
+        "defaultSaleType": payload["purchaseDefaultSaleType"],
+        "allowedPaymentTermsDays": payload["defaultPaymentTermsDays"],
+        "scopeLabel": payload["purchaseConditionsScope"],
+        "note": payload["purchaseConditionsNote"] or payload["orderTermsText"],
+    }
     return payload
+
+
+def sync_company_from_settings(store: dict, settings_data: dict) -> None:
+    company_id = current_company_id(store)
+    company = get_company(store, company_id)
+    if not company:
+        return
+    profile = market_profile(settings_data.get("marketCountry") or company.get("country") or "CL")
+    pricing = plan_pricing_for_country(profile["code"])
+    company.update(
+        {
+            "name": settings_data.get("companyName") or company.get("name", ""),
+            "legalName": settings_data.get("companyLegalName") or company.get("legalName", ""),
+            "taxId": settings_data.get("taxId", company.get("taxId", "")),
+            "country": profile["code"],
+            "marketCountry": profile["code"],
+            "currency": settings_data.get("localCurrency") or profile["localCurrency"],
+            "baseCurrency": settings_data.get("salesCurrency") or profile["salesCurrency"],
+            "exchangeRateBaseToLocal": settings_data.get("exchangeRateBaseToLocal") or profile["exchangeRateBaseToLocal"],
+            "marketProfile": profile,
+            "taxLabel": profile["taxLabel"],
+            "supportEmail": settings_data.get("supportEmail", company.get("supportEmail", "")),
+            "supportPhone": settings_data.get("supportPhone", company.get("supportPhone", "")),
+            "logoUrl": settings_data.get("logoUrl", company.get("logoUrl", "")),
+            "planCurrency": settings_data.get("planCurrency") or pricing["currency"],
+            "planPrice": settings_data.get("planPrice") or pricing["price"],
+            "planPriceClp": settings_data.get("planPriceClp") or pricing["priceClp"],
+            "purchaseConditions": dict(settings_data.get("purchaseConditions") or {}),
+            "updatedAt": settings_data.get("updatedAt") or utc_now(),
+        }
+    )
 
 
 def settings_page_context(store: dict, error: str = "", success: str = "") -> dict:
@@ -14848,6 +17838,10 @@ def settings_page_context(store: dict, error: str = "", success: str = "") -> di
             "planCurrency": settings_data.get("planCurrency") or pricing["currency"],
             "planPrice": settings_data.get("planPrice") or pricing["price"],
             "planPriceClp": settings_data.get("planPriceClp") or pricing["priceClp"],
+            "purchaseConditionsTitle": settings_data.get("purchaseConditionsTitle") or (settings_data.get("purchaseConditions") or {}).get("title") or "Condiciones de compra",
+            "purchaseDefaultSaleType": settings_data.get("purchaseDefaultSaleType") or (settings_data.get("purchaseConditions") or {}).get("defaultSaleType") or "cash",
+            "purchaseConditionsScope": settings_data.get("purchaseConditionsScope") or (settings_data.get("purchaseConditions") or {}).get("scopeLabel") or "Solo datos de tu empresa",
+            "purchaseConditionsNote": settings_data.get("purchaseConditionsNote") or (settings_data.get("purchaseConditions") or {}).get("note") or settings_data.get("orderTermsText", ""),
         }
     )
     return {
@@ -14859,6 +17853,7 @@ def settings_page_context(store: dict, error: str = "", success: str = "") -> di
         "market_profiles": MARKET_PROFILES,
         "market_profile": profile,
         "currency_options": CURRENCY_OPTIONS,
+        "sale_type_options": SALE_TYPE_OPTIONS,
         "error": error,
         "success": success,
         "can_edit_settings": can_module_action("settings", "edit"),
@@ -14891,7 +17886,7 @@ def audit_export():
         "origen",
         "ip",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for event in context["events"]:
         writer.writerow(
@@ -14934,6 +17929,7 @@ def settings():
             return forbidden_response()
         before = copy.deepcopy(store.get("business_settings") or {})
         store["business_settings"] = settings_payload_from_form(before)
+        sync_company_from_settings(store, store["business_settings"])
         record_change_event(
             store,
             "update",
@@ -14997,7 +17993,7 @@ def crm_export():
         "ultima_actividad",
         "actividades",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for record in context["records"]:
         writer.writerow(
@@ -15032,7 +18028,7 @@ def crm_export():
 @require_roles(*roles_for_action("crm", "edit"))
 def crm_update(record_id: str):
     store = load_store()
-    record = find_by_id(store.get("crm_records", []), record_id)
+    record = find_company_record(store, "crm_records", record_id)
     if not record or not can_access_crm_record(record, store):
         return redirect(url_for("crm"))
     before = copy.deepcopy(record)
@@ -15059,7 +18055,7 @@ def crm_update(record_id: str):
 @require_roles(*roles_for_action("crm", "edit"))
 def crm_activity_create(record_id: str):
     store = load_store()
-    record = find_by_id(store.get("crm_records", []), record_id)
+    record = find_company_record(store, "crm_records", record_id)
     if not record or not can_access_crm_record(record, store):
         return redirect(url_for("crm"))
     before = copy.deepcopy(record)
@@ -15097,7 +18093,7 @@ def crm_activity_create(record_id: str):
 @require_roles(*DELETE_ROLES)
 def crm_delete(record_id: str):
     store = load_store()
-    record = find_by_id(store.get("crm_records", []), record_id)
+    record = find_company_record(store, "crm_records", record_id)
     if not record or not can_access_crm_record(record, store) or not can_module_action("crm", "delete"):
         return redirect(url_for("crm"))
     before = copy.deepcopy(record)
@@ -15145,7 +18141,7 @@ def quotes_export():
         "items",
         "orden_convertida",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for quote in context["quotes"]:
         writer.writerow(
@@ -15201,7 +18197,7 @@ def quote_new():
 @require_roles(*roles_for_action("quotes", "edit"))
 def quote_edit(quote_id: str):
     store = load_store()
-    quote = find_by_id(store.get("quotes", []), quote_id)
+    quote = find_company_record(store, "quotes", quote_id)
     if not quote or not can_access_quote_record(quote, store):
         return redirect(url_for("quotes"))
     if request.method == "POST":
@@ -15232,7 +18228,7 @@ def quote_edit(quote_id: str):
 @require_roles(*roles_for_action("quotes", "edit"))
 def quote_status_update(quote_id: str):
     store = load_store()
-    quote = find_by_id(store.get("quotes", []), quote_id)
+    quote = find_company_record(store, "quotes", quote_id)
     if not quote or not can_access_quote_record(quote, store):
         return redirect(url_for("quotes"))
     before = copy.deepcopy(quote)
@@ -15271,7 +18267,7 @@ def quote_status_update(quote_id: str):
 @require_roles(*roles_for_action("quotes", "create"))
 def quote_duplicate(quote_id: str):
     store = load_store()
-    source = find_by_id(store.get("quotes", []), quote_id)
+    source = find_company_record(store, "quotes", quote_id)
     if not source or not can_access_quote_record(source, store):
         return redirect(url_for("quotes"))
     quote = copy.deepcopy(source)
@@ -15303,7 +18299,7 @@ def quote_duplicate(quote_id: str):
 @require_roles(*roles_for_action("orders", "create"))
 def quote_convert(quote_id: str):
     store = load_store()
-    quote = find_by_id(store.get("quotes", []), quote_id)
+    quote = find_company_record(store, "quotes", quote_id)
     if not quote or not can_access_quote_record(quote, store):
         return redirect(url_for("quotes"))
     if quote.get("convertedOrderId"):
@@ -15318,6 +18314,7 @@ def quote_convert(quote_id: str):
         quote_to_order_payload(quote),
         actor=order_actor(),
         default_channel="seller_assisted",
+        trusted_pricing=True,
     )
     if error:
         return render_template("quotes.html", **quotes_page_context(store, error)), 400
@@ -15355,12 +18352,15 @@ def quote_convert(quote_id: str):
 @require_roles(*roles_for_action("quotes", "export"))
 def quote_download(quote_id: str):
     store = load_store()
-    quote = find_by_id(store.get("quotes", []), quote_id)
+    quote = find_company_record(store, "quotes", quote_id)
     if not quote or not can_access_quote_record(quote, store):
         return redirect(url_for("quotes"))
     enriched = enrich_quote(quote)
     html = render_template("quote_print.html", quote=enriched)
-    filename = f"{enriched.get('quoteNumber', 'cotizacion')}.html".replace("/", "-")
+    filename = safe_download_filename(
+        f"{enriched.get('quoteNumber', 'cotizacion')}.html",
+        "cotizacion_fventas.html",
+    )
     return Response(
         html,
         mimetype="text/html; charset=utf-8",
@@ -15403,7 +18403,7 @@ def orders_export():
         "comision_usd",
         "estado_comision",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for order in context["orders"]:
         writer.writerow(
@@ -15487,7 +18487,8 @@ def order_status_update(order_id: str):
         return redirect(url_for("orders"))
 
     client = find_company_record(store, "clients", order.get("customerId", ""))
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
+    scoped_orders = visible_records_for_current_company(store, "orders")
     balance = order_balance_usd(order, movements)
     note = request.form.get("note", "").strip()
     if target_status in {"cancelled", "rejected"} and not note:
@@ -15526,7 +18527,7 @@ def order_status_update(order_id: str):
     if target_status in ORDER_CREDIT_RESERVING_STATUSES and sale_type == "credit_line":
         available = credit_available(
             client,
-            store["orders"],
+            scoped_orders,
             movements,
             exclude_order_id=order.get("id") or order.get("orderId", ""),
         ) if client else 0.0
@@ -15590,14 +18591,20 @@ def order_status_update(order_id: str):
 @require_roles("super_admin", "general_manager", "commercial_manager", "operator", "collections")
 def order_payment_create(order_id: str):
     store = load_store()
-    next_url = request.form.get("next") or url_for("orders")
+    next_url = safe_internal_url(request.form.get("next"), "orders")
     order = find_order(store["orders"], order_id)
     if not order or not can_access_order_record(order, store):
         return redirect(next_url)
 
     before = copy.deepcopy(order)
+    company_id = record_company_id(order, store)
     movements = store.setdefault("credit_movements", [])
-    balance_before = order_balance_usd(order, movements)
+    scoped_movements = [
+        movement
+        for movement in movements
+        if record_company_id(movement, store) == company_id
+    ]
+    balance_before = order_balance_usd(order, scoped_movements)
     amount_usd = min(float(request.form.get("amountUsd") or 0), balance_before)
     if amount_usd <= 0:
         return redirect(next_url)
@@ -15606,6 +18613,7 @@ def order_payment_create(order_id: str):
     amount_clp = float(request.form.get("amountClp") or request.form.get("amountVes") or round(amount_usd * exchange_rate, 2))
     movement = {
         "id": next_id("credit-payment", order.get("orderId") or order.get("id", "")),
+        "companyId": company_id,
         "movementType": "payment",
         "clientId": order.get("customerId", ""),
         "orderId": order.get("orderId") or order.get("id", ""),
@@ -15620,9 +18628,10 @@ def order_payment_create(order_id: str):
         "createdAt": utc_now(),
     }
     movements.append(movement)
+    scoped_movements.append(movement)
 
-    balance_after = order_balance_usd(order, movements)
-    paid_after = order_paid_usd(order, movements)
+    balance_after = order_balance_usd(order, scoped_movements)
+    paid_after = order_paid_usd(order, scoped_movements)
     order["paidUsd"] = paid_after
     order["balanceUsd"] = balance_after
     order["paymentStatus"] = "paid" if balance_after <= 0 else "partial"
@@ -15661,7 +18670,8 @@ def order_payment_create(order_id: str):
 
 
 def collections_page_context(store: dict) -> dict:
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
+    visible_orders = visible_orders_for_current_user(store)
     filters = {
         "q": request.args.get("q", "").strip(),
         "status": request.args.get("status", "").strip(),
@@ -15669,12 +18679,12 @@ def collections_page_context(store: dict) -> dict:
         "view": request.args.get("view", "open").strip() or "open",
     }
     client_lookup = {
-        client.get("id", ""): enrich_client(client, store.get("orders", []), movements)
+        client.get("id", ""): enrich_client(client, visible_orders, movements)
         for client in visible_clients_for_current_user(store)
     }
     orders = [
         enrich_order(order, movements)
-        for order in visible_orders_for_current_user(store)
+        for order in visible_orders
         if order.get("customerId", "") in client_lookup
         and order.get("status") not in {"cancelled", "rejected"}
         and order.get("saleType") in {"term_credit", "credit_line", "cash"}
@@ -15748,7 +18758,7 @@ def collections_export():
     store = load_store()
     context = collections_page_context(store)
     output = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         output,
         fieldnames=[
             "orden",
@@ -15804,14 +18814,14 @@ def collection_statement(client_id: str):
     client = find_company_record(store, "clients", client_id)
     if not client or not can_access_client_record(client, store):
         return redirect(url_for("collections"))
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
     orders = [
         enrich_order(order, movements)
         for order in visible_orders_for_current_user(store)
         if order.get("customerId") == client_id and order.get("status") not in {"cancelled", "rejected"}
     ]
     output = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         output,
         fieldnames=["fecha", "tipo", "documento", "debe_usd", "haber_usd", "saldo_usd", "detalle"],
         lineterminator="\n",
@@ -15847,7 +18857,12 @@ def collection_statement(client_id: str):
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=estado_cuenta_{client_id}.csv"},
+        headers={
+            "Content-Disposition": (
+                "attachment; filename="
+                f"{safe_download_filename(f'estado_cuenta_{client_id}.csv', 'estado_cuenta_fventas.csv')}"
+            )
+        },
     )
 
 
@@ -15859,6 +18874,7 @@ def collection_action(order_id: str):
     if not order or not can_access_order_record(order, store):
         return redirect(url_for("collections"))
     client = find_company_record(store, "clients", order.get("customerId", ""))
+    movements = visible_records_for_current_company(store, "credit_movements")
     before = copy.deepcopy({"order": order, "client": client})
     action = request.form.get("action", "in_management")
     note = request.form.get("collectionComment", "").strip()
@@ -15884,15 +18900,15 @@ def collection_action(order_id: str):
         client["updatedAt"] = now
     elif action == "release_client" and client:
         client["status"] = "active"
-        client["collectionStatus"] = "current" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else "without_debt"
+        client["collectionStatus"] = "current" if order_balance_usd(order, movements) > 0 else "without_debt"
         if client.get("creditLimitUsd", 0) > 0 and client.get("creditRequestStatus") == "blocked_debt":
             client["creditRequestStatus"] = "approved"
             client["creditEnabled"] = True
         client["updatedAt"] = now
-    elif action == "close" and order_balance_usd(order, store.get("credit_movements", [])) <= 0:
+    elif action == "close" and order_balance_usd(order, movements) <= 0:
         order["collectionStatus"] = "closed"
         order["currentOwner"] = "Cierre"
-    order["currentOwner"] = "Cobranza" if order_balance_usd(order, store.get("credit_movements", [])) > 0 else order.get("currentOwner", "Cierre")
+    order["currentOwner"] = "Cobranza" if order_balance_usd(order, movements) > 0 else order.get("currentOwner", "Cierre")
     order["updatedAt"] = now
     append_order_history(order, order.get("status", "partial_paid"), f"Cobranza: {collection_status_label(order.get('collectionStatus', ''))}. {note}".strip())
     record_change_event(
@@ -15909,7 +18925,7 @@ def collection_action(order_id: str):
 
 
 def dispatch_page_context(store: dict) -> dict:
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
     filters = {
         "q": request.args.get("q", "").strip(),
         "status": request.args.get("status", "").strip(),
@@ -15987,7 +19003,7 @@ def dispatch_export():
     store = load_store()
     context = dispatch_page_context(store)
     output = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         output,
         fieldnames=[
             "orden",
@@ -16043,11 +19059,16 @@ def dispatch_update(order_id: str):
     order = find_order(store.get("orders", []), order_id)
     if not order or not can_access_order_record(order, store):
         return redirect(url_for("dispatch"))
+    movements = visible_records_for_current_company(store, "credit_movements")
     before = copy.deepcopy(order)
     target_status = request.form.get("dispatchStatus", order.get("dispatchStatus", "pending"))
     if target_status not in DISPATCH_STATUS_LABELS:
         target_status = order.get("dispatchStatus", "pending")
-    uploaded_evidence = save_upload(request.files.get("deliveryEvidenceFile"), "library")
+    uploaded_evidence = save_upload(
+        request.files.get("deliveryEvidenceFile"),
+        "library",
+        allowed_extensions=DOCUMENT_UPLOAD_EXTENSIONS,
+    )
     evidence_url = uploaded_evidence or sanitize_url(request.form.get("deliveryEvidenceUrl", ""))
     now = utc_now()
     for field in (
@@ -16080,7 +19101,7 @@ def dispatch_update(order_id: str):
         order["dispatchedAt"] = order.get("dispatchedAt") or now
         order["currentOwner"] = "Despacho"
     elif target_status == "delivered":
-        delivery_block_reason = order_release_block_reason(order, store.get("credit_movements", []))
+        delivery_block_reason = order_release_block_reason(order, movements)
         if delivery_block_reason:
             target_status = "payment_hold"
             order["dispatchStatus"] = target_status
@@ -16165,7 +19186,7 @@ def commissions_export():
         "bloqueos",
         "observacion",
     ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for order in context["orders"]:
         writer.writerow(
@@ -16201,7 +19222,7 @@ def commissions_export():
 def commission_status_update(order_id: str):
     store = load_store()
     order = find_order(store.get("orders", []), order_id)
-    if not order:
+    if not order or not can_access_order_record(order, store):
         return redirect(url_for("commissions"))
     before = copy.deepcopy(order)
     status = request.form.get("commissionStatus", order.get("commissionStatus", "commission_pending"))
@@ -16209,10 +19230,10 @@ def commission_status_update(order_id: str):
         return redirect(url_for("commissions"))
     note = request.form.get("commissionObservation", "").strip()
     hold_reason = request.form.get("commissionHoldReason", "").strip()
-    movements = store.get("credit_movements", [])
+    movements = visible_records_for_current_company(store, "credit_movements")
     client_lookup = {
-        client.get("id", ""): enrich_client(client, store.get("orders", []), movements)
-        for client in store.get("clients", [])
+        client.get("id", ""): enrich_client(client, visible_orders_for_current_user(store), movements)
+        for client in visible_clients_for_current_user(store)
     }
     enriched = enrich_commission_order(enrich_order(order, movements), client_lookup)
     if status in {"commission_approved", "commission_paid"} and order.get("status") in {"cancelled", "rejected"}:
@@ -16317,10 +19338,11 @@ def announcements():
         if not can_module_action("announcements", "create"):
             return forbidden_response()
         title = sanitize_text(request.form.get("title", ""), max_length=160, allow_newlines=False)
-        uploaded_image = save_upload(request.files.get("imageFile"), "announcements")
+        uploaded_image = save_upload(request.files.get("imageFile"), "announcements", allowed_extensions=IMAGE_UPLOAD_EXTENSIONS)
         image_url = uploaded_image or sanitize_url(request.form.get("imageUrl", ""))
         announcement = {
             "id": next_id("ann", title),
+            "companyId": current_company_id(store),
             "title": title,
             "body": sanitize_text(request.form.get("body", ""), max_length=700),
             "placement": sanitize_text(request.form.get("placement", "home"), max_length=50, allow_newlines=False),
@@ -16333,14 +19355,18 @@ def announcements():
             "status": sanitize_text(request.form.get("status", "active"), max_length=50, allow_newlines=False),
             "updatedAt": utc_now(),
         }
-        store["announcements"].append(announcement)
+        store.setdefault("announcements", []).append(announcement)
         record_create_event(store, "announcement", announcement["id"], f"Anuncio creado: {title}.", announcement)
         save_store(store)
         return redirect(url_for("announcements"))
 
     return render_template(
         "announcements.html",
-        announcements=sorted(store["announcements"], key=lambda item: int(item.get("priority") or 0), reverse=True),
+        announcements=sorted(
+            visible_records_for_current_company(store, "announcements"),
+            key=lambda item: int(item.get("priority") or 0),
+            reverse=True,
+        ),
         bulk_result=consume_bulk_result("announcements"),
     )
 
@@ -16355,11 +19381,11 @@ def announcements_import():
 @require_roles(*roles_for_action("announcements", "edit"))
 def announcement_edit(announcement_id: str):
     store = load_store()
-    announcement = find_by_id(store["announcements"], announcement_id)
+    announcement = find_company_record(store, "announcements", announcement_id)
     if announcement:
         before = copy.deepcopy(announcement)
         image_url = sanitize_url(request.form.get("imageUrl", "")) or announcement.get("imageUrl", "")
-        uploaded = save_upload(request.files.get("imageFile"), "announcements")
+        uploaded = save_upload(request.files.get("imageFile"), "announcements", allowed_extensions=IMAGE_UPLOAD_EXTENSIONS)
         if uploaded:
             image_url = uploaded
         announcement.update(
@@ -16394,10 +19420,10 @@ def announcement_edit(announcement_id: str):
 @require_roles(*roles_for_action("announcements", "delete"))
 def announcement_delete(announcement_id: str):
     store = load_store()
-    announcement = find_by_id(store["announcements"], announcement_id)
-    store["announcements"] = [
-        announcement for announcement in store["announcements"] if announcement["id"] != announcement_id
-    ]
+    announcement = find_company_record(store, "announcements", announcement_id)
+    if not announcement:
+        return redirect(url_for("announcements"))
+    remove_company_record(store, "announcements", announcement)
     record_change_event(
         store,
         "delete",
@@ -16421,12 +19447,29 @@ def api_create_order():
     client, auth_error = require_mobile_client(store)
     if auth_error:
         return auth_error, 401
+    if not client:
+        return jsonify({"error": "Token movil requerido."}), 401
+    client_company_id = mobile_required_company_id(client)
+    rate_limit_response = guard_mobile_write_rate_limit(
+        store,
+        action="client_order_create",
+        actor=client,
+        actor_type="client",
+        company_id=client_company_id,
+    )
+    if rate_limit_response:
+        return rate_limit_response
     customer_id = (client or {}).get("id") or customer_payload.get("id", "")
     payload["customerId"] = customer_id
     order, error = build_commercial_order(
         store,
         payload,
-        actor={"id": customer_id, "name": customer_payload.get("name", "Cliente FVENTAS"), "role": "client"},
+        actor={
+            "id": customer_id,
+            "name": customer_payload.get("name", "Cliente FVENTAS"),
+            "role": "client",
+            "companyId": client_company_id,
+        },
         default_channel="mobile",
     )
     if error:
@@ -16465,11 +19508,22 @@ def api_orders():
     client, auth_error = require_mobile_client(store)
     if auth_error:
         return auth_error, 401
-    customer_id = (client or {}).get("id") or request.args.get("customerId", "").strip()
-    orders = store.get("orders", [])
+    if not client:
+        return jsonify({"error": "Token movil requerido."}), 401
+    customer_id = client["id"]
+    client_company_id = mobile_required_company_id(client)
+    orders = [
+        order
+        for order in store.get("orders", [])
+        if mobile_record_matches_company(order, client_company_id)
+    ]
     if customer_id:
         orders = [order for order in orders if order.get("customerId") == customer_id]
-    movements = store.get("credit_movements", [])
+    movements = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if mobile_record_matches_company(movement, client_company_id)
+    ]
 
     items = [enrich_order(order, movements) for order in orders]
     items, filters = filter_mobile_orders(items)
@@ -16481,13 +19535,13 @@ def api_orders():
 @app.get("/api/mobile/notifications")
 def api_mobile_notifications():
     store = load_store()
-    subject_type, subject_id, role, auth_error = mobile_notification_subject(store)
+    subject_type, subject_id, role, company_id, auth_error = mobile_notification_subject(store)
     if auth_error:
         return auth_error, 401
-    if generate_mobile_subject_notifications(store, subject_type, subject_id, role):
+    if generate_mobile_subject_notifications(store, subject_type, subject_id, role, company_id):
         save_store(store)
     status = request.args.get("status", "").strip()
-    notifications = mobile_notifications_for_subject(store, subject_type, subject_id, role)
+    notifications = mobile_notifications_for_subject(store, subject_type, subject_id, role, company_id)
     if status:
         notifications = [item for item in notifications if item.get("status", "unread") == status]
     items = [mobile_notification_payload(item) for item in notifications]
@@ -16498,15 +19552,18 @@ def api_mobile_notifications():
 @app.post("/api/mobile/notifications/<notification_id>/read")
 def api_mobile_notification_read(notification_id: str):
     store = load_store()
-    subject_type, subject_id, role, auth_error = mobile_notification_subject(store)
+    subject_type, subject_id, role, company_id, auth_error = mobile_notification_subject(store)
     if auth_error:
         return auth_error, 401
-    visible_ids = {
-        notification.get("id")
-        for notification in mobile_notifications_for_subject(store, subject_type, subject_id, role)
-    }
-    notification = find_by_id(store.get("notifications", []), notification_id)
-    if not notification or notification_id not in visible_ids:
+    notification = next(
+        (
+            item
+            for item in mobile_notifications_for_subject(store, subject_type, subject_id, role, company_id)
+            if item.get("id") == notification_id
+        ),
+        None,
+    )
+    if not notification:
         return jsonify({"error": "Notificacion no encontrada."}), 404
     notification["status"] = "read"
     notification["readAt"] = utc_now()
@@ -16524,7 +19581,8 @@ def api_mobile_seller_summary():
         return auth_error, 401
 
     clients = seller_scope_clients(store, user)
-    orders = [enrich_order(order, store.get("credit_movements", [])) for order in seller_scope_orders(store, user)]
+    movements = mobile_company_records(store, "credit_movements", user)
+    orders = [enrich_order(order, movements) for order in seller_scope_orders(store, user)]
     seller_snapshot = enrich_seller(store, user)
     pending_credit = [
         client for client in clients if client.get("creditRequestStatus") == "pending"
@@ -16582,14 +19640,13 @@ def api_mobile_seller_summary():
 @app.get("/api/v1/mobile/locations/chile")
 @app.get("/api/mobile/locations/chile")
 def api_mobile_locations_chile():
-    return jsonify(
-        {
-            "items": [
-                {"state": state, "cities": cities}
-                for state, cities in CHILE_REGION_CITIES.items()
-            ]
-        }
-    )
+    return jsonify(country_location_payload("CL"))
+
+
+@app.get("/api/v1/mobile/locations/countries/<country_code>")
+@app.get("/api/mobile/locations/countries/<country_code>")
+def api_mobile_locations_country(country_code):
+    return jsonify(country_location_payload(country_code))
 
 
 @app.route("/api/v1/mobile/seller/clients", methods=["GET", "POST"])
@@ -16603,6 +19660,15 @@ def api_mobile_seller_clients():
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
         user_company_id = mobile_user_company_id(store, user)
+        rate_limit_response = guard_mobile_write_rate_limit(
+            store,
+            action="seller_client_create",
+            actor=user,
+            actor_type="admin_user",
+            company_id=user_company_id,
+        )
+        if rate_limit_response:
+            return rate_limit_response
         profile = active_market_profile_for_store(store, user_company_id)
         email = str(payload.get("email") or "").strip().lower()
         business_name = str(payload.get("businessName") or payload.get("name") or "").strip()
@@ -16681,6 +19747,32 @@ def api_mobile_seller_clients():
         if existing_client:
             return existing_client_response(existing_client, store)
 
+        mobile_user_conflict = next(
+            (
+                candidate
+                for candidate in store.get("admin_users", [])
+                if candidate.get("email", "").lower() == email
+                and candidate.get("status") == "active"
+                and candidate.get("mobileAccessEnabled", True) is not False
+                and candidate.get("role") in MOBILE_SALES_ROLES
+            ),
+            None,
+        )
+        if mobile_user_conflict:
+            return jsonify({"error": "Ese correo ya esta registrado como usuario operativo movil."}), 409
+
+        cross_company_email = next(
+            (
+                candidate
+                for candidate in store.get("clients", [])
+                if candidate.get("email", "").lower() == email
+                and record_company_id(candidate, store) != user_company_id
+            ),
+            None,
+        )
+        if cross_company_email:
+            return jsonify({"error": "Ese correo ya existe como cliente movil de otra empresa."}), 409
+
         if use_sql_backend():
             try:
                 from sql_store import client_identity_exists
@@ -16704,7 +19796,7 @@ def api_mobile_seller_clients():
                 app.logger.exception("No se pudo validar duplicidad SQL para cliente movil.")
 
         seller_id = user["id"]
-        seller_name = user.get("name", "") or seller_name_for(store, seller_id)
+        seller_name = user.get("name", "") or seller_name_for(store, seller_id, user_company_id)
         requested_credit = max(0.0, safe_float(payload.get("creditRequestedUsd"), 0))
         raw_terms = payload.get("allowedPaymentTermsDays") or [0]
         if isinstance(raw_terms, str):
@@ -16712,14 +19804,61 @@ def api_mobile_seller_clients():
         elif not isinstance(raw_terms, list):
             raw_terms = [raw_terms]
         available_terms = set(payment_term_options(store))
-        terms = []
+        requested_terms = []
         for term in raw_terms:
             value = safe_int(term, -1)
-            if value in available_terms and value not in terms:
-                terms.append(value)
-        terms = terms or [0]
-        temporary_password = str(payload.get("password") or secrets.token_urlsafe(10))
-        authorized_discount = max(0.0, min(safe_float(payload.get("authorizedDiscountPercent"), 0), 100.0))
+            if value in available_terms and value not in requested_terms:
+                requested_terms.append(value)
+        requested_terms = requested_terms or [0]
+        requested_default_sale_type = str(payload.get("defaultSaleType") or "cash").strip()
+        if requested_default_sale_type not in dict(SALE_TYPE_OPTIONS):
+            requested_default_sale_type = "cash"
+        can_authorize_conditions = user.get("role") in {"super_admin", "general_manager", "commercial_manager"}
+        terms = requested_terms if can_authorize_conditions else [0]
+        default_sale_type = requested_default_sale_type if can_authorize_conditions else "cash"
+        provided_password = str(payload.get("password") or "").strip()
+        if provided_password:
+            provided_password_errors = password_errors(provided_password)
+            if provided_password_errors:
+                return jsonify(
+                    {
+                        "error": " ".join(provided_password_errors),
+                        "errors": {"password": " ".join(provided_password_errors)},
+                    }
+                ), 400
+            temporary_password = provided_password
+        else:
+            temporary_password = temporary_mobile_client_password()
+        requested_authorized_discount = max(0.0, min(safe_float(payload.get("authorizedDiscountPercent"), 0), 100.0))
+        can_authorize_discount = user.get("role") in {"super_admin", "general_manager", "commercial_manager"}
+        authorized_discount = requested_authorized_discount if can_authorize_discount else 0.0
+        discount_request_status = (
+            "approved"
+            if authorized_discount > 0
+            else "pending"
+            if requested_authorized_discount > 0
+            else "none"
+        )
+        raw_notes = str(payload.get("notes") or "").strip()
+        if requested_authorized_discount > 0 and not can_authorize_discount:
+            discount_note = f"Solicitud vendedor: descuento comercial {requested_authorized_discount:g}% pendiente de aprobacion."
+            raw_notes = f"{raw_notes}\n{discount_note}".strip()
+        if not can_authorize_conditions and (
+            requested_default_sale_type != "cash" or any(term > 0 for term in requested_terms)
+        ):
+            requested_terms_label = ", ".join(str(term) for term in requested_terms if term > 0) or "contado"
+            condition_note = (
+                "Solicitud vendedor: condiciones de compra "
+                f"{sale_type_label(requested_default_sale_type).lower()} / plazos {requested_terms_label} "
+                "pendientes de aprobacion comercial."
+            )
+            raw_notes = f"{raw_notes}\n{condition_note}".strip()
+        client_category = str(payload.get("clientCategory") or "standard").strip()
+        if client_category not in dict(CLIENT_CATEGORY_OPTIONS):
+            client_category = "standard"
+        price_list = str(payload.get("priceList") or "b2b").strip()
+        if price_list not in dict(PRICE_LIST_OPTIONS):
+            price_list = "b2b"
         now = utc_now()
         client = {
             "id": next_id("client", email or business_name),
@@ -16735,21 +19874,24 @@ def api_mobile_seller_clients():
             "whatsapp": normalized_whatsapp,
             "email": email,
             "clientType": "b2b",
-            "clientCategory": str(payload.get("clientCategory") or "standard"),
-            "priceList": str(payload.get("priceList") or "b2b"),
+            "clientCategory": client_category,
+            "priceList": price_list,
             "authorizedDiscountPercent": authorized_discount,
+            "discountRequestedPercent": requested_authorized_discount,
+            "discountRequestStatus": discount_request_status,
+            "discountRequestSource": "seller_mobile" if requested_authorized_discount > 0 else "",
             "status": "active",
             "onboardingStatus": "pending_review",
             "address": str(payload.get("address") or "").strip(),
             "fiscalAddress": str(payload.get("fiscalAddress") or payload.get("address") or "").strip(),
             "shippingAddress": str(payload.get("shippingAddress") or payload.get("address") or "").strip(),
-            "country": str(payload.get("country") or profile.get("code") or "CL").strip(),
+            "country": profile.get("code") or "CL",
             "state": normalized_state,
             "city": normalized_city,
             "deliveryZone": str(payload.get("deliveryZone") or "").strip(),
             "assignedSellerId": seller_id,
             "assignedSellerName": seller_name,
-            "defaultSaleType": str(payload.get("defaultSaleType") or "cash"),
+            "defaultSaleType": default_sale_type,
             "allowedPaymentTermsDays": terms,
             "collectionStatus": "without_debt",
             "creditRiskLevel": "low",
@@ -16759,7 +19901,7 @@ def api_mobile_seller_clients():
             "creditLimitUsd": 0.0,
             "creditUsedUsd": 0.0,
             "paymentTermsDays": 0,
-            "notes": str(payload.get("notes") or "").strip(),
+            "notes": raw_notes,
             "passwordHash": generate_password_hash(temporary_password),
             "mustChangePassword": True,
             "idempotencyKey": idempotency_key,
@@ -16879,6 +20021,16 @@ def api_mobile_seller_orders():
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
+        user_company_id = mobile_user_company_id(store, user)
+        rate_limit_response = guard_mobile_write_rate_limit(
+            store,
+            action="seller_order_create",
+            actor=user,
+            actor_type="admin_user",
+            company_id=user_company_id,
+        )
+        if rate_limit_response:
+            return rate_limit_response
         customer_id = str(payload.get("customerId") or (payload.get("customer") or {}).get("id") or "").strip()
         if not can_mobile_seller_access_client(store, user, customer_id):
             return jsonify({"error": "Cliente fuera de tu cartera."}), 403
@@ -16886,7 +20038,12 @@ def api_mobile_seller_orders():
         order, error = build_commercial_order(
             store,
             payload,
-            actor={"id": user["id"], "name": user.get("name", "Vendedor FVENTAS"), "role": user.get("role", "sales")},
+            actor={
+                "id": user["id"],
+                "name": user.get("name", "Vendedor FVENTAS"),
+                "role": user.get("role", "sales"),
+                "companyId": user_company_id,
+            },
             default_channel="seller_mobile",
         )
         if error:
@@ -16941,6 +20098,16 @@ def api_mobile_seller_quotes():
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
+        user_company_id = mobile_user_company_id(store, user)
+        rate_limit_response = guard_mobile_write_rate_limit(
+            store,
+            action="seller_quote_create",
+            actor=user,
+            actor_type="admin_user",
+            company_id=user_company_id,
+        )
+        if rate_limit_response:
+            return rate_limit_response
         customer_id = str(payload.get("customerId") or (payload.get("customer") or {}).get("id") or "").strip()
         if not can_mobile_seller_access_client(store, user, customer_id):
             return jsonify({"error": "Cliente fuera de tu cartera."}), 403
@@ -16968,13 +20135,16 @@ def api_mobile_seller_quotes():
                 ),
                 None,
             )
-            if not product or product.get("status") != "active":
-                return jsonify({"error": f"Producto {product_ref} no disponible."}), 400
-            unit_price = safe_float(
-                raw_item.get("unitPriceUsd"),
-                safe_float(product.get("b2bPriceUsd"), safe_float(product.get("publicPriceUsd"), 0)),
-            )
-            discount_percent = max(0.0, min(100.0, safe_float(raw_item.get("discountPercent"), 0)))
+            blocker = mobile_product_commercial_blocker(product)
+            if blocker:
+                return jsonify({"error": f"{blocker} ({product_ref})"}), 400
+            unit_price = mobile_product_catalog_price(product)
+            requested_discount = max(0.0, min(100.0, safe_float(raw_item.get("discountPercent"), 0)))
+            max_discount = max(0.0, min(100.0, safe_float((client or {}).get("authorizedDiscountPercent"), 0)))
+            if requested_discount > max_discount:
+                sku_label = product.get("sku") or product_ref
+                return jsonify({"error": f"Descuento no autorizado para {sku_label}. Maximo {max_discount:g}%."}), 400
+            discount_percent = requested_discount
             line_gross = round(unit_price * quantity, 2)
             line_discount = round(line_gross * discount_percent / 100, 2)
             line_total = round(max(0.0, line_gross - line_discount), 2)
@@ -16997,13 +20167,15 @@ def api_mobile_seller_quotes():
                 }
             )
 
-        exchange_rate = safe_float((payload.get("preview") or {}).get("exchangeRateUsdClp"), current_rate())
+        market = mobile_market_payload(store, user_company_id)
+        exchange_rate = safe_float(market.get("exchangeRateBaseToLocal"), current_rate())
         sale_type = str(payload.get("saleType") or "cash")
         if sale_type not in dict(SALE_TYPE_OPTIONS):
             sale_type = "cash"
         payment_term_days = safe_int(payload.get("paymentTermDays"), 0)
-        if sale_type == "cash":
-            payment_term_days = 0
+        condition_error, sale_type, payment_term_days = validate_client_purchase_conditions(client, sale_type, payment_term_days)
+        if condition_error:
+            return jsonify({"error": condition_error}), 400
         now = utc_now()
         quote = {
             "id": next_id("quote", client.get("businessName", "fventas")),
@@ -17076,6 +20248,16 @@ def api_mobile_seller_activities():
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
+        user_company_id = mobile_user_company_id(store, user)
+        rate_limit_response = guard_mobile_write_rate_limit(
+            store,
+            action="seller_activity_create",
+            actor=user,
+            actor_type="admin_user",
+            company_id=user_company_id,
+        )
+        if rate_limit_response:
+            return rate_limit_response
         customer_id = str(payload.get("customerId") or payload.get("clientId") or "").strip()
         if not can_mobile_seller_access_client(store, user, customer_id):
             return jsonify({"error": "Cliente fuera de tu cartera."}), 403
@@ -17171,11 +20353,26 @@ def api_client_credit():
     if auth_error:
         return auth_error, 401
     if not client:
-        client = find_by_id(store.get("clients", []), request.args.get("customerId", "").strip())
-    if not client:
-        return jsonify({"error": "Cliente no encontrado."}), 404
+        return jsonify({"error": "Token movil requerido."}), 401
 
-    enriched = enrich_client(client, store.get("orders", []), store.get("credit_movements", []))
+    client_company_id = mobile_required_company_id(client)
+    scoped_orders = [
+        order
+        for order in store.get("orders", [])
+        if mobile_record_matches_company(order, client_company_id)
+    ]
+    scoped_movements = [
+        movement
+        for movement in store.get("credit_movements", [])
+        if mobile_record_matches_company(movement, client_company_id)
+    ]
+    enriched = enrich_client(client, scoped_orders, scoped_movements)
+    purchase_conditions = purchase_conditions_payload(
+        store,
+        client_company_id,
+        allowed_terms=enriched.get("allowedPaymentTermsDays", [0]),
+        default_sale_type=enriched.get("defaultSaleType", "cash"),
+    )
     return jsonify(
         {
             "credit": {
@@ -17188,6 +20385,7 @@ def api_client_credit():
                 "creditAvailableUsd": enriched["creditAvailableUsd"],
                 "paymentTermsDays": enriched["paymentTermsDays"],
                 "allowedPaymentTermsDays": enriched.get("allowedPaymentTermsDays", [0]),
+                "purchaseConditions": purchase_conditions,
                 "defaultSaleType": enriched.get("defaultSaleType", "cash"),
                 "collectionStatus": enriched.get("collectionStatus", "without_debt"),
                 "collectionStatusLabel": enriched.get("collectionStatusLabel", ""),
@@ -17209,40 +20407,80 @@ def api_client_credit():
 @app.get("/api/v1/mobile/meta")
 def api_mobile_meta():
     store = load_store()
-    currency_data = currency_context(store)
-    profile = currency_data["market_profile"]
-    return jsonify(
-        {
-            "meta": mobile_api_meta(),
-            "market": {
-                "country": profile.get("code", "CL"),
-                "countryName": profile.get("label", "Mercado configurado"),
-                "taxLabel": profile.get("taxLabel", "Documento fiscal"),
-                "taxPlaceholder": profile.get("taxPlaceholder", "Documento fiscal"),
-                "phonePrefix": profile.get("phonePrefix", "+56"),
-                "phonePlaceholder": profile.get("phonePlaceholder", "+56 9 1234 5678"),
-                "salesCurrency": currency_data["sales_currency"],
-                "localCurrency": currency_data["local_currency"],
-                "exchangeRate": currency_data["exchange_rate"],
-                "locale": profile.get("locale", "es-CL"),
-                "timezone": profile.get("timezone", "America/Santiago"),
-            },
-            "capabilities": {
-                "auth": ["login", "logout", "refresh", "change_password", "recover_password", "request_account_deletion"],
-                "mobile": ["home", "products", "product_detail", "categories", "banners", "cart", "orders", "credit", "profile"],
-                "seller": ["summary", "clients", "orders", "quotes", "activities", "commissions"],
-                "storage": app.config.get("STORAGE_BACKEND"),
-                "data": app.config.get("DATA_BACKEND"),
-                "tokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
-            },
-            "counts": {
-                "products": len(store.get("products", [])),
-                "categories": len(store.get("categories", [])),
-                "announcements": len(store.get("announcements", [])),
-                "serviceTechnicians": len(store.get("service_technicians", [])),
-            },
+    profile_payload = None
+    if request.headers.get("Authorization", ""):
+        profile_payload, auth_error = mobile_profile_from_token(store)
+        if auth_error:
+            return auth_error, 401
+
+    company_id = str((profile_payload or {}).get("companyId") or "").strip()
+    if company_id and not company_subscription_allows_access(store, company_id):
+        return mobile_subscription_response(company_id)
+
+    if company_id:
+        company_market = mobile_market_payload(store, company_id)
+        profile = active_market_profile_for_store(store, company_id)
+        market = {
+            "country": company_market.get("country", "CL"),
+            "countryName": company_market.get("countryName", "Mercado configurado"),
+            "taxLabel": profile.get("taxLabel", "Documento fiscal"),
+            "taxPlaceholder": profile.get("taxPlaceholder", "Documento fiscal"),
+            "phonePrefix": profile.get("phonePrefix", "+56"),
+            "phonePlaceholder": profile.get("phonePlaceholder", "+56 9 1234 5678"),
+            "salesCurrency": company_market.get("salesCurrency", "USD"),
+            "localCurrency": company_market.get("localCurrency", "CLP"),
+            "exchangeRate": company_market.get("exchangeRateBaseToLocal", 1),
+            "exchangeRateBaseToLocal": company_market.get("exchangeRateBaseToLocal", 1),
+            "locale": company_market.get("locale", profile.get("locale", "es-CL")),
+            "timezone": company_market.get("timezone", profile.get("timezone", "America/Santiago")),
         }
-    )
+        counts = {
+            "products": len(mobile_visible_products(store, company_id)),
+            "categories": len(mobile_visible_categories(store, company_id)),
+            "announcements": len(
+                [
+                    item
+                    for item in store.get("announcements", [])
+                    if mobile_record_matches_company(item, company_id)
+                ]
+            ),
+            "serviceTechnicians": len(mobile_visible_service_technicians(store, company_id)),
+        }
+    else:
+        currency_data = currency_context(store)
+        profile = currency_data["market_profile"]
+        market = {
+            "country": profile.get("code", "CL"),
+            "countryName": profile.get("label", "Mercado configurado"),
+            "taxLabel": profile.get("taxLabel", "Documento fiscal"),
+            "taxPlaceholder": profile.get("taxPlaceholder", "Documento fiscal"),
+            "phonePrefix": profile.get("phonePrefix", "+56"),
+            "phonePlaceholder": profile.get("phonePlaceholder", "+56 9 1234 5678"),
+            "salesCurrency": currency_data["sales_currency"],
+            "localCurrency": currency_data["local_currency"],
+            "exchangeRate": currency_data["exchange_rate"],
+            "exchangeRateBaseToLocal": currency_data["exchange_rate"],
+            "locale": profile.get("locale", "es-CL"),
+            "timezone": profile.get("timezone", "America/Santiago"),
+        }
+        counts = {}
+
+    payload = {
+        "meta": mobile_api_meta(),
+        "market": market,
+        "capabilities": {
+            "auth": ["login", "logout", "refresh", "change_password", "recover_password", "request_account_deletion"],
+            "mobile": ["home", "products", "product_detail", "categories", "banners", "cart", "orders", "credit", "profile"],
+            "seller": ["summary", "clients", "orders", "quotes", "activities", "commissions"],
+            "storage": app.config.get("STORAGE_BACKEND"),
+            "data": app.config.get("DATA_BACKEND"),
+            "tokenRequired": bool(app.config.get("REQUIRE_MOBILE_TOKEN")),
+        },
+    }
+    if counts:
+        payload["counts"] = counts
+        payload["purchaseConditions"] = purchase_conditions_payload(store, company_id)
+    return jsonify(payload)
 
 
 @app.get("/api/v1/mobile/home")
@@ -17251,9 +20489,10 @@ def api_mobile_home():
     profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
+    company_id = mobile_catalog_company_id(store, profile)
 
     products = sorted(
-        mobile_visible_products(store),
+        mobile_visible_products(store, company_id),
         key=lambda product: product.get("createdAt", ""),
         reverse=True,
     )
@@ -17273,7 +20512,7 @@ def api_mobile_home():
             "visibleInApp": bool(category.get("visibleInApp")),
         }
         for category in sorted(
-            [enrich_category(item, store) for item in store.get("categories", []) if item.get("status", "active") == "active"],
+            mobile_visible_categories(store, company_id),
             key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", "")),
         )
         if category.get("visibleInApp")
@@ -17281,7 +20520,7 @@ def api_mobile_home():
     payload = {
         "meta": mobile_api_meta(),
         "home": {
-            "banners": active_announcements("home", store),
+            "banners": active_announcements("home", store, company_id=company_id),
             "categories": categories[:10],
             "featuredProducts": [mobile_product_payload(product) for product in featured_products],
             "saleProducts": [mobile_product_payload(product) for product in sale_products],
@@ -17322,9 +20561,10 @@ def api_mobile_cart():
 @app.get("/api/mobile/categories")
 def api_categories():
     store = load_store()
-    _, auth_error = require_mobile_catalog_access(store)
+    profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
+    company_id = mobile_catalog_company_id(store, profile)
     categories = [
         {
             "id": category.get("id", ""),
@@ -17339,7 +20579,7 @@ def api_categories():
             "visibleInApp": bool(category.get("visibleInApp")),
         }
         for category in sorted(
-            [enrich_category(item, store) for item in store["categories"] if item.get("status", "active") == "active"],
+            mobile_visible_categories(store, company_id),
             key=lambda item: (safe_int(item.get("sortOrder"), 0), item.get("name", "")),
         )
         if category.get("visibleInApp")
@@ -17356,6 +20596,10 @@ def api_client_login():
     payload = request.get_json(silent=True) or {}
     email = payload.get("email", "").strip().lower()
     password = payload.get("password", "")
+    login_device_id = mobile_request_device_id(payload)
+    if app.config.get("REQUIRE_MOBILE_DEVICE_HEADER") and not login_device_id:
+        return jsonify({"error": "Identificador de dispositivo requerido."}), 400
+    login_device_id = login_device_id or mobile_device_id(payload)
     if is_blocked_default_login(email, mobile=True):
         register_login_failure("mobile", email)
         record_audit_event(
@@ -17380,15 +20624,54 @@ def api_client_login():
         save_store(store)
         return jsonify({"error": "Demasiados intentos. Espera unos minutos."}), 429
 
-    client = next(
-        (
-            item
-            for item in store.get("clients", [])
-            if item.get("email", "").lower() == email and item.get("status") == "active"
-        ),
-        None,
-    )
+    client_candidates = [
+        item
+        for item in store.get("clients", [])
+        if item.get("email", "").lower() == email and item.get("status") == "active"
+        and item.get("mobileAccessEnabled", True) is not False
+    ]
+    admin_candidates = [
+        user
+        for user in store.get("admin_users", [])
+        if user.get("email", "").lower() == email
+        and user.get("status") == "active"
+        and user.get("mobileAccessEnabled", True) is not False
+        and user.get("role") in MOBILE_SALES_ROLES
+    ]
+    if len(client_candidates) + len(admin_candidates) > 1:
+        register_login_failure("mobile", email)
+        record_audit_event(
+            store,
+            "login_blocked",
+            "mobile_user",
+            email,
+            "Login movil bloqueado por identidad duplicada entre empresas o roles.",
+            actor={"id": email, "name": email or "desconocido", "role": "mobile"},
+            metadata={
+                "clientMatches": [client.get("id", "") for client in client_candidates],
+                "adminMatches": [user.get("id", "") for user in admin_candidates],
+            },
+            criticality="high",
+        )
+        save_store(store)
+        return jsonify({"error": "Credenciales invalidas."}), 401
+
+    client = client_candidates[0] if client_candidates else None
     if client and check_password_hash(client.get("passwordHash", ""), password):
+        company_id = mobile_required_company_id(client)
+        if not company_id:
+            record_audit_event(
+                store,
+                "mobile_login_blocked",
+                "client",
+                client["id"],
+                "Login movil bloqueado porque la cuenta no tiene companyId explicito.",
+                actor={"id": client["id"], "name": client.get("businessName", email), "role": "client"},
+                metadata={"email": email},
+                criticality="high",
+            )
+            save_store(store)
+            return jsonify({"error": "Cuenta movil sin empresa asignada. Contacta al administrador."}), 403
         if mobile_account_access_blocked(client):
             record_audit_event(
                 store,
@@ -17402,7 +20685,6 @@ def api_client_login():
             )
             save_store(store)
             return mobile_account_deletion_response(), 403
-        company_id = record_company_id(client, store)
         if not company_subscription_allows_access(store, company_id):
             record_audit_event(
                 store,
@@ -17418,9 +20700,9 @@ def api_client_login():
         reset_login_attempts("mobile", email)
         client["lastLoginAt"] = utc_now()
         client["lastMobileLoginIp"] = request_ip_address()
-        client["lastMobileDeviceId"] = mobile_device_id()
+        client["lastMobileDeviceId"] = login_device_id
         client["mobileSessionVersion"] = safe_int(client.get("mobileSessionVersion"), 0)
-        access_token = issue_mobile_token(client)
+        access_token = issue_mobile_token(client, login_device_id)
         record_audit_event(
             store,
             "login",
@@ -17433,18 +20715,22 @@ def api_client_login():
         save_store(store)
         return jsonify(mobile_customer_payload(client, store, access_token))
 
-    admin_user = next(
-        (
-            user
-            for user in store.get("admin_users", [])
-            if user.get("email", "").lower() == email
-            and user.get("status") == "active"
-            and user.get("mobileAccessEnabled", True) is not False
-            and user.get("role") in MOBILE_SALES_ROLES
-        ),
-        None,
-    )
+    admin_user = admin_candidates[0] if admin_candidates else None
     if admin_user and check_password_hash(admin_user.get("passwordHash", ""), password):
+        company_id = mobile_required_company_id(admin_user)
+        if not company_id:
+            record_audit_event(
+                store,
+                "mobile_login_blocked",
+                "admin_user",
+                admin_user["id"],
+                "Login movil operativo bloqueado porque la cuenta no tiene companyId explicito.",
+                actor={"id": admin_user["id"], "name": admin_user.get("name", email), "role": admin_user.get("role", "")},
+                metadata={"email": email},
+                criticality="high",
+            )
+            save_store(store)
+            return jsonify({"error": "Cuenta movil sin empresa asignada. Contacta al administrador."}), 403
         if mobile_account_access_blocked(admin_user):
             record_audit_event(
                 store,
@@ -17458,7 +20744,6 @@ def api_client_login():
             )
             save_store(store)
             return mobile_account_deletion_response(), 403
-        company_id = record_company_id(admin_user, store)
         if not company_subscription_allows_access(store, company_id):
             record_audit_event(
                 store,
@@ -17474,8 +20759,8 @@ def api_client_login():
         reset_login_attempts("mobile", email)
         admin_user["lastMobileLoginAt"] = utc_now()
         admin_user["lastMobileLoginIp"] = request_ip_address()
-        admin_user["lastMobileDeviceId"] = mobile_device_id()
-        access_token = issue_mobile_admin_token(admin_user)
+        admin_user["lastMobileDeviceId"] = login_device_id
+        access_token = issue_mobile_admin_token(admin_user, login_device_id)
         record_audit_event(
             store,
             "login",
@@ -17486,7 +20771,7 @@ def api_client_login():
             metadata={"ipAddress": admin_user["lastMobileLoginIp"], "deviceId": admin_user["lastMobileDeviceId"]},
         )
         save_store(store)
-        return jsonify(mobile_admin_payload(admin_user, access_token))
+        return jsonify(mobile_admin_payload(admin_user, store, access_token))
 
     register_login_failure("mobile", email)
     record_audit_event(
@@ -17509,7 +20794,7 @@ def api_mobile_refresh_token():
         return jsonify({"error": "Token movil requerido."}), 401
 
     if token_payload and token_payload.get("type") == "admin":
-        user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        user = mobile_find_admin_for_token(store, token_payload)
         if user and mobile_account_access_blocked(user):
             record_audit_event(
                 store,
@@ -17528,12 +20813,13 @@ def api_mobile_refresh_token():
             or user.get("status") != "active"
             or user.get("role") not in MOBILE_SALES_ROLES
             or user.get("mobileAccessEnabled", True) is False
+            or not mobile_subject_matches_token_company(user, store, token_payload)
             or not mobile_token_version_valid(user, token_payload, "sessionVersion")
         ):
             return jsonify({"error": "Token movil invalido."}), 401
-        return jsonify(mobile_admin_payload(user, issue_mobile_admin_token(user)))
+        return jsonify(mobile_admin_payload(user, store, issue_mobile_admin_token(user)))
 
-    client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    client = mobile_find_client_for_token(store, token_payload)
     if client and mobile_account_access_blocked(client):
         record_audit_event(
             store,
@@ -17547,7 +20833,13 @@ def api_mobile_refresh_token():
         )
         save_store(store)
         return mobile_account_deletion_response(), 403
-    if not client or client.get("status") != "active" or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion"):
+    if (
+        not client
+        or client.get("status") != "active"
+        or client.get("mobileAccessEnabled", True) is False
+        or not mobile_subject_matches_token_company(client, store, token_payload)
+        or not mobile_token_version_valid(client, token_payload, "mobileSessionVersion")
+    ):
         return jsonify({"error": "Cliente no encontrado."}), 401
     return jsonify(mobile_customer_payload(client, store, issue_mobile_token(client)))
 
@@ -17560,14 +20852,63 @@ def api_mobile_logout():
     subject_type = "mobile_user"
     subject_name = "App movil"
     subject_role = token_payload.get("role", "mobile") if token_payload else "mobile"
+    subject = None
+    session_revoked = False
     if token_payload and token_payload.get("type") == "admin":
         subject_type = "admin_user"
-        user = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        user = mobile_find_admin_for_token(store, token_payload)
+        if (
+            user
+            and user.get("status") == "active"
+            and user.get("role") in MOBILE_SALES_ROLES
+            and user.get("mobileAccessEnabled", True) is not False
+            and mobile_subject_matches_token_company(user, store, token_payload)
+            and mobile_token_version_valid(user, token_payload, "sessionVersion")
+        ):
+            subject = user
+            before = copy.deepcopy(user)
+            bump_user_session_version(user)
+            user["updatedAt"] = utc_now()
+            session_revoked = True
+            record_change_event(
+                store,
+                "session_revoke",
+                "admin_user",
+                user["id"],
+                "Token movil revocado por cierre de sesion.",
+                before,
+                user,
+                actor={"id": user["id"], "name": user.get("name", subject_id), "role": user.get("role", "seller")},
+            )
         subject_name = (user or {}).get("name", subject_id)
     elif token_payload:
         subject_type = "client"
-        client = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+        client = mobile_find_client_for_token(store, token_payload)
+        if (
+            client
+            and client.get("status") == "active"
+            and mobile_subject_matches_token_company(client, store, token_payload)
+            and mobile_token_version_valid(client, token_payload, "mobileSessionVersion")
+        ):
+            subject = client
+            before = copy.deepcopy(client)
+            client["mobileSessionVersion"] = safe_int(client.get("mobileSessionVersion"), 0) + 1
+            client["updatedAt"] = utc_now()
+            session_revoked = True
+            record_change_event(
+                store,
+                "session_revoke",
+                "client",
+                client["id"],
+                "Token movil revocado por cierre de sesion.",
+                before,
+                client,
+                actor={"id": client["id"], "name": client.get("businessName", subject_id), "role": "client"},
+            )
         subject_name = (client or {}).get("businessName", subject_id)
+    if subject:
+        subject_id = subject.get("id", subject_id)
+        subject_role = subject.get("role", subject_role)
 
     record_audit_event(
         store,
@@ -17576,6 +20917,7 @@ def api_mobile_logout():
         subject_id,
         "Cierre de sesion desde app movil.",
         actor={"id": subject_id, "name": subject_name, "role": subject_role},
+        metadata={"sessionRevoked": session_revoked},
     )
     save_store(store)
     return jsonify({"status": "logged_out"})
@@ -17590,11 +20932,11 @@ def api_client_change_password():
         return jsonify({"error": "Token movil requerido."}), 401
 
     subject_type = "client"
-    subject = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    subject = mobile_find_client_for_token(store, token_payload)
     subject_name_key = "businessName"
     if token_payload.get("type") == "admin":
         subject_type = "admin_user"
-        subject = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        subject = mobile_find_admin_for_token(store, token_payload)
         subject_name_key = "name"
         if subject and mobile_account_access_blocked(subject):
             return mobile_account_deletion_response(), 403
@@ -17603,13 +20945,31 @@ def api_client_change_password():
             or subject.get("status") != "active"
             or subject.get("role") not in MOBILE_SALES_ROLES
             or subject.get("mobileAccessEnabled", True) is False
+            or not mobile_subject_matches_token_company(subject, store, token_payload)
             or not mobile_token_version_valid(subject, token_payload, "sessionVersion")
         ):
             return jsonify({"error": "Token movil invalido."}), 401
-    elif not subject or subject.get("status") != "active" or not mobile_token_version_valid(subject, token_payload, "mobileSessionVersion"):
+    elif (
+        not subject
+        or subject.get("status") != "active"
+        or subject.get("mobileAccessEnabled", True) is False
+        or not mobile_subject_matches_token_company(subject, store, token_payload)
+        or not mobile_token_version_valid(subject, token_payload, "mobileSessionVersion")
+    ):
         return jsonify({"error": "Cliente no encontrado."}), 404
     elif mobile_account_access_blocked(subject):
         return mobile_account_deletion_response(), 403
+
+    subject_company_id = mobile_required_company_id(subject)
+    rate_limit_response = guard_mobile_write_rate_limit(
+        store,
+        action="mobile_password_change",
+        actor=subject,
+        actor_type=subject_type,
+        company_id=subject_company_id,
+    )
+    if rate_limit_response:
+        return rate_limit_response
 
     payload = request.get_json(silent=True) or {}
     current_password = payload.get("currentPassword", "")
@@ -17672,19 +21032,27 @@ def api_mobile_account_deletion_request():
         return jsonify({"meta": mobile_api_meta(), "error": "Token movil requerido.", "code": "mobile_token_required"}), 401
 
     subject_type = "client"
-    subject = find_by_id(store.get("clients", []), token_payload.get("clientId") or token_payload.get("id", ""))
+    subject = mobile_find_client_for_token(store, token_payload)
     version_key = "mobileSessionVersion"
     valid_subject = bool(subject and subject.get("status") == "active")
 
     if token_payload.get("type") == "admin":
         subject_type = "admin_user"
-        subject = find_by_id(store.get("admin_users", []), token_payload.get("adminUserId") or token_payload.get("id", ""))
+        subject = mobile_find_admin_for_token(store, token_payload)
         version_key = "sessionVersion"
         valid_subject = bool(
             subject
             and subject.get("status") == "active"
             and subject.get("role") in MOBILE_SALES_ROLES
             and subject.get("mobileAccessEnabled", True) is not False
+            and mobile_subject_matches_token_company(subject, store, token_payload)
+        )
+    else:
+        valid_subject = bool(
+            subject
+            and subject.get("status") == "active"
+            and subject.get("mobileAccessEnabled", True) is not False
+            and mobile_subject_matches_token_company(subject, store, token_payload)
         )
 
     if not subject or not valid_subject or not mobile_token_version_valid(subject, token_payload, version_key):
@@ -17735,35 +21103,82 @@ def api_mobile_recover_password():
     if not email:
         return jsonify({"error": "Correo requerido."}), 400
 
+    ip_address = request_ip_address()
+    window_seconds = max(1, int(app.config.get("MOBILE_PASSWORD_RECOVERY_WINDOW_SECONDS", 300)))
+    max_events = max(1, int(app.config.get("MOBILE_PASSWORD_RECOVERY_MAX_EVENTS", 5)))
+    if public_submission_rate_limited(
+        store,
+        "mobile_password_recovery_rate_events",
+        ip_address=ip_address,
+        email=email,
+        window_seconds=window_seconds,
+        max_events=max_events,
+    ):
+        record_audit_event(
+            store,
+            "password_recovery_limited",
+            "mobile_user",
+            email,
+            "Recuperacion movil bloqueada temporalmente por solicitudes repetidas.",
+            actor={"id": email, "name": email, "role": "mobile"},
+            metadata={"ipAddress": ip_address},
+            criticality="medium",
+        )
+        save_store(store)
+        return jsonify({"error": "Demasiadas solicitudes. Espera unos minutos."}), 429
+
     subject_type = "mobile_user"
     subject_id = email
     subject_name = email
     subject_role = "mobile"
-    subject = next(
-        (
-            item
-            for item in store.get("clients", [])
-            if item.get("email", "").lower() == email and item.get("status") == "active"
-        ),
-        None,
-    )
+    client_candidates = [
+        item
+        for item in store.get("clients", [])
+        if item.get("email", "").lower() == email and item.get("status") == "active"
+        and item.get("mobileAccessEnabled", True) is not False
+        and not mobile_account_access_blocked(item)
+    ]
+    admin_candidates = [
+        user
+        for user in store.get("admin_users", [])
+        if user.get("email", "").lower() == email
+        and user.get("status") == "active"
+        and user.get("mobileAccessEnabled", True) is not False
+        and not mobile_account_access_blocked(user)
+        and user.get("role") in MOBILE_SALES_ROLES
+    ]
+    if len(client_candidates) + len(admin_candidates) > 1:
+        record_audit_event(
+            store,
+            "password_recovery_blocked",
+            "mobile_user",
+            email,
+            "Recuperacion movil bloqueada por identidad duplicada.",
+            actor={"id": email, "name": email, "role": "mobile"},
+            metadata={
+                "clientMatches": [client.get("id", "") for client in client_candidates],
+                "adminMatches": [user.get("id", "") for user in admin_candidates],
+            },
+            criticality="high",
+        )
+        record_public_submission_rate_event(
+            store,
+            "mobile_password_recovery_rate_events",
+            ip_address=ip_address,
+            email=email,
+            action="password_recovery",
+            window_seconds=window_seconds,
+        )
+        save_store(store)
+        return mobile_password_recovery_response()
+    subject = client_candidates[0] if client_candidates else None
     if subject:
         subject_type = "client"
         subject_id = subject.get("id", email)
         subject_name = subject.get("businessName", email)
         subject_role = "client"
     else:
-        subject = next(
-            (
-                user
-                for user in store.get("admin_users", [])
-                if user.get("email", "").lower() == email
-                and user.get("status") == "active"
-                and user.get("mobileAccessEnabled", True) is not False
-                and user.get("role") in MOBILE_SALES_ROLES
-            ),
-            None,
-        )
+        subject = admin_candidates[0] if admin_candidates else None
         if subject:
             subject_type = "admin_user"
             subject_id = subject.get("id", email)
@@ -17795,23 +21210,30 @@ def api_mobile_recover_password():
             metadata={"email": email, "status": "received"},
             actor={"id": subject_id, "name": subject_name, "role": subject_role},
         )
-    save_store(store)
-    return jsonify(
-        {
-            "status": "received",
-            "message": "Si el correo existe, FVENTAS gestionara la recuperacion de acceso.",
-        }
+    record_public_submission_rate_event(
+        store,
+        "mobile_password_recovery_rate_events",
+        ip_address=ip_address,
+        email=email,
+        action="password_recovery",
+        window_seconds=window_seconds,
     )
+    save_store(store)
+    return mobile_password_recovery_response()
 
 
 @app.get("/api/v1/mobile/products")
 @app.get("/api/mobile/products")
 def api_products():
     store = load_store()
-    _, auth_error = require_mobile_catalog_access(store)
+    profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
-    products = [mobile_product_payload(product) for product in mobile_visible_products(store)]
+    company_id = mobile_catalog_company_id(store, profile)
+    products = [
+        mobile_product_payload(product)
+        for product in mobile_visible_products(store, company_id)
+    ]
     products, filters = filter_mobile_products(products)
     products, sort = sort_mobile_products(products)
     return mobile_paginated_response(products, filters, sort)
@@ -17821,13 +21243,14 @@ def api_products():
 @app.get("/api/mobile/products/<product_id>")
 def api_mobile_product_detail(product_id: str):
     store = load_store()
-    _, auth_error = require_mobile_catalog_access(store)
+    profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
+    company_id = mobile_catalog_company_id(store, profile)
     product = next(
         (
             item
-            for item in mobile_visible_products(store)
+            for item in mobile_visible_products(store, company_id)
             if item.get("id") == product_id or item.get("sku") == product_id
         ),
         None,
@@ -17837,7 +21260,7 @@ def api_mobile_product_detail(product_id: str):
     related_skus = {str(sku) for sku in product.get("relatedSkus", [])}
     related_products = [
         mobile_product_payload(item)
-        for item in mobile_visible_products(store)
+        for item in mobile_visible_products(store, company_id)
         if item.get("sku") in related_skus and item.get("id") != product.get("id")
     ][:8]
     return jsonify(
@@ -17853,11 +21276,12 @@ def api_mobile_product_detail(product_id: str):
 @app.get("/api/mobile/announcements")
 def api_announcements():
     store = load_store()
-    _, auth_error = require_mobile_catalog_access(store)
+    profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
+    company_id = mobile_catalog_company_id(store, profile)
     placement = request.args.get("placement")
-    announcements = active_announcements(placement, store)
+    announcements = active_announcements(placement, store, company_id=company_id)
     announcements, filters = filter_mobile_announcements(announcements)
     announcements, sort = sort_mobile_announcements(announcements)
     return mobile_paginated_response(announcements, filters, sort)
@@ -17867,14 +21291,11 @@ def api_announcements():
 @app.get("/api/mobile/service-technicians")
 def api_service_technicians():
     store = load_store()
-    _, auth_error = require_mobile_catalog_access(store)
+    profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
-    technicians = [
-        technician
-        for technician in store.get("service_technicians", [])
-        if technician.get("status") == "active" and technician.get("visibleInApp")
-    ]
+    company_id = mobile_catalog_company_id(store, profile)
+    technicians = mobile_visible_service_technicians(store, company_id)
     technicians, filters = filter_mobile_directory_items(technicians)
     technicians, sort = sort_mobile_directory_items(technicians)
     return mobile_paginated_response(technicians, filters, sort)
@@ -17884,14 +21305,11 @@ def api_service_technicians():
 @app.get("/api/mobile/locations")
 def api_locations():
     store = load_store()
-    _, auth_error = require_mobile_catalog_access(store)
+    profile, auth_error = require_mobile_catalog_access(store)
     if auth_error:
         return auth_error, 401
-    technicians = [
-        technician
-        for technician in store.get("service_technicians", [])
-        if technician.get("status") == "active" and technician.get("visibleInApp")
-    ]
+    company_id = mobile_catalog_company_id(store, profile)
+    technicians = mobile_visible_service_technicians(store, company_id)
     locations = [
         {
             "id": technician.get("id", ""),

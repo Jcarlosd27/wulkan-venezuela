@@ -9,8 +9,9 @@
 {% set selected_state = client.state if client is defined else '' %}
 {% set selected_city = client.city if client is defined else '' %}
 {% set field_id_prefix = field_prefix if field_prefix is defined else 'client' %}
-{% set location_options = chile_locations if chile_locations is defined else {} %}
-{% set market = currency_context().market_profile %}
+{% set location_options = country_locations if country_locations is defined else (chile_locations if chile_locations is defined else {}) %}
+{% set location_labels = country_location_labels if country_location_labels is defined else {} %}
+{% set market = client_market_profile if client_market_profile is defined else currency_context().market_profile %}
 
 <div class="client-form-stack">
   <section class="form-section">
@@ -79,7 +80,7 @@
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-country">Pais</label>
-        <input class="form-control" id="{{ field_id_prefix }}-country" name="country" value="{{ client.country if client is defined else market.code }}" aria-label="Pais">
+        <input class="form-control" id="{{ field_id_prefix }}-country" name="country" value="{{ market.code }}" readonly aria-label="Pais">
       </div>
       <div class="col-12 col-lg-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-address">Direccion general</label>
@@ -93,20 +94,20 @@
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-shippingAddress">Direccion despacho</label>
         <input class="form-control" id="{{ field_id_prefix }}-shippingAddress" name="shippingAddress" value="{{ client.shippingAddress if client is defined else '' }}" aria-label="Direccion despacho">
       </div>
-      {% if market.code == "CL" %}
+      {% if location_options %}
         <div class="col-12 col-md-4">
-          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-state">Region</label>
-          <select class="form-select" id="{{ field_id_prefix }}-state" name="state" required data-chile-region aria-label="Region">
-            <option value="">Selecciona region</option>
+          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-state">{{ location_labels.stateLabel or 'Region / estado' }}</label>
+          <select class="form-select" id="{{ field_id_prefix }}-state" name="state" required data-country-state aria-label="{{ location_labels.stateLabel or 'Region / estado' }}">
+            <option value="">{{ location_labels.statePlaceholder or 'Selecciona region / estado' }}</option>
             {% for state in location_options.keys() %}
             <option value="{{ state }}" {% if selected_state == state %}selected{% endif %}>{{ state }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="col-12 col-md-4">
-          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-city">Ciudad</label>
-          <select class="form-select" id="{{ field_id_prefix }}-city" name="city" required data-chile-city data-selected-city="{{ selected_city }}" aria-label="Ciudad o comuna">
-            <option value="">Selecciona ciudad/comuna</option>
+          <label class="form-label fw-semibold" for="{{ field_id_prefix }}-city">{{ location_labels.cityLabel or 'Ciudad' }}</label>
+          <select class="form-select" id="{{ field_id_prefix }}-city" name="city" required data-country-city data-selected-city="{{ selected_city }}" aria-label="{{ location_labels.cityLabel or 'Ciudad' }}">
+            <option value="">{{ location_labels.cityPlaceholder or 'Selecciona ciudad' }}</option>
           </select>
         </div>
       {% else %}
@@ -222,12 +223,12 @@
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestedUsd">Credito solicitado USD</label>
-        <input class="form-control" id="{{ field_id_prefix }}-creditRequestedUsd" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}" aria-label="Credito solicitado USD">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestedUsd">Credito solicitado {{ sales_currency }}</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditRequestedUsd" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}" aria-label="Credito solicitado {{ sales_currency }}">
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditLimitUsd">Limite credito USD</label>
-        <input class="form-control" id="{{ field_id_prefix }}-creditLimitUsd" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}" aria-label="Limite credito USD">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditLimitUsd">Limite credito {{ sales_currency }}</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditLimitUsd" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd if client is defined else 0 }}" aria-label="Limite credito {{ sales_currency }}">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-paymentTermsDays">Dias credito</label>
@@ -248,8 +249,8 @@
         </label>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestedUsd">Monto solicitado USD</label>
-        <input class="form-control" id="{{ field_id_prefix }}-creditRequestedUsd" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}" aria-label="Monto solicitado USD">
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditRequestedUsd">Monto solicitado {{ sales_currency }}</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditRequestedUsd" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd if client is defined else 0 }}" aria-label="Monto solicitado {{ sales_currency }}">
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-currentCreditStatus">Estado actual</label>
@@ -258,8 +259,8 @@
       {% endif %}
 
       <div class="col-12 col-md-4">
-        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditUsedUsd">Credito usado manual USD</label>
-        <input class="form-control" id="{{ field_id_prefix }}-creditUsedUsd" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}" aria-label="Credito usado manual USD" {% if not can_approve_credit %}readonly{% endif %}>
+        <label class="form-label fw-semibold" for="{{ field_id_prefix }}-creditUsedUsd">Credito usado manual {{ sales_currency }}</label>
+        <input class="form-control" id="{{ field_id_prefix }}-creditUsedUsd" name="creditUsedUsd" inputmode="decimal" value="{{ client.creditUsedUsd if client is defined else 0 }}" aria-label="Credito usado manual {{ sales_currency }}" {% if not can_approve_credit %}readonly{% endif %}>
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label fw-semibold" for="{{ field_id_prefix }}-collectionStatus">Estado cobranza</label>

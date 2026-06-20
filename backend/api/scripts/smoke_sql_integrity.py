@@ -20,8 +20,10 @@ if str(ROOT_DIR) not in sys.path:
 import app as FVENTAS_app
 from core.db import drop_database, init_database
 from sql_store import load_sql_store, sync_admin_user_records, sync_client_records, sync_store_to_sql
-from store import normalize_store, utc_now
-from werkzeug.security import generate_password_hash
+from store import DEFAULT_COMPANY_ID, normalize_store, utc_now
+
+
+generate_password_hash = FVENTAS_app.generate_password_hash
 
 
 ADMIN_ID = "admin-sql-smoke"
@@ -307,8 +309,63 @@ def post(client, path: str, data: dict | None = None):
 def main() -> int:
     drop_database()
     init_database()
-    sync_store_to_sql(base_store())
     now = utc_now()
+    initial_store = base_store()
+    other_company_id = "company-sql-other"
+    duplicate_admin_email = "admin.tenant.duplicate.sql@FVENTAS.test"
+    initial_store.setdefault("companies", []).append(
+        {
+            "id": other_company_id,
+            "name": "Empresa SQL Otra",
+            "country": "CL",
+            "status": "active",
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )
+    initial_store["admin_users"].extend(
+        [
+            {
+                "id": "admin-sql-tenant-a",
+                "companyId": DEFAULT_COMPANY_ID,
+                "name": "Admin SQL Tenant A",
+                "email": duplicate_admin_email,
+                "passwordHash": generate_password_hash("AdminSqlTenantA2026"),
+                "role": "admin",
+                "status": "active",
+                "sessionVersion": 0,
+                "mustChangePassword": False,
+                "activeSessions": [],
+                "createdAt": now,
+                "updatedAt": now,
+            },
+            {
+                "id": "admin-sql-tenant-b",
+                "companyId": other_company_id,
+                "name": "Admin SQL Tenant B",
+                "email": duplicate_admin_email,
+                "passwordHash": generate_password_hash("AdminSqlTenantB2026"),
+                "role": "admin",
+                "status": "active",
+                "sessionVersion": 0,
+                "mustChangePassword": False,
+                "activeSessions": [],
+                "createdAt": now,
+                "updatedAt": now,
+            },
+        ]
+    )
+    sync_store_to_sql(initial_store)
+    synced_admins = [
+        item
+        for item in load_sql_store()["admin_users"]
+        if str(item.get("email", "")).lower() == duplicate_admin_email.lower()
+    ]
+    assert len(synced_admins) == 2, "admins con mismo correo en empresas distintas no deben fusionarse en SQL"
+    assert {item.get("companyId") for item in synced_admins} == {
+        DEFAULT_COMPANY_ID,
+        other_company_id,
+    }, "admins duplicados por correo deben conservar su empresa"
     sync_admin_user_records(
         [
             {

@@ -28,6 +28,24 @@ from store import (
 Config = get_config()
 
 
+LEGAL_TEMPLATE_REQUIREMENTS = {
+    "privacy_policy.html": [
+        "Politica de privacidad",
+        "Solicitud de eliminacion",
+        "Terminos del servicio",
+    ],
+    "terms_of_service.html": [
+        "Terminos del servicio",
+        "Politica de privacidad",
+        "Eliminar cuenta",
+    ],
+    "account_deletion.html": [
+        "Solicitud de eliminacion de cuenta",
+        "politica de privacidad",
+    ],
+}
+
+
 @dataclass
 class Finding:
     severity: str
@@ -69,8 +87,27 @@ def audit_config(findings: list[Finding], strict: bool) -> None:
             add(findings, "error", "sql-fallback", "Produccion debe tener FVENTAS_SQL_FALLBACK_TO_JSON=0.")
         if not Config.REQUIRE_MOBILE_TOKEN:
             add(findings, "error", "mobile-token", "Produccion debe exigir token movil.")
+        if not getattr(Config, "REQUIRE_MOBILE_DEVICE_HEADER", False):
+            add(findings, "error", "mobile-device", "Produccion debe exigir X-FVENTAS-Device-Id en tokens moviles.")
+        if getattr(Config, "ALLOW_LEGACY_MOBILE_API", True):
+            add(findings, "error", "mobile-legacy-api", "Produccion debe desactivar /api/mobile/* legacy.")
         if str(Config.STORAGE_BACKEND).lower() != "s3":
             add(findings, "error", "storage", "Produccion debe usar storage S3/Spaces.")
+        if not Config.SESSION_COOKIE_SECURE:
+            add(findings, "error", "session-secure", "Produccion debe marcar cookies de sesion como Secure.")
+        if not Config.SESSION_COOKIE_HTTPONLY:
+            add(findings, "error", "session-httponly", "Produccion debe marcar cookies de sesion como HttpOnly.")
+        if str(Config.SESSION_COOKIE_SAMESITE).lower() not in {"lax", "strict"}:
+            add(findings, "error", "session-samesite", "Produccion debe usar SameSite=Lax o Strict.")
+        if getattr(Config, "CONTENT_SECURITY_POLICY_REPORT_ONLY", True):
+            add(findings, "error", "csp-enforcement", "Produccion debe aplicar Content-Security-Policy en modo bloqueo.")
+        if not getattr(Config, "TRUST_PROXY_HEADERS", False):
+            add(
+                findings,
+                "warn",
+                "proxy-headers",
+                "Si el backend queda detras de DigitalOcean/Caddy, configura FVENTAS_TRUST_PROXY_HEADERS=1 para auditoria y rate limit por IP real.",
+            )
     else:
         add(findings, "info", "environment", f"Entorno actual: {Config.ENV}.")
 
@@ -80,6 +117,29 @@ def audit_config(findings: list[Finding], strict: bool) -> None:
         add(findings, expected, "storage-public-url", "FVENTAS_STORAGE_PUBLIC_BASE_URL no esta configurado.")
     if strict and "sqlite" in Config.DATABASE_URL:
         add(findings, expected, "database-url", "La base configurada parece SQLite, no PostgreSQL.")
+
+
+def audit_legal_templates(findings: list[Finding], strict: bool) -> None:
+    templates_dir = ROOT_DIR / "templates"
+    severity = "error" if strict else "warn"
+    for template_name, required_fragments in LEGAL_TEMPLATE_REQUIREMENTS.items():
+        template_path = templates_dir / template_name
+        if not template_path.exists():
+            add(findings, severity, "legal-template", f"Falta template legal: {template_name}.")
+            continue
+        content = template_path.read_text(encoding="utf-8", errors="ignore").lower()
+        missing = [
+            fragment
+            for fragment in required_fragments
+            if fragment.lower() not in content
+        ]
+        if missing:
+            add(
+                findings,
+                severity,
+                "legal-template",
+                f"{template_name} no contiene: {', '.join(missing)}.",
+            )
 
 
 def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]], strict: bool) -> None:
@@ -98,6 +158,7 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
 
     admin_users = store.get("admin_users", [])
     clients = store.get("clients", [])
+    companies = store.get("companies", [])
     active_admins = active_items(admin_users)
     active_clients = active_items(clients)
     active_products = active_items(store.get("products", []))
@@ -112,6 +173,24 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         add(findings, "error", "client-email", f"Emails cliente duplicados: {', '.join(client_emails[:8])}.")
     if product_skus:
         add(findings, "error", "product-sku", f"SKUs duplicados: {', '.join(product_skus[:8])}.")
+    mobile_admin_emails = {
+        str(user.get("email") or "").strip().lower()
+        for user in active_admins
+        if user.get("role") in {"sales", "commercial_manager", "super_admin"}
+        and user.get("mobileAccessEnabled", True) is not False
+    }
+    mobile_client_emails = {
+        str(client.get("email") or "").strip().lower()
+        for client in active_clients
+    }
+    duplicated_mobile_identities = sorted((mobile_admin_emails & mobile_client_emails) - {""})
+    if duplicated_mobile_identities:
+        add(
+            findings,
+            "error",
+            "mobile-identity-email",
+            f"Correos usados por cliente y usuario movil: {', '.join(duplicated_mobile_identities[:8])}.",
+        )
 
     real_super_admins = [
         user
@@ -182,10 +261,11 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         add(findings, "warn", "seller", "No hay vendedores activos para cartera/comisiones.")
     if not active_clients:
         add(findings, "warn", "clients", "No hay clientes B2B activos.")
+    commercial_data_severity = "error" if strict else "warn"
     if not active_products:
-        add(findings, "error", "products", "No hay productos activos para la app movil.")
+        add(findings, commercial_data_severity, "products", "No hay productos activos para la app movil.")
     if not active_categories:
-        add(findings, "error", "categories", "No hay categorias activas.")
+        add(findings, commercial_data_severity, "categories", "No hay categorias activas.")
 
     category_ids = {category.get("id") for category in store.get("categories", [])}
     for product in active_products:
@@ -206,6 +286,20 @@ def audit_store(findings: list[Finding], store: dict[str, list[dict[str, Any]]],
         add(findings, "warn", "announcements", "No hay anuncios activos para el carrusel movil.")
     if not active_items(store.get("service_technicians", [])):
         add(findings, "warn", "service-technicians", "No hay servicios tecnicos activos visibles.")
+
+    companies_without_legal_acceptance = [
+        company.get("name") or company.get("id", "sin-id")
+        for company in companies
+        if not (company.get("legalAcceptance") or {}).get("accepted")
+    ]
+    if companies_without_legal_acceptance:
+        add(
+            findings,
+            "error" if strict else "warn",
+            "legal-acceptance",
+            "Empresas sin version legal aceptada: "
+            f"{', '.join(companies_without_legal_acceptance[:8])}.",
+        )
 
 
 def print_report(findings: list[Finding]) -> None:
@@ -233,6 +327,7 @@ def main() -> None:
     strict = args.strict or str(Config.ENV).lower() == "production"
 
     audit_config(findings, strict=strict)
+    audit_legal_templates(findings, strict=strict)
     try:
         store = load_store()
     except Exception as exc:

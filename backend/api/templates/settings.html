@@ -30,9 +30,9 @@
   <div class="col-12 col-md-6 col-xl-3">
     <article class="metric-card">
       <div class="metric-icon"><i class="bi bi-credit-card-2-front"></i></div>
-      <span>Credito</span>
-      <strong>{{ settings.overdueBlockDays }} dias</strong>
-      <em>Bloqueo por mora</em>
+      <span>Condiciones</span>
+      <strong>{{ payment_terms_text }}</strong>
+      <em>{{ settings.purchaseConditionsScope }}</em>
     </article>
   </div>
   <div class="col-12 col-md-6 col-xl-3">
@@ -99,8 +99,12 @@
       </div>
 
       <div class="col-12 col-xl-6">
-        <div class="section-title">Moneda y credito</div>
+        <div class="section-title">Condiciones de compra</div>
         <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Titulo visible en app</label>
+            <input class="form-control" name="purchaseConditionsTitle" value="{{ settings.purchaseConditionsTitle }}" placeholder="Condiciones de compra">
+          </div>
           <div class="col-6 col-md-4">
             <label class="form-label">Moneda de venta</label>
             <select class="form-select" id="settingsSalesCurrency" name="primaryCurrency">
@@ -122,16 +126,33 @@
             <input class="form-control" id="settingsExchangeRate" name="exchangeRateBaseToLocal" inputmode="decimal" value="{{ settings.exchangeRateBaseToLocal or settings.exchangeRateUsdClp or settings.exchangeRateUsdVes }}">
           </div>
           <div class="col-12 col-md-6">
-            <label class="form-label">Plazos permitidos</label>
+            <label class="form-label">Plazos visibles para compra</label>
             <input class="form-control" name="defaultPaymentTermsDays" value="{{ payment_terms_text }}" placeholder="0, 10, 15, 20, 30, 40">
+            <div class="form-text">Usa 0 para contado. Estos plazos se publican en la app y se usan para pedidos.</div>
           </div>
-          <div class="col-12 col-md-3">
-            <label class="form-label">Aprobacion USD</label>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Tipo de venta base</label>
+            <select class="form-select" name="purchaseDefaultSaleType">
+              {% for value, label in sale_type_options %}
+              <option value="{{ value }}" {% if settings.purchaseDefaultSaleType == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Umbral aprobacion {{ settings.primaryCurrency }}</label>
             <input class="form-control" name="creditApprovalThresholdUsd" inputmode="decimal" value="{{ settings.creditApprovalThresholdUsd }}">
           </div>
-          <div class="col-12 col-md-3">
+          <div class="col-12 col-md-6">
             <label class="form-label">Bloqueo mora</label>
             <input class="form-control" name="overdueBlockDays" inputmode="numeric" value="{{ settings.overdueBlockDays }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Alcance visible en app</label>
+            <input class="form-control" name="purchaseConditionsScope" value="{{ settings.purchaseConditionsScope }}" placeholder="Solo datos de tu empresa">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Nota comercial visible en app</label>
+            <textarea class="form-control" name="purchaseConditionsNote" rows="3" placeholder="Pedidos sujetos a validacion de stock, credito y despacho.">{{ settings.purchaseConditionsNote }}</textarea>
           </div>
         </div>
       </div>

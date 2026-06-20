@@ -1,10 +1,35 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/mobile_environment.dart';
 import '../domain/mobile_models.dart';
+
+class MobilePurchaseConditions {
+  const MobilePurchaseConditions({
+    this.title = "Condiciones de compra",
+    this.currencyLabel = "",
+    this.exchangeRateLabel = "",
+    this.allowedPaymentTermsDays = const [0],
+    this.paymentTermsLabel = "",
+    this.defaultSaleType = "cash",
+    this.defaultSaleTypeLabel = "Contado",
+    this.scopeLabel = "Solo datos de tu empresa",
+    this.note = "",
+  });
+
+  final String title;
+  final String currencyLabel;
+  final String exchangeRateLabel;
+  final List<int> allowedPaymentTermsDays;
+  final String paymentTermsLabel;
+  final String defaultSaleType;
+  final String defaultSaleTypeLabel;
+  final String scopeLabel;
+  final String note;
+}
 
 class MobileUserSession {
   const MobileUserSession({
@@ -19,6 +44,12 @@ class MobileUserSession {
     this.allowedPaymentTermsDays = const [0],
     this.defaultSaleType = "cash",
     this.assignedSeller = const MobileSellerSnapshot(id: "", name: ""),
+    this.companyId = "",
+    this.marketCountry = "",
+    this.salesCurrency = "",
+    this.localCurrency = "",
+    this.exchangeRateUsdLocal,
+    this.purchaseConditions = const MobilePurchaseConditions(),
   });
 
   final String id;
@@ -32,12 +63,63 @@ class MobileUserSession {
   final List<int> allowedPaymentTermsDays;
   final String defaultSaleType;
   final MobileSellerSnapshot assignedSeller;
+  final String companyId;
+  final String marketCountry;
+  final String salesCurrency;
+  final String localCurrency;
+  final double? exchangeRateUsdLocal;
+  final MobilePurchaseConditions purchaseConditions;
 
   bool get isClient => accountRole == "client";
   bool get isSeller => accountRole == "sales";
   bool get isCommercialManager => accountRole == "commercial_manager";
   bool get isMobileSalesUser =>
       isSeller || isCommercialManager || accountRole == "super_admin";
+  String get effectiveCountry => marketCountry.trim().isNotEmpty
+      ? marketCountry.trim().toUpperCase()
+      : mobileEnvironment.countryCode;
+  String get effectiveDisplayCurrency =>
+      mobileEnvironment.displayCurrencyForMarket(
+        countryCode: effectiveCountry,
+        localCurrency: localCurrency,
+        primaryCurrency: salesCurrency,
+      );
+  String get effectivePrimaryCurrency => mobileEnvironment
+      .primaryCurrencyForMarket(primaryCurrency: salesCurrency);
+  double get effectiveExchangeRateUsdLocal =>
+      effectiveDisplayCurrency == effectivePrimaryCurrency
+          ? 1
+          : mobileEnvironment.exchangeRateForMarket(exchangeRateUsdLocal);
+}
+
+const _mobileDeviceIdKey = "fventas_mobile_device_id";
+
+Future<String> fventasMobileDeviceId({
+  FlutterSecureStorage storage = const FlutterSecureStorage(),
+}) async {
+  final stored = await storage.read(key: _mobileDeviceIdKey);
+  if (stored != null && stored.trim().isNotEmpty) {
+    return stored.trim();
+  }
+
+  final random = Random.secure();
+  final bytes = List<int>.generate(24, (_) => random.nextInt(256));
+  final deviceId = "fventas-${base64UrlEncode(bytes).replaceAll("=", "")}";
+  await storage.write(key: _mobileDeviceIdKey, value: deviceId);
+  return deviceId;
+}
+
+Future<void> attachFventasMobileHeaders(
+  HttpHeaders headers, {
+  MobileUserSession? session,
+  FlutterSecureStorage storage = const FlutterSecureStorage(),
+}) async {
+  headers.set(
+      "X-FVENTAS-Device-Id", await fventasMobileDeviceId(storage: storage));
+  final token = session?.accessToken ?? "";
+  if (token.isNotEmpty) {
+    headers.set("Authorization", "Bearer $token");
+  }
 }
 
 abstract class MobileAuthRepository {
@@ -56,18 +138,49 @@ abstract class MobileAuthRepository {
 }
 
 class MockMobileAuthRepository implements MobileAuthRepository {
+  MockMobileAuthRepository({String? initialSessionRole})
+      : _initialSessionRole =
+            initialSessionRole ?? mobileEnvironment.mockSessionRole;
+
   MobileUserSession? _session;
+  final String _initialSessionRole;
+  bool _initialSessionConsumed = false;
 
   @override
   Future<MobileUserSession> getCurrentSession() async {
-    return _session ??
-        const MobileUserSession(
-          id: "anonymous",
-          name: "Invitado",
-          email: "",
-          roleLabel: "Sin sesion",
-          isAuthenticated: false,
-        );
+    final session = _session;
+    if (session != null) {
+      return session;
+    }
+
+    final initialRole =
+        _initialSessionConsumed ? "" : _initialSessionRole.trim().toLowerCase();
+    if (initialRole == "seller" ||
+        initialRole == "sales" ||
+        initialRole == "vendedor") {
+      _initialSessionConsumed = true;
+      _session = _mockSession(
+        email: "vendedor@fventas.local",
+        isSeller: true,
+      );
+      return _session!;
+    }
+    if (initialRole == "client" || initialRole == "cliente") {
+      _initialSessionConsumed = true;
+      _session = _mockSession(
+        email: "cliente@fventas.local",
+        isSeller: false,
+      );
+      return _session!;
+    }
+
+    return const MobileUserSession(
+      id: "anonymous",
+      name: "Invitado",
+      email: "",
+      roleLabel: "Sin sesion",
+      isAuthenticated: false,
+    );
   }
 
   @override
@@ -85,21 +198,53 @@ class MockMobileAuthRepository implements MobileAuthRepository {
         localPart.contains("seller") ||
         localPart.contains("ventas");
 
-    _session = MobileUserSession(
-      id: isSeller ? "seller-local-fventas" : "client-local-fventas",
-      name: isSeller ? "Vendedor FVENTAS" : "Cliente FVENTAS",
+    _session = _mockSession(
       email: normalizedEmail,
+      isSeller: isSeller,
+    );
+    _initialSessionConsumed = true;
+    return _session!;
+  }
+
+  MobileUserSession _mockSession({
+    required String email,
+    required bool isSeller,
+  }) {
+    return MobileUserSession(
+      id: isSeller ? "seller-local-fventas" : "client-local-fventas",
+      name: isSeller ? "Vendedor FVENTAS" : "Ferreteria Alameda",
+      email: email,
       roleLabel: isSeller ? "Vendedor" : "Cliente B2B",
       isAuthenticated: true,
       accountRole: isSeller ? "sales" : "client",
       allowedPaymentTermsDays: const [0, 15, 30],
       defaultSaleType: isSeller ? "cash" : "term_credit",
-      assignedSeller: const MobileSellerSnapshot(
+      assignedSeller: MobileSellerSnapshot(
         id: "seller-local-fventas",
-        name: "Vendedor FVENTAS",
+        name: isSeller ? "Vendedor FVENTAS" : "Carolina Reyes",
+      ),
+      companyId: "company-local-fventas",
+      marketCountry: mobileEnvironment.countryCode,
+      salesCurrency: mobileEnvironment.primaryCurrency,
+      localCurrency: mobileEnvironment.localCurrency,
+      exchangeRateUsdLocal: mobileEnvironment.exchangeRateUsdLocal,
+      purchaseConditions: MobilePurchaseConditions(
+        currencyLabel: mobileEnvironment.currencySymbolForCurrency(
+                  mobileEnvironment.displayCurrency,
+                ) ==
+                mobileEnvironment.displayCurrency
+            ? mobileEnvironment.displayCurrency
+            : '${mobileEnvironment.currencySymbolForCurrency(mobileEnvironment.displayCurrency)} ${mobileEnvironment.displayCurrency}',
+        exchangeRateLabel: mobileEnvironment.displaysPrimaryCurrency
+            ? ""
+            : mobileEnvironment.exchangeRateLabel,
+        allowedPaymentTermsDays: const [0, 15, 30],
+        paymentTermsLabel: "Contado / 15, 30 dias",
+        defaultSaleType: isSeller ? "cash" : "term_credit",
+        defaultSaleTypeLabel: isSeller ? "Contado" : "Credito por dias",
+        note: "Pedidos sujetos a validacion de stock, credito y despacho.",
       ),
     );
-    return _session!;
   }
 
   @override
@@ -118,11 +263,13 @@ class MockMobileAuthRepository implements MobileAuthRepository {
   @override
   Future<void> requestAccountDeletion({String reason = ""}) async {
     _session = null;
+    _initialSessionConsumed = true;
   }
 
   @override
   Future<void> signOut() async {
     _session = null;
+    _initialSessionConsumed = true;
   }
 }
 
@@ -137,6 +284,19 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
   final Uri _baseUri;
   final FlutterSecureStorage _storage;
   MobileUserSession? _session;
+
+  Future<String> _deviceId() => fventasMobileDeviceId(storage: _storage);
+
+  Future<void> _attachSessionHeaders(
+    HttpHeaders headers,
+    MobileUserSession session,
+  ) {
+    return attachFventasMobileHeaders(
+      headers,
+      session: session,
+      storage: _storage,
+    );
+  }
 
   @override
   Future<MobileUserSession> getCurrentSession() async {
@@ -174,7 +334,13 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
-      request.write(jsonEncode({"email": email, "password": password}));
+      final deviceId = await _deviceId();
+      request.headers.set("X-FVENTAS-Device-Id", deviceId);
+      request.write(jsonEncode({
+        "email": email,
+        "password": password,
+        "deviceId": deviceId,
+      }));
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
 
@@ -206,7 +372,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
-      request.headers.set("Authorization", "Bearer ${stored.accessToken}");
+      await _attachSessionHeaders(request.headers, stored);
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
 
@@ -251,6 +417,15 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
     final sellerData = assignedSeller is Map<String, dynamic>
         ? assignedSeller
         : <String, dynamic>{};
+    final market = data["market"];
+    final marketData = market is Map ? market : const {};
+    final purchaseConditions = _purchaseConditionsFromPayload(
+      data["purchaseConditions"],
+      fallbackTerms: _asIntList(
+        data["allowedPaymentTermsDays"],
+        fallback: const [0],
+      ),
+    );
     final accountRole = data["accountRole"]?.toString() ??
         data["clientType"]?.toString() ??
         "client";
@@ -273,6 +448,30 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         id: sellerData["id"]?.toString() ?? "",
         name: sellerData["name"]?.toString() ?? "",
       ),
+      companyId: _firstNonEmpty([data["companyId"], marketData["companyId"]]),
+      marketCountry: _firstNonEmpty([
+        marketData["country"],
+        data["marketCountry"],
+        data["country"],
+      ]),
+      salesCurrency: _firstNonEmpty([
+        marketData["salesCurrency"],
+        data["salesCurrency"],
+        data["baseCurrency"],
+      ]),
+      localCurrency: _firstNonEmpty([
+        marketData["localCurrency"],
+        data["localCurrency"],
+        data["currency"],
+      ]),
+      exchangeRateUsdLocal: _firstDouble([
+        marketData["exchangeRateBaseToLocal"],
+        marketData["exchangeRate"],
+        data["exchangeRateBaseToLocal"],
+        data["exchangeRateUsdLocal"],
+        data["exchangeRate"],
+      ]),
+      purchaseConditions: purchaseConditions,
     );
   }
 
@@ -292,7 +491,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
-      request.headers.set("Authorization", "Bearer ${session.accessToken}");
+      await _attachSessionHeaders(request.headers, session);
       request.write(jsonEncode({
         "currentPassword": currentPassword,
         "newPassword": newPassword,
@@ -307,6 +506,10 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
             : null;
         throw StateError(message ?? "No se pudo cambiar la contrasena.");
       }
+      final payload = body.isNotEmpty ? jsonDecode(body) : null;
+      final newAccessToken = payload is Map<String, dynamic>
+          ? _firstNonEmpty([payload["accessToken"], session.accessToken])
+          : session.accessToken;
 
       _session = MobileUserSession(
         id: session.id,
@@ -315,11 +518,17 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         roleLabel: session.roleLabel,
         isAuthenticated: session.isAuthenticated,
         accountRole: session.accountRole,
-        accessToken: session.accessToken,
+        accessToken: newAccessToken,
         mustChangePassword: false,
         allowedPaymentTermsDays: session.allowedPaymentTermsDays,
         defaultSaleType: session.defaultSaleType,
         assignedSeller: session.assignedSeller,
+        companyId: session.companyId,
+        marketCountry: session.marketCountry,
+        salesCurrency: session.salesCurrency,
+        localCurrency: session.localCurrency,
+        exchangeRateUsdLocal: session.exchangeRateUsdLocal,
+        purchaseConditions: session.purchaseConditions,
       );
       await _persistSession(_session!);
     } finally {
@@ -367,7 +576,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
-      request.headers.set("Authorization", "Bearer ${session.accessToken}");
+      await _attachSessionHeaders(request.headers, session);
       request.write(jsonEncode({"reason": reason}));
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
@@ -398,7 +607,7 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
       try {
         final request = await client.postUrl(uri);
         request.headers.contentType = ContentType.json;
-        request.headers.set("Authorization", "Bearer ${session.accessToken}");
+        await _attachSessionHeaders(request.headers, session);
         final response = await request.close();
         await response.drain<void>();
       } catch (_) {
@@ -429,6 +638,24 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
         "assignedSeller": {
           "id": session.assignedSeller.id,
           "name": session.assignedSeller.name,
+        },
+        "companyId": session.companyId,
+        "marketCountry": session.marketCountry,
+        "salesCurrency": session.salesCurrency,
+        "localCurrency": session.localCurrency,
+        "exchangeRateUsdLocal": session.exchangeRateUsdLocal,
+        "purchaseConditions": {
+          "title": session.purchaseConditions.title,
+          "currencyLabel": session.purchaseConditions.currencyLabel,
+          "exchangeRateLabel": session.purchaseConditions.exchangeRateLabel,
+          "allowedPaymentTermsDays":
+              session.purchaseConditions.allowedPaymentTermsDays,
+          "paymentTermsLabel": session.purchaseConditions.paymentTermsLabel,
+          "defaultSaleType": session.purchaseConditions.defaultSaleType,
+          "defaultSaleTypeLabel":
+              session.purchaseConditions.defaultSaleTypeLabel,
+          "scopeLabel": session.purchaseConditions.scopeLabel,
+          "note": session.purchaseConditions.note,
         },
       }),
     );
@@ -474,6 +701,20 @@ class ApiMobileAuthRepository implements MobileAuthRepository {
           id: sellerData["id"]?.toString() ?? "",
           name: sellerData["name"]?.toString() ?? "",
         ),
+        companyId: payload["companyId"]?.toString() ?? "",
+        marketCountry: payload["marketCountry"]?.toString() ?? "",
+        salesCurrency: payload["salesCurrency"]?.toString() ?? "",
+        localCurrency: payload["localCurrency"]?.toString() ?? "",
+        exchangeRateUsdLocal: _asDoubleOrNull(
+          payload["exchangeRateUsdLocal"],
+        ),
+        purchaseConditions: _purchaseConditionsFromPayload(
+          payload["purchaseConditions"],
+          fallbackTerms: _asIntList(
+            payload["allowedPaymentTermsDays"],
+            fallback: const [0],
+          ),
+        ),
       );
     } catch (_) {
       await _storage.delete(key: _sessionKey);
@@ -507,4 +748,62 @@ List<int> _asIntList(Object? value, {required List<int> fallback}) {
   }
 
   return fallback;
+}
+
+MobilePurchaseConditions _purchaseConditionsFromPayload(
+  Object? value, {
+  required List<int> fallbackTerms,
+}) {
+  final data = value is Map ? value : const {};
+  final terms = _asIntList(
+    data["allowedPaymentTermsDays"],
+    fallback: fallbackTerms,
+  );
+  return MobilePurchaseConditions(
+    title: _firstNonEmpty([data["title"], "Condiciones de compra"]),
+    currencyLabel: _firstNonEmpty([data["currencyLabel"]]),
+    exchangeRateLabel: _firstNonEmpty([data["exchangeRateLabel"]]),
+    allowedPaymentTermsDays: terms,
+    paymentTermsLabel: _firstNonEmpty([data["paymentTermsLabel"]]),
+    defaultSaleType: _firstNonEmpty([data["defaultSaleType"], "cash"]),
+    defaultSaleTypeLabel: _firstNonEmpty([
+      data["defaultSaleTypeLabel"],
+      "Contado",
+    ]),
+    scopeLabel: _firstNonEmpty([
+      data["scopeLabel"],
+      "Solo datos de tu empresa",
+    ]),
+    note: _firstNonEmpty([data["note"]]),
+  );
+}
+
+String _firstNonEmpty(Iterable<Object?> values) {
+  for (final value in values) {
+    final text = value?.toString().trim() ?? "";
+    if (text.isNotEmpty) {
+      return text;
+    }
+  }
+  return "";
+}
+
+double? _firstDouble(Iterable<Object?> values) {
+  for (final value in values) {
+    final parsed = _asDoubleOrNull(value);
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+double? _asDoubleOrNull(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is num) {
+    return value.toDouble();
+  }
+  return double.tryParse(value.toString());
 }

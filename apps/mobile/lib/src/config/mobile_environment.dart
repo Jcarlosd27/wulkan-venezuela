@@ -24,12 +24,37 @@ enum MobileAuthMode {
   }
 }
 
+const _zeroDecimalCurrencies = {"CLP", "COP", "PYG"};
+
+String _currencyCode(String value, String fallback) {
+  final normalized = value.trim().toUpperCase().replaceAll(
+        RegExp(r"[^A-Z]"),
+        "",
+      );
+  if (normalized.isEmpty) {
+    return fallback.trim().toUpperCase();
+  }
+  return normalized.length > 3 ? normalized.substring(0, 3) : normalized;
+}
+
+String _countryCode(String value, String fallback) {
+  final normalized = value.trim().toUpperCase().replaceAll(
+        RegExp(r"[^A-Z]"),
+        "",
+      );
+  if (normalized.isEmpty) {
+    return fallback.trim().toUpperCase();
+  }
+  return normalized;
+}
+
 class MobileEnvironment {
   const MobileEnvironment({
     required this.appEnvironment,
     required this.dataSource,
     required this.authMode,
     required this.allowMock,
+    required this.mockSessionRole,
     required this.defaultCountry,
     required this.primaryCurrency,
     required this.secondaryCurrency,
@@ -69,6 +94,10 @@ class MobileEnvironment {
         ),
       ),
       allowMock: allowMock,
+      mockSessionRole: const String.fromEnvironment(
+        "FVENTAS_MOCK_SESSION_ROLE",
+        defaultValue: "",
+      ),
       defaultCountry: const String.fromEnvironment(
         "FVENTAS_DEFAULT_COUNTRY",
         defaultValue: "CL",
@@ -97,6 +126,7 @@ class MobileEnvironment {
   final MobileDataSource dataSource;
   final MobileAuthMode authMode;
   final bool allowMock;
+  final String mockSessionRole;
   final String defaultCountry;
   final String primaryCurrency;
   final String secondaryCurrency;
@@ -109,18 +139,254 @@ class MobileEnvironment {
   bool get usesMock => dataSource == MobileDataSource.mock;
   bool get usesMockAuth => authMode == MobileAuthMode.mock;
   bool get isProduction => appEnvironment == "production";
-  bool get usesChileFormat => defaultCountry.trim().toUpperCase() == "CL";
-  String get localCurrency => secondaryCurrency;
-  String get currencyPairLabel => "$primaryCurrency / $secondaryCurrency";
-  String get exchangeRateLabel => "$secondaryCurrency/$primaryCurrency";
-  String get taxLabel => usesChileFormat ? "RUT" : "Documento fiscal";
-  String get taxPlaceholder =>
-      usesChileFormat ? "76.123.456-7" : "Documento fiscal";
-  String get phonePlaceholder =>
-      usesChileFormat ? "+56 9 1234 5678" : "+00 000 000 000";
+  String get countryCode => defaultCountry.trim().toUpperCase();
+  bool get usesChileFormat => countryCode == "CL";
+  String get displayCurrency => displayCurrencyForMarket();
+  bool get displaysPrimaryCurrency => displayCurrency == primaryCurrency;
+  String get localCurrency => displayCurrency;
+  String get currencyPairLabel => displaysPrimaryCurrency
+      ? displayCurrency
+      : "$displayCurrency / $primaryCurrency";
+  String get exchangeRateLabel => exchangeRateLabelForMarket();
+  String get taxLabel => taxLabelForMarket();
+  String get taxPlaceholder => taxPlaceholderForMarket();
+  String get phonePlaceholder => phonePlaceholderForMarket();
+
+  String taxLabelForMarket({String countryCode = ""}) {
+    return switch (_countryCode(countryCode, defaultCountry)) {
+      "CL" => "RUT",
+      "PE" || "EC" => "RUC",
+      "CO" => "NIT",
+      "MX" => "RFC",
+      "AR" => "CUIT",
+      "VE" => "RIF",
+      "US" => "EIN",
+      _ => "Documento fiscal",
+    };
+  }
+
+  String taxPlaceholderForMarket({String countryCode = ""}) {
+    return switch (_countryCode(countryCode, defaultCountry)) {
+      "CL" => "76.123.456-7",
+      "PE" => "20123456789",
+      "EC" => "1790012345001",
+      "CO" => "900123456-7",
+      "MX" => "XAXX010101000",
+      "AR" => "30-71234567-8",
+      "VE" => "J-12345678-9",
+      "US" => "12-3456789",
+      _ => "Documento fiscal",
+    };
+  }
+
+  String phonePlaceholderForMarket({String countryCode = ""}) {
+    return switch (_countryCode(countryCode, defaultCountry)) {
+      "CL" => "+56 9 1234 5678",
+      "PE" => "+51 987 654 321",
+      "EC" => "+593 99 123 4567",
+      "CO" => "+57 300 123 4567",
+      "MX" => "+52 55 1234 5678",
+      "AR" => "+54 9 11 2345 6789",
+      "VE" => "+58 412 123 4567",
+      "US" => "+1 305 555 0123",
+      _ => "+00 000 000 000",
+    };
+  }
+
+  String primaryCurrencyForMarket({String primaryCurrency = ""}) {
+    return _currencyCode(primaryCurrency, this.primaryCurrency);
+  }
+
+  String displayCurrencyForMarket({
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+  }) {
+    final explicitLocalCurrency = _currencyCode(localCurrency, "");
+    if (explicitLocalCurrency.isNotEmpty) {
+      return explicitLocalCurrency;
+    }
+
+    final effectiveCountry = _countryCode(countryCode, defaultCountry);
+    final effectivePrimaryCurrency =
+        primaryCurrencyForMarket(primaryCurrency: primaryCurrency);
+    return switch (effectiveCountry) {
+      "CL" => "CLP",
+      "PE" => "PEN",
+      "CO" => "COP",
+      "EC" => "USD",
+      "MX" => "MXN",
+      "AR" => "ARS",
+      "VE" || "US" => "USD",
+      _ => effectivePrimaryCurrency,
+    };
+  }
+
+  bool displaysPrimaryCurrencyForMarket({
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+  }) {
+    return displayCurrencyForMarket(
+          countryCode: countryCode,
+          localCurrency: localCurrency,
+          primaryCurrency: primaryCurrency,
+        ) ==
+        primaryCurrencyForMarket(primaryCurrency: primaryCurrency);
+  }
+
+  double exchangeRateForMarket(double? exchangeRateUsdLocal) {
+    final rate = exchangeRateUsdLocal ?? this.exchangeRateUsdLocal;
+    return rate.isFinite && rate > 0 ? rate : 1;
+  }
+
+  String exchangeRateLabelForMarket({
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+  }) {
+    final displayCurrency = displayCurrencyForMarket(
+      countryCode: countryCode,
+      localCurrency: localCurrency,
+      primaryCurrency: primaryCurrency,
+    );
+    final effectivePrimaryCurrency =
+        primaryCurrencyForMarket(primaryCurrency: primaryCurrency);
+    return displayCurrency == effectivePrimaryCurrency
+        ? displayCurrency
+        : "$displayCurrency/$effectivePrimaryCurrency";
+  }
+
+  String currencySymbolForMarket({
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+  }) {
+    return currencySymbolForCurrency(
+      displayCurrencyForMarket(
+        countryCode: countryCode,
+        localCurrency: localCurrency,
+        primaryCurrency: primaryCurrency,
+      ),
+    );
+  }
+
+  String currencySymbolForCurrency(String currency) {
+    return switch (_currencyCode(currency, primaryCurrency)) {
+      "USD" || "CLP" || "COP" || "MXN" || "ARS" => r"$",
+      "PEN" => "S/ ",
+      _ => "${_currencyCode(currency, primaryCurrency)} ",
+    };
+  }
+
+  double visibleAmountFromUsd(double usdAmount) {
+    return visibleAmountFromUsdForMarket(usdAmount);
+  }
+
+  double visibleAmountFromUsdForMarket(
+    double usdAmount, {
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+    double? exchangeRateUsdLocal,
+  }) {
+    final displayCurrency = displayCurrencyForMarket(
+      countryCode: countryCode,
+      localCurrency: localCurrency,
+      primaryCurrency: primaryCurrency,
+    );
+    final effectivePrimaryCurrency =
+        primaryCurrencyForMarket(primaryCurrency: primaryCurrency);
+    if (displayCurrency == effectivePrimaryCurrency) {
+      return usdAmount;
+    }
+    return usdAmount * exchangeRateForMarket(exchangeRateUsdLocal);
+  }
+
+  double visibleAmountToUsd(double visibleAmount) {
+    return visibleAmountToUsdForMarket(visibleAmount);
+  }
+
+  double visibleAmountToUsdForMarket(
+    double visibleAmount, {
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+    double? exchangeRateUsdLocal,
+  }) {
+    final displayCurrency = displayCurrencyForMarket(
+      countryCode: countryCode,
+      localCurrency: localCurrency,
+      primaryCurrency: primaryCurrency,
+    );
+    final effectivePrimaryCurrency =
+        primaryCurrencyForMarket(primaryCurrency: primaryCurrency);
+    if (displayCurrency == effectivePrimaryCurrency) {
+      return visibleAmount;
+    }
+    return visibleAmount / exchangeRateForMarket(exchangeRateUsdLocal);
+  }
+
+  String moneyFromUsd(double usdAmount, {int? fractionDigits}) {
+    return moneyFromUsdForMarket(usdAmount, fractionDigits: fractionDigits);
+  }
+
+  String moneyFromUsdForMarket(
+    double usdAmount, {
+    String countryCode = "",
+    String localCurrency = "",
+    String primaryCurrency = "",
+    double? exchangeRateUsdLocal,
+    int? fractionDigits,
+  }) {
+    final displayCurrency = displayCurrencyForMarket(
+      countryCode: countryCode,
+      localCurrency: localCurrency,
+      primaryCurrency: primaryCurrency,
+    );
+    final digits = fractionDigits ??
+        (_zeroDecimalCurrencies.contains(displayCurrency) ? 0 : 2);
+    final amount = visibleAmountFromUsdForMarket(
+      usdAmount,
+      countryCode: countryCode,
+      localCurrency: localCurrency,
+      primaryCurrency: primaryCurrency,
+      exchangeRateUsdLocal: exchangeRateUsdLocal,
+    );
+    return "${currencySymbolForCurrency(displayCurrency)}${_formatMoneyAmount(amount, digits, displayCurrency)}";
+  }
 
   String localMoney(double baseAmount) {
-    return "$secondaryCurrency ${(baseAmount * exchangeRateUsdLocal).toStringAsFixed(2)}";
+    return moneyFromUsd(baseAmount);
+  }
+
+  String _formatMoneyAmount(
+    double amount,
+    int fractionDigits,
+    String currency,
+  ) {
+    final normalized = amount.isFinite ? amount : 0;
+    final fixed = normalized.abs().toStringAsFixed(fractionDigits);
+    final parts = fixed.split(".");
+    final integer = parts.first;
+    final buffer = StringBuffer();
+    final usesLatinSeparators = currency != "USD";
+
+    for (var index = 0; index < integer.length; index += 1) {
+      final remaining = integer.length - index;
+      buffer.write(integer[index]);
+      if (remaining > 1 && remaining % 3 == 1) {
+        buffer.write(usesLatinSeparators ? "." : ",");
+      }
+    }
+
+    final sign = normalized < 0 ? "-" : "";
+    if (fractionDigits == 0) {
+      return "$sign$buffer";
+    }
+    final decimals = parts.length > 1 ? parts.last : "";
+    final decimalSeparator = usesLatinSeparators ? "," : ".";
+    return "$sign$buffer$decimalSeparator$decimals";
   }
 
   String get dataSourceLabel => switch (dataSource) {

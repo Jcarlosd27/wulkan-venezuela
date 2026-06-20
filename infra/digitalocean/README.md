@@ -4,7 +4,7 @@ Esta carpeta deja el proyecto listo para operar el admin Flask y la API movil de
 
 ## Componentes
 
-- **App Platform**: ejecuta `backend/api` con Docker, Gunicorn y Flask.
+- **App Platform o Droplet**: ejecuta `backend/api` con Docker, Gunicorn y Flask.
 - **Managed PostgreSQL**: almacena productos, categorias, clientes, credito, ordenes, auditoria y usuarios admin.
 - **Spaces**: almacena fotos de productos, imagenes de categorias, banners y PDFs.
 - **App movil Flutter**: consume el dominio publico del admin/API, no el computador local.
@@ -30,11 +30,11 @@ FVENTAS_DB_MAX_OVERFLOW=2
 
 Esto evita levantar copias innecesarias de Flask/Gunicorn y mantiene un pool SQL acotado. Si la RAM se mantiene bajo 70% y el trafico crece, se puede escalar subiendo el tamano del contenedor antes de aumentar workers.
 
-## Crear la app en DigitalOcean
+## Ruta recomendada: App Platform
 
 1. Crear un Space, por ejemplo `fventas-assets`, en la region elegida.
 2. Crear una llave de Spaces y guardarla como `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY`.
-3. Crear la App Platform desde el repositorio de GitHub o importando `.do/app.yaml`.
+3. Crear la App Platform desde el repositorio de GitHub `Jcarlosd27/wulkan-venezuela` o importando `.do/app.yaml`.
 4. Reemplazar estos valores antes del primer deploy:
    - `FVENTAS_SECRET_KEY`
    - `AWS_ACCESS_KEY_ID`
@@ -43,7 +43,36 @@ Esto evita levantar copias innecesarias de Flask/Gunicorn y mantiene un pool SQL
    - `FVENTAS_S3_BUCKET`
    - `FVENTAS_S3_REGION`
    - `FVENTAS_S3_ENDPOINT_URL`
+   - `FVENTAS_SIGNUP_WINDOW_SECONDS` y `FVENTAS_SIGNUP_MAX_EVENTS`
+   - `FVENTAS_ACCOUNT_DELETION_WINDOW_SECONDS` y `FVENTAS_ACCOUNT_DELETION_MAX_EVENTS`
 5. Confirmar que la base de datos quede enlazada y que `FVENTAS_DATABASE_URL` use la variable interna entregada por App Platform.
+
+`FVENTAS_S3_ACL=public-read` solo debe aplicar a recursos publicos como imagenes de producto/categoria/anuncios. Los documentos internos quedan protegidos por visibilidad, ruta firmada y auditoria desde el panel.
+
+## Ruta alternativa: Droplet con Docker Compose
+
+Usar esta ruta si Oceancloud se administrara como VPS.
+
+```bash
+cd infra/docker
+cp .env.production.example .env.production
+# Editar .env.production con dominio, Managed PostgreSQL, Spaces y secretos reales.
+docker compose -f docker-compose.production.yml --env-file .env.production build
+docker compose -f docker-compose.production.yml --env-file .env.production up -d
+```
+
+Si se necesita un ambiente autocontenido con PostgreSQL dentro del VPS:
+
+```bash
+cd infra/docker
+cp .env.production.localdb.example .env.production
+# Editar secretos, dominio y storage antes de levantar.
+docker compose \
+  -f docker-compose.production.yml \
+  -f docker-compose.production.localdb.yml \
+  --env-file .env.production \
+  up -d --build
+```
 
 El backend falla al arrancar en produccion si intenta usar JSON, SQLite, storage local o secreto de desarrollo. Con `FVENTAS_HARDEN_DEFAULT_ACCOUNTS=1`, el arranque tambien deshabilita cuentas, clientes, productos, categorias, anuncios y servicios tecnicos demo para que la app solo muestre datos creados o cargados por la empresa suscrita.
 
@@ -63,9 +92,8 @@ El script pide una contrasena temporal segura y obliga a cambiarla al iniciar se
 ## Validar produccion
 
 ```bash
-cd backend/api
 python scripts/readiness_check.py --strict
-python scripts/smoke_production.py --base-url https://app.fventas.cl
+python scripts/smoke_production.py --base-url https://app.example.com
 ```
 
 `readiness_check.py --strict` debe pasar antes de venta comercial: exige super admin real, sin demos activos, catalogo/categorias reales y configuracion SQL/S3/token movil. Si todavia no hay productos reales cargados, el smoke puede fallar en catalogo aunque el servicio este sano.
@@ -74,9 +102,9 @@ Endpoints importantes:
 
 - `/healthz`: salud del servicio.
 - `/readyz`: valida lectura de datos.
-- `/api/mobile/products`: catalogo movil.
-- `/api/mobile/categories`: categorias movil.
-- `/api/mobile/announcements`: carrusel movil.
+- `/api/v1/mobile/products`: catalogo movil.
+- `/api/v1/mobile/categories`: categorias movil.
+- `/api/v1/mobile/announcements`: carrusel movil.
 
 ## Compilar la app movil contra DigitalOcean
 
@@ -84,8 +112,8 @@ Editar `apps/mobile/dart_defines.digitalocean.example.json` con el dominio real:
 
 ```json
 {
-  "FVENTAS_ADMIN_API_URL": "https://app.fventas.cl/api/mobile",
-  "FVENTAS_MOBILE_ORDER_API_URL": "https://app.fventas.cl/api/mobile/orders"
+  "FVENTAS_ADMIN_API_URL": "https://app.example.com/api/v1/mobile",
+  "FVENTAS_MOBILE_ORDER_API_URL": "https://app.example.com/api/v1/mobile/orders"
 }
 ```
 

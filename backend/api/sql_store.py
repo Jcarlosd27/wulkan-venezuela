@@ -706,14 +706,17 @@ def upsert_admin_user(session, user: dict[str, Any], object_id: str | None = Non
     object_id = object_id or user["id"]
     values = admin_user_sql_values(user, object_id)
     email = values.get("email") or ""
-    existing_by_email = (
-        session.query(AdminUser)
-        .filter(AdminUser.email == email)
-        .order_by(AdminUser.updated_at.desc(), AdminUser.created_at.desc())
-        .first()
-        if email
-        else None
-    )
+    company_id = payload_company_id(user)
+    existing_by_email = None
+    if email:
+        email_matches = (
+            session.query(AdminUser)
+            .filter(AdminUser.email == email)
+            .order_by(AdminUser.updated_at.desc(), AdminUser.created_at.desc())
+            .limit(200)
+            .all()
+        )
+        existing_by_email = next((row for row in email_matches if row_company_id(row) == company_id), None)
     if existing_by_email and existing_by_email.id != object_id:
         object_id = existing_by_email.id
         values["id"] = object_id

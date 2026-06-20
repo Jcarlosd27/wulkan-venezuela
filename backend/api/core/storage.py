@@ -61,11 +61,16 @@ def validate_declared_mime(file_storage: FileStorage, extension: str) -> None:
         raise ValueError("El tipo MIME no coincide con un PDF valido.")
 
 
-def validate_upload(file_storage: FileStorage, max_bytes: int = 0) -> str:
+def validate_upload(
+    file_storage: FileStorage,
+    max_bytes: int = 0,
+    allowed_extensions: set[str] | frozenset[str] | None = None,
+) -> str:
     filename = secure_filename(file_storage.filename or "")
     extension = file_extension(filename)
-    if not filename or extension not in ALLOWED_EXTENSIONS:
-        allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
+    effective_extensions = set(allowed_extensions or ALLOWED_EXTENSIONS) & ALLOWED_EXTENSIONS
+    if not filename or extension not in effective_extensions:
+        allowed = ", ".join(sorted(effective_extensions or ALLOWED_EXTENSIONS))
         raise ValueError(f"Archivo no permitido. Formatos validos: {allowed}.")
     if max_bytes and stream_size(file_storage) > max_bytes:
         raise ValueError(f"Archivo demasiado grande. Maximo permitido: {max_bytes // (1024 * 1024)} MB.")
@@ -200,11 +205,12 @@ def save_uploaded_file(
     s3_prefix: str,
     s3_acl: str = "",
     max_bytes: int = 0,
+    allowed_extensions: set[str] | frozenset[str] | None = None,
 ) -> str:
     if not file_storage or not file_storage.filename:
         return ""
 
-    filename = validate_upload(file_storage, max_bytes=max_bytes)
+    filename = validate_upload(file_storage, max_bytes=max_bytes, allowed_extensions=allowed_extensions)
     backend = storage_backend.strip().lower()
     if backend == "s3":
         return save_s3(

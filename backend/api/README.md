@@ -35,9 +35,9 @@ http://localhost:5000
 API movil:
 
 ```text
-http://localhost:5000/api/mobile/products
-http://localhost:5000/api/mobile/announcements
-http://localhost:5000/api/mobile/auth/login
+http://localhost:5000/api/v1/mobile/products
+http://localhost:5000/api/v1/mobile/announcements
+http://localhost:5000/api/v1/mobile/auth/login
 ```
 
 Salud del servicio:
@@ -183,5 +183,5 @@ Guia completa: `../../docs/architecture/PROJECT_STRUCTURE.md`.
 - Auditoria disponible en `/audit` para `super_admin`.
 - Usuarios admin y clientes nuevos quedan con contrasena temporal y `mustChangePassword`.
 - El admin cambia su clave en `/account/password`.
-- El cliente B2B cambia su clave con `POST /api/mobile/auth/change-password`.
+- El cliente B2B cambia su clave con `POST /api/v1/mobile/auth/change-password`.
 - Login admin y movil tienen bloqueo temporal por intentos fallidos.

@@ -6,8 +6,8 @@
     <title>FVENTAS | CRM B2B y ventas moviles</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/fventas-crm-icon.svg') }}?v=20260615-saas">
     <meta name="theme-color" content="#0d6efd">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" integrity="sha384-tViUnnbYAV00FLIhhi3v/dWt3Jxw4gZQcNoSCxCIFNJVCx7/D55/wXsrNIRANwdD" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="{{ url_for('static', filename='css/uix.css') }}?v=20260615-saas" rel="stylesheet">
   </head>
   <body class="landing-body">
@@ -17,6 +17,8 @@
         <span>FVENTAS</span>
       </a>
       <div class="landing-nav-actions">
+        <a class="btn btn-light" href="{{ url_for('privacy_policy') }}">Privacidad</a>
+        <a class="btn btn-light" href="{{ url_for('terms_of_service') }}">Terminos</a>
         <a class="btn btn-light" href="{{ url_for('login') }}">Entrar</a>
         <a class="btn btn-primary" href="{{ url_for('signup') }}">Registrar empresa</a>
       </div>
@@ -32,23 +34,77 @@
             Cada empresa opera con sus propios usuarios, catalogo, creditos, ordenes y trazabilidad.
             Antes de pagar eliges el pais de operacion para configurar moneda, documento fiscal, telefono y zona horaria.
           </p>
-          <div class="landing-hero-actions">
-            <a class="btn btn-primary btn-lg" href="{{ url_for('signup') }}">
-              Comenzar por {{ plan_price_display }}/mes
-            </a>
-            <a class="btn btn-outline-dark btn-lg" href="{{ url_for('login') }}">Ya tengo cuenta</a>
+          <div class="landing-market-card">
+            <label for="landingMarketCountry">Pais de operacion</label>
+            <select id="landingMarketCountry" class="form-select">
+              {% for code, label in market_country_options %}
+              <option value="{{ code }}" {% if selected_market_country == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div>
+              <strong id="landingMarketPrice">{{ plan_price_display }}/mes</strong>
+              <span id="landingMarketDetail">
+                {{ selected_market_profile.taxLabel }} empresa · ventas {{ selected_market_profile.salesCurrency }} · moneda local {{ selected_market_profile.localCurrency }}
+              </span>
+            </div>
           </div>
+          <div class="landing-hero-actions">
+            <a class="btn btn-primary btn-lg" id="signupButton" href="{{ url_for('signup', marketCountry=selected_market_country) }}">
+              Crear cuenta por {{ plan_price_display }}/mes
+            </a>
+            <a class="btn btn-outline-dark btn-lg {% if not desktop_download_available %}disabled{% endif %}" id="desktopDownloadButton" href="{{ url_for('desktop_download') }}" {% if not desktop_download_available %}aria-disabled="true" tabindex="-1"{% endif %}>
+              <i class="bi bi-windows"></i> Descargar panel Windows
+            </a>
+            <button class="btn btn-light btn-lg" id="mobileAccessButton" type="button">
+              <i class="bi bi-phone"></i> Usar app movil
+            </button>
+          </div>
+          {% if desktop_download_unavailable %}
+          <div class="alert alert-warning border-0 mt-3 mb-0">
+            El instalador Windows aun no esta publicado en este entorno. Puedes registrar la empresa y activar acceso movil.
+          </div>
+          {% endif %}
+          <div class="landing-installer-note">
+            {% if desktop_download_available %}
+            <i class="bi bi-shield-check"></i>
+            <span>
+              Instalador disponible · {{ desktop_installer.sizeDisplay }} · SHA256 {{ desktop_installer.sha256[:12] }}...
+            </span>
+            {% else %}
+            <i class="bi bi-info-circle"></i>
+            <span>El instalador Windows se habilita cuando exista una version publicada. El panel web y la app movil pueden activarse desde el alta.</span>
+            {% endif %}
+          </div>
+          <div class="landing-access-status" id="landingAccessStatus" hidden></div>
+          <p class="landing-legal-note">
+            Al registrar una empresa aceptas los
+            <a href="{{ url_for('terms_of_service') }}">Terminos del servicio</a>,
+            la <a href="{{ url_for('privacy_policy') }}">Politica de privacidad</a>
+            y el tratamiento de datos comerciales para operar FVENTAS.
+          </p>
         </div>
         <div class="landing-panel" aria-label="Resumen del servicio">
           <div class="landing-panel-top">
             <span>Plan mensual</span>
-            <strong>{{ plan_price_display }}</strong>
+            <strong id="landingPanelPrice">{{ plan_price_display }}</strong>
+          </div>
+          <div class="landing-setup-steps">
+            <div><span>1</span><strong>Empresa</strong><small>Pais, documento fiscal y administrador.</small></div>
+            <div><span>2</span><strong>Pago</strong><small>La suscripcion habilita panel y app.</small></div>
+            <div><span>3</span><strong>Operacion</strong><small>Catalogo, vendedores y clientes por empresa.</small></div>
           </div>
           <div class="landing-metric-grid">
             <div><i class="bi bi-box-seam"></i><strong>Catalogo</strong><span>Productos, stock y precios</span></div>
             <div><i class="bi bi-people"></i><strong>Equipo</strong><span>Roles y cartera comercial</span></div>
             <div><i class="bi bi-receipt"></i><strong>Ordenes</strong><span>Credito, contado y seguimiento</span></div>
             <div><i class="bi bi-shield-check"></i><strong>Auditoria</strong><span>Registro de cambios sensibles</span></div>
+          </div>
+          <div class="landing-mobile-access">
+            <i class="bi bi-phone-vibrate"></i>
+            <div>
+              <strong>Acceso movil incluido</strong>
+              <span>Si no descarga el panel Windows, guardamos la preferencia y el alta deja preparada la app movil para la empresa.</span>
+            </div>
           </div>
         </div>
       </section>
@@ -85,10 +141,114 @@
       <section class="landing-cta">
         <div>
           <span>{{ plan_name }}</span>
-          <h2>Activa tu operacion comercial desde {{ plan_price_display }} mensuales.</h2>
+          <h2>Activa tu operacion comercial desde <span id="landingCtaPriceText">{{ plan_price_display }}</span> mensuales.</h2>
         </div>
-        <a class="btn btn-light btn-lg" href="{{ url_for('signup') }}">Registrar mi empresa</a>
+        <a class="btn btn-light btn-lg" id="footerSignupButton" href="{{ url_for('signup', marketCountry=selected_market_country) }}">Registrar mi empresa</a>
       </section>
     </main>
+    <footer class="landing-footer">
+      <span>FVENTAS CRM</span>
+      <nav aria-label="Enlaces legales">
+        <a href="{{ url_for('privacy_policy') }}">Politica de privacidad</a>
+        <a href="{{ url_for('terms_of_service') }}">Terminos del servicio</a>
+        <a href="{{ url_for('account_deletion_page') }}">Eliminar cuenta</a>
+      </nav>
+    </footer>
+    <script>
+      (() => {
+        const preferenceKey = "fventasDesktopAccessPreference";
+        const status = document.getElementById("landingAccessStatus");
+        const mobileButton = document.getElementById("mobileAccessButton");
+        const downloadButton = document.getElementById("desktopDownloadButton");
+        const marketSelect = document.getElementById("landingMarketCountry");
+        const marketPrice = document.getElementById("landingMarketPrice");
+        const marketDetail = document.getElementById("landingMarketDetail");
+        const panelPrice = document.getElementById("landingPanelPrice");
+        const ctaPriceText = document.getElementById("landingCtaPriceText");
+        const signupButton = document.getElementById("signupButton");
+        const footerSignupButton = document.getElementById("footerSignupButton");
+        const profiles = {{ market_profiles|tojson }};
+        const signupUrl = "{{ url_for('signup') }}";
+        const endpoint = "{{ url_for('landing_access_preference') }}";
+        const csrfToken = "{{ csrf_token() }}";
+        const preferenceParam = "desktopAccessPreference";
+        const formatMoney = (amount, currency, locale) => new Intl.NumberFormat(locale || "es-CL", {
+          style: "currency",
+          currency,
+          maximumFractionDigits: currency === "CLP" || currency === "COP" || currency === "ARS" ? 0 : 2
+        }).format(Number(amount || 0));
+
+        const selectedCountry = () => marketSelect?.value || "{{ selected_market_country }}";
+
+        const signupUrlFor = (preference = "") => {
+          const params = new URLSearchParams({ marketCountry: selectedCountry() });
+          if (preference) params.set(preferenceParam, preference);
+          return `${signupUrl}?${params.toString()}`;
+        };
+
+        const applyMarket = () => {
+          const profile = profiles[selectedCountry()] || profiles.CL;
+          const price = formatMoney(profile.planPrice, profile.planCurrency, profile.locale);
+          if (marketPrice) marketPrice.textContent = `${price}/mes`;
+          if (panelPrice) panelPrice.textContent = price;
+          if (ctaPriceText) ctaPriceText.textContent = price;
+          if (marketDetail) {
+            marketDetail.textContent = `${profile.taxLabel} empresa · ventas ${profile.salesCurrency} · moneda local ${profile.localCurrency}`;
+          }
+          if (signupButton) {
+            signupButton.href = signupUrlFor();
+            signupButton.textContent = `Crear cuenta por ${price}/mes`;
+          }
+          if (footerSignupButton) footerSignupButton.href = signupUrlFor();
+        };
+
+        const showStatus = (message, tone = "success") => {
+          if (!status) return;
+          status.hidden = false;
+          status.className = `landing-access-status landing-access-status-${tone}`;
+          status.textContent = message;
+        };
+
+        const savePreference = async (preference) => {
+          localStorage.setItem(preferenceKey, preference);
+          try {
+            await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": csrfToken
+              },
+              body: JSON.stringify({
+                preference,
+                source: "landing",
+                marketCountry: selectedCountry()
+              })
+            });
+          } catch (_error) {
+            // localStorage keeps the choice even if the network is offline.
+          }
+        };
+
+        mobileButton?.addEventListener("click", async () => {
+          await savePreference("desktop_download_cancelled");
+          showStatus("Preferencia guardada: continuara con acceso a la app movil. Te llevamos al registro.");
+          window.setTimeout(() => {
+            window.location.href = signupUrlFor("desktop_download_cancelled");
+          }, 650);
+        });
+
+        downloadButton?.addEventListener("click", () => {
+          savePreference("desktop_download_started");
+          showStatus("Descarga iniciada. Si decides no instalar el panel, puedes continuar con la app movil.", "info");
+        });
+        marketSelect?.addEventListener("change", applyMarket);
+        applyMarket();
+
+        const stored = localStorage.getItem(preferenceKey);
+        if (stored === "desktop_download_cancelled" || stored === "mobile_first" || stored === "mobile_only") {
+          showStatus("Ya guardamos tu preferencia de acceso movil para el registro.", "info");
+        }
+      })();
+    </script>
   </body>
 </html>

@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block top_action %}
+<div class="d-flex flex-wrap gap-2">
+  <a class="btn btn-light" href="{{ url_for('platform_privacy_export', q=filters.q, status=filters.status, type=filters.type, company=filters.company) }}">
+    <i class="bi bi-download"></i> Exportar CSV
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<section class="row g-3 mb-3">
+  <div class="col-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-person-x"></i></div>
+      <span>Solicitudes</span>
+      <strong>{{ metrics.total }}</strong>
+      <em>Historico</em>
+    </article>
+  </div>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-warning">
+      <div class="metric-icon"><i class="bi bi-hourglass-split"></i></div>
+      <span>Pendientes</span>
+      <strong>{{ metrics.pending }}</strong>
+      <em>Requieren accion</em>
+    </article>
+  </div>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card metric-active">
+      <div class="metric-icon"><i class="bi bi-shield-check"></i></div>
+      <span>Cerradas</span>
+      <strong>{{ metrics.completed }}</strong>
+      <em>Anonimizadas</em>
+    </article>
+  </div>
+  <div class="col-6 col-xl-3">
+    <article class="metric-card">
+      <div class="metric-icon"><i class="bi bi-slash-circle"></i></div>
+      <span>Rechazadas</span>
+      <strong>{{ metrics.rejected }}</strong>
+      <em>Con motivo</em>
+    </article>
+  </div>
+</section>
+
+<section class="panel mb-3">
+  <form class="row g-2 align-items-end" method="get">
+    <div class="col-12 col-xl-4">
+      <label class="form-label" for="privacySearch">Buscar solicitud</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input class="form-control" id="privacySearch" name="q" value="{{ filters.q }}" placeholder="Cuenta, correo o empresa">
+      </div>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label" for="privacyStatus">Estado</label>
+      <select class="form-select" id="privacyStatus" name="status">
+        {% for value, label in status_options %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label" for="privacyType">Tipo</label>
+      <select class="form-select" id="privacyType" name="type">
+        {% for value, label in type_options %}
+        <option value="{{ value }}" {% if filters.type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2">
+      <label class="form-label" for="privacyCompany">Empresa</label>
+      <select class="form-select" id="privacyCompany" name="company">
+        <option value="">Todas</option>
+        {% for company in companies %}
+        <option value="{{ company.id }}" {% if filters.company == company.id %}selected{% endif %}>{{ company.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3 col-xl-2 d-flex gap-2">
+      <button class="btn btn-primary flex-fill" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+      <a class="btn btn-light" href="{{ url_for('platform_privacy') }}" aria-label="Limpiar filtros"><i class="bi bi-x-lg"></i></a>
+    </div>
+  </form>
+</section>
+
+<section class="content-card">
+  <div class="section-title">
+    <div>
+      <h2>Solicitudes de eliminacion</h2>
+      <p>Bloquea el acceso movil, revisa obligaciones comerciales y cierra con anonimizacion o rechazo documentado.</p>
+    </div>
+    <span>{{ rows|length }} registros</span>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table align-middle admin-table">
+      <thead>
+        <tr>
+          <th>Cuenta</th>
+          <th>Empresa</th>
+          <th>Estado</th>
+          <th>Fechas</th>
+          <th>Riesgo comercial</th>
+          <th>Motivo</th>
+          <th class="text-end">Accion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>
+            <strong>{{ row.subjectLabel }}</strong>
+            <small class="d-block text-secondary">{{ row.email or "Sin correo" }}</small>
+            <small class="d-block text-secondary">{{ row.role }} · {{ row.channel or "sin canal" }}</small>
+            <small class="d-block text-secondary">ID {{ row.id }}</small>
+          </td>
+          <td>
+            <strong>{{ row.companyName }}</strong>
+            <small class="d-block text-secondary">{{ row.companyId or "Sin companyId" }}</small>
+          </td>
+          <td>
+            <span class="badge rounded-pill {{ row.badgeClass }}">{{ row.statusLabel }}</span>
+            {% if row.resolutionNote %}
+            <small class="d-block text-secondary mt-1">{{ row.resolutionNote|truncate(80, true) }}</small>
+            {% endif %}
+          </td>
+          <td>
+            <small class="d-block text-secondary">Solicitada</small>
+            <strong>{{ row.requestedAt or "Sin fecha" }}</strong>
+            {% if row.completedAt %}
+            <small class="d-block text-secondary mt-1">Cerrada {{ row.completedAt }}</small>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.openOrders %}
+            <span class="badge text-bg-warning">{{ row.openOrders }} ordenes abiertas</span>
+            {% elif row.requiresVerification %}
+            <span class="badge text-bg-info">Verificacion pendiente</span>
+            {% else %}
+            <span class="badge text-bg-light">Sin ordenes abiertas</span>
+            {% endif %}
+            {% if row.requiresVerification %}
+            <small class="d-block text-secondary mt-1">El acceso movil sigue activo hasta validar identidad.</small>
+            {% else %}
+            <small class="d-block text-secondary mt-1">Se conservan auditoria, ordenes y registros requeridos.</small>
+            {% endif %}
+          </td>
+          <td>
+            <span class="text-secondary">{{ row.reason or "Sin motivo informado" }}</span>
+          </td>
+          <td class="text-end">
+            {% if row.status in ["requested", "processing", "approved"] %}
+            <div class="d-flex flex-column gap-2 align-items-end">
+              {% if row.status == "requested" %}
+              <form method="post" action="{{ url_for('platform_privacy_deletion_action', subject_type=row.subjectType, subject_id=row.subjectId, action='processing') }}">
+                {{ csrf_field() }}
+                <input type="hidden" name="companyId" value="{{ row.companyId }}">
+                <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-hourglass-split"></i> Revisar</button>
+              </form>
+              {% endif %}
+              {% if row.status in ["requested", "processing"] %}
+              <form method="post" action="{{ url_for('platform_privacy_deletion_action', subject_type=row.subjectType, subject_id=row.subjectId, action='approve') }}">
+                {{ csrf_field() }}
+                <input type="hidden" name="companyId" value="{{ row.companyId }}">
+                <button class="btn btn-sm btn-outline-success" type="submit"><i class="bi bi-check2-circle"></i> Aprobar</button>
+              </form>
+              {% endif %}
+              {% if row.subjectType == "unknown" or not row.requiresVerification %}
+              <form method="post" action="{{ url_for('platform_privacy_deletion_action', subject_type=row.subjectType, subject_id=row.subjectId, action='complete') }}" data-confirm="Se anonimizara la cuenta y el acceso movil quedara bloqueado. Conserva solo la trazabilidad comercial necesaria.">
+                {{ csrf_field() }}
+                <input type="hidden" name="companyId" value="{{ row.companyId }}">
+                <input type="hidden" name="resolutionNote" value="Cierre ejecutado desde privacidad plataforma.">
+                <button class="btn btn-sm btn-danger" type="submit"><i class="bi bi-person-x"></i> {{ "Cerrar sin cuenta" if row.subjectType == "unknown" else "Cerrar" }}</button>
+              </form>
+              {% endif %}
+              <form class="d-flex gap-2" method="post" action="{{ url_for('platform_privacy_deletion_action', subject_type=row.subjectType, subject_id=row.subjectId, action='reject') }}" data-confirm="Se rechazara la solicitud y se restablecera el acceso movil si la cuenta sigue activa.">
+                {{ csrf_field() }}
+                <input type="hidden" name="companyId" value="{{ row.companyId }}">
+                <input class="form-control form-control-sm" name="resolutionNote" placeholder="Motivo rechazo" required>
+                <button class="btn btn-sm btn-outline-secondary" type="submit">Rechazar</button>
+              </form>
+            </div>
+            {% else %}
+            <span class="text-secondary">Cerrado</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <i class="bi bi-shield-check"></i>
+              <strong>Sin solicitudes con estos filtros</strong>
+              <span>Cuando una cuenta pida eliminacion desde web o app movil, aparecera en esta consola.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

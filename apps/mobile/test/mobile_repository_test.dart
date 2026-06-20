@@ -16,7 +16,7 @@ void main() {
     test('returns technical catalog products', () async {
       final products = await repository.listProducts();
 
-      expect(products.length, 3);
+      expect(products.length, greaterThanOrEqualTo(8));
       expect(products.map((product) => product.sku), contains('FVT-MOT-45CC'));
       expect(products.any((product) => product.requiresTechnicalValidation),
           isTrue);
@@ -33,7 +33,7 @@ void main() {
       expect(firstPage.products, hasLength(2));
       expect(firstPage.hasMore, isTrue);
       expect(firstPage.nextCursor, isNotNull);
-      expect(secondPage.products, hasLength(1));
+      expect(secondPage.products, hasLength(2));
       expect(
         firstPage.products.map((product) => product.id).toSet().intersection(
               secondPage.products.map((product) => product.id).toSet(),
@@ -83,12 +83,48 @@ void main() {
       final credit = await repository.getCredit('client-local-fventas');
       final orders = await repository.listOrders('client-local-fventas');
 
-      expect(credit.creditAvailableUsd, 0);
-      expect(credit.status, 'without_credit');
-      expect(credit.defaultSaleType, 'cash');
-      expect(credit.allowedPaymentTermsDays, contains(0));
-      expect(credit.assignedSeller.name, 'Vendedor FVENTAS');
-      expect(orders, isEmpty);
+      expect(credit.creditEnabled, isTrue);
+      expect(credit.creditAvailableUsd, greaterThan(0));
+      expect(credit.status, 'approved');
+      expect(credit.defaultSaleType, 'credit_line');
+      expect(credit.allowedPaymentTermsDays, contains(30));
+      expect(credit.assignedSeller.name, 'Carolina Reyes');
+      expect(orders, hasLength(greaterThanOrEqualTo(3)));
+      expect(orders.first.customerId, 'client-local-fventas');
+      expect(orders.first.sellerName, 'Carolina Reyes');
+    });
+
+    test('returns a commercial seller mock board', () async {
+      final summary = await repository.getSellerSummary();
+      final clients = await repository.listSellerClients();
+      final orders = await repository.listSellerOrders();
+      final commissions = await repository.listSellerCommissions();
+
+      expect(summary.salesMonthUsd, greaterThan(0));
+      expect(summary.clientsCount, greaterThanOrEqualTo(4));
+      expect(clients, hasLength(greaterThanOrEqualTo(4)));
+      expect(clients.any((client) => client.creditRequestStatus == 'pending'),
+          isTrue);
+      expect(
+        clients
+            .where((client) => client.canUseCreditLine)
+            .map((client) => client.defaultSaleType),
+        contains('credit_line'),
+      );
+      expect(
+        clients
+            .firstWhere((client) => client.creditRequestStatus == 'pending')
+            .creditRequestedUsd,
+        greaterThan(0),
+      );
+      final pendingClient = clients
+          .firstWhere((client) => client.creditRequestStatus == 'pending');
+      expect(pendingClient.defaultSaleType, 'credit_line');
+      expect(pendingClient.positivePaymentTerms, isEmpty);
+      expect(pendingClient.canUseCreditLine, isFalse);
+      expect(orders, hasLength(greaterThanOrEqualTo(3)));
+      expect(
+          commissions.map((order) => order.commissionStatus), contains('paid'));
     });
   });
 
@@ -156,6 +192,36 @@ void main() {
       expect(order.commissionUsd, 12.5);
       expect(order.commissionStatus, 'commission_pending');
       expect(order.commissionStatusLabel, 'Pendiente');
+    });
+
+    test('maps seller client commercial conditions from admin payload', () {
+      final client = mapApiSellerClient({
+        'id': 'client-central',
+        'businessName': 'Cliente Central',
+        'email': 'compras@central.cl',
+        'phone': '+56 9 1234 5678',
+        'city': 'Santiago',
+        'state': 'Metropolitana',
+        'creditEnabled': true,
+        'creditStatus': 'approved',
+        'creditLimitUsd': 5000,
+        'creditAvailableUsd': 3200,
+        'creditExposureUsd': 1800,
+        'creditRequestStatus': 'approved',
+        'creditRequestedUsd': 5000,
+        'defaultSaleType': 'credit_line',
+        'allowedPaymentTermsDays': [0, 15, 30],
+        'taxId': '76.000.000-0',
+        'contactName': 'Comprador Central',
+        'deliveryZone': 'Centro',
+      });
+
+      expect(client.defaultSaleType, 'credit_line');
+      expect(client.allowedPaymentTermsDays, [0, 15, 30]);
+      expect(client.positivePaymentTerms, [15, 30]);
+      expect(client.canUseCreditLine, isTrue);
+      expect(client.creditRequestedUsd, 5000);
+      expect(client.taxId, '76.000.000-0');
     });
   });
 }

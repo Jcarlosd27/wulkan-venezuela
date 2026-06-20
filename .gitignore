@@ -28,7 +28,9 @@ apps/mobile/android/*.jks
 apps/mobile/android/*.keystore
 
 # Local database files
+backend/api/.venv/
 backend/api/data/*.db
+backend/api/data/*.json
 backups/
 backend/api/backups/
 

@@ -20,6 +20,7 @@
 {% include "partials/credit_subnav.html" %}
 
 <form class="seller-filter-panel mb-3" method="get">
+  <input type="hidden" name="limit" value="{{ pagination.limit if pagination else 24 }}">
   <div class="row g-2 align-items-end">
     <div class="col-12 col-lg-3">
       <label class="form-label">Buscar</label>
@@ -168,10 +169,10 @@
       <h2>Lineas de credito por cliente</h2>
       <span>Cupo otorgado, consumo real, deuda, pagos y observacion de gerencia.</span>
     </div>
-    <span>{{ clients | length }} clientes</span>
+    <span>Mostrando {{ pagination.start if pagination else clients|length }}-{{ pagination.end if pagination else clients|length }} de {{ total_clients or clients|length }} clientes</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table">
+    <table class="table align-middle category-table" data-admin-paginated="1">
       <thead>
         <tr>
           <th>Cliente</th>
@@ -212,15 +213,21 @@
             </small>
           </td>
           <td>
-            <strong>{{ money_usd(client.currentDebtUsd) }}</strong>
-            <small class="d-block text-secondary">Vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
+            <strong>{{ money_currency(client.currentDebtUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Vencido {{ money_currency(client.overdueBalanceUsd, sales_currency) }}</small>
           </td>
           <td>
-            <strong>{{ money_usd(client.creditLimitUsd) }}</strong>
-            <small class="d-block text-secondary">Solicitado {{ money_usd(client.creditRequestedUsd) }}</small>
+            <strong>{{ money_currency(client.creditLimitUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Solicitado {{ money_currency(client.creditRequestedUsd, sales_currency) }}</small>
+            {% if local_currency != sales_currency and client.creditRequestedUsd %}
+            <small class="d-block text-secondary">Ref. {{ convert_currency(client.creditRequestedUsd, exchange_rate, local_currency) }}</small>
+            {% endif %}
+            {% if client.notes %}
+            <small class="d-block text-secondary">Notas: {{ client.notes|truncate(90, true) }}</small>
+            {% endif %}
           </td>
           <td>
-            <strong>{{ money_usd(client.creditAvailableUsd) }}</strong>
+            <strong>{{ money_currency(client.creditAvailableUsd, sales_currency) }}</strong>
             <div class="credit-track mt-1">
               {% set percent = (client.creditExposureUsd / client.creditLimitUsd * 100) if client.creditLimitUsd else 0 %}
               <span style="width: {{ [percent, 100] | min }}%"></span>
@@ -228,7 +235,7 @@
           </td>
           <td>
             <strong>{{ client.averagePaymentDays }} dias</strong>
-            <small class="d-block text-secondary">{{ money_usd(client.lastPaymentUsd) }} ultimo pago</small>
+            <small class="d-block text-secondary">{{ money_currency(client.lastPaymentUsd, sales_currency) }} ultimo pago</small>
           </td>
           {% if can_approve_credit %}
           <td class="text-end">
@@ -252,6 +259,23 @@
       </tbody>
     </table>
   </div>
+  {% if pagination and pagination.pages > 1 %}
+  <div class="table-pagination">
+    <span>Pagina {{ pagination.page }} de {{ pagination.pages }} - {{ pagination.total }} clientes</span>
+    <div>
+      {% if pagination.previousPage %}
+      <a class="btn btn-light btn-sm" href="{{ url_for('credit', q=filters.q, status=filters.status, risk=filters.risk, seller=filters.seller, collection=filters.collection, due=filters.due, page=pagination.previousPage, limit=pagination.limit) }}" aria-label="Pagina anterior" title="Pagina anterior"><i class="bi bi-chevron-left"></i></a>
+      {% else %}
+      <button class="btn btn-light btn-sm" type="button" disabled aria-label="Pagina anterior" title="Pagina anterior"><i class="bi bi-chevron-left"></i></button>
+      {% endif %}
+      {% if pagination.nextPage %}
+      <a class="btn btn-light btn-sm" href="{{ url_for('credit', q=filters.q, status=filters.status, risk=filters.risk, seller=filters.seller, collection=filters.collection, due=filters.due, page=pagination.nextPage, limit=pagination.limit) }}" aria-label="Pagina siguiente" title="Pagina siguiente"><i class="bi bi-chevron-right"></i></a>
+      {% else %}
+      <button class="btn btn-light btn-sm" type="button" disabled aria-label="Pagina siguiente" title="Pagina siguiente"><i class="bi bi-chevron-right"></i></button>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 </section>
 
 {% if can_approve_credit %}
@@ -290,11 +314,11 @@
             <input class="form-control" name="creditScore" inputmode="numeric" value="{{ client.creditScore }}">
           </div>
           <div class="col-12 col-md-4">
-            <label class="form-label fw-semibold">Solicitado USD</label>
+            <label class="form-label fw-semibold">Solicitado {{ sales_currency }}</label>
             <input class="form-control" name="creditRequestedUsd" inputmode="decimal" value="{{ client.creditRequestedUsd }}">
           </div>
           <div class="col-12 col-md-4">
-            <label class="form-label fw-semibold">Cupo aprobado USD</label>
+            <label class="form-label fw-semibold">Cupo aprobado {{ sales_currency }}</label>
             <input class="form-control" name="creditLimitUsd" inputmode="decimal" value="{{ client.creditLimitUsd or client.creditRequestedUsd }}">
           </div>
           <div class="col-12 col-md-4">
@@ -306,16 +330,26 @@
             </select>
           </div>
           <div class="col-12">
+            <div class="alert alert-light border mb-0">
+              <span class="d-block text-secondary small">Notas comerciales del vendedor</span>
+              <strong class="d-block">{{ money_currency(client.creditRequestedUsd, sales_currency) }} solicitado</strong>
+              {% if local_currency != sales_currency and client.creditRequestedUsd %}
+              <span class="d-block text-secondary small">Referencia local {{ convert_currency(client.creditRequestedUsd, exchange_rate, local_currency) }}</span>
+              {% endif %}
+              <p class="mb-0">{{ client.notes or 'Sin notas comerciales' }}</p>
+            </div>
+          </div>
+          <div class="col-12">
             <label class="form-label fw-semibold">Observacion de gerencia</label>
             <textarea class="form-control" name="creditManagerNote" rows="3" placeholder="Motivo de aprobacion, bloqueo, rechazo o ajuste.">{{ client.creditManagerNote }}</textarea>
             <div class="form-text">Obligatorio para rechazar, suspender o bloquear credito.</div>
           </div>
           <div class="col-12">
             <div class="row g-2">
-              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Disponible</span><strong>{{ money_usd(client.creditAvailableUsd) }}</strong></div>
-              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Comprometido</span><strong>{{ money_usd(client.creditExposureUsd) }}</strong></div>
-              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Vencido</span><strong>{{ money_usd(client.overdueBalanceUsd) }}</strong></div>
-              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Ultimo pago</span><strong>{{ money_usd(client.lastPaymentUsd) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Disponible</span><strong>{{ money_currency(client.creditAvailableUsd, sales_currency) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Comprometido</span><strong>{{ money_currency(client.creditExposureUsd, sales_currency) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Vencido</span><strong>{{ money_currency(client.overdueBalanceUsd, sales_currency) }}</strong></div>
+              <div class="col-6 col-lg-3"><span class="text-secondary small d-block">Ultimo pago</span><strong>{{ money_currency(client.lastPaymentUsd, sales_currency) }}</strong></div>
             </div>
           </div>
         </div>

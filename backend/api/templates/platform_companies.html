@@ -73,6 +73,7 @@
           <th>Estado</th>
           <th>Proximo pago</th>
           <th>Usuarios</th>
+          <th>Preparacion</th>
           <th class="text-end">Accion</th>
         </tr>
       </thead>
@@ -89,6 +90,12 @@
                 <strong>{{ company.name }}</strong>
                 <small class="d-block text-secondary">{{ company.legalName or company.name }}{% if company.taxId %} - {{ company.taxId }}{% endif %}</small>
                 <small class="d-block text-secondary">{{ row_market.label }} - {{ row_market.localCurrency }}</small>
+                <div class="company-source-tags">
+                  <span class="badge rounded-pill text-bg-light">{{ row.accessPreferenceLabel }}</span>
+                  {% if row.mobileRequested %}
+                  <span class="badge rounded-pill text-bg-primary">App movil solicitada</span>
+                  {% endif %}
+                </div>
               </div>
             </div>
           </td>
@@ -112,7 +119,23 @@
             <small class="d-block text-secondary">de {{ row.adminCount }} admin</small>
           </td>
           <td>
-            <form class="d-flex justify-content-end gap-2" method="post" action="{{ url_for('company_subscription_update', company_id=company.id) }}">
+            <div class="company-setup">
+              <div class="d-flex align-items-center justify-content-between gap-2">
+                <strong>{{ row.setup.done }}/{{ row.setup.total }}</strong>
+                <span>{{ row.setup.percent }}%</span>
+              </div>
+              <div class="progress" role="progressbar" aria-label="Preparacion empresa" aria-valuenow="{{ row.setup.percent }}" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" style="width: {{ row.setup.percent }}%"></div>
+              </div>
+              {% if row.setup.missing %}
+              <small>Falta: {{ row.setup.missing[:2]|join(", ") }}{% if row.setup.missing|length > 2 %} +{{ row.setup.missing|length - 2 }}{% endif %}</small>
+              {% else %}
+              <small>Lista para operar.</small>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            <form class="company-action-form" method="post" action="{{ url_for('company_subscription_update', company_id=company.id) }}">
               {{ csrf_field() }}
               <select class="form-select form-select-sm w-auto" name="subscriptionStatus" aria-label="Estado de suscripcion">
                 {% for value, label in subscription_status_options %}
@@ -120,6 +143,10 @@
                 {% endfor %}
               </select>
               <input class="form-control form-control-sm w-auto" name="nextPaymentAt" type="date" value="{{ subscription.nextPaymentAt or '' }}" aria-label="Proximo pago">
+              <label class="form-check company-mobile-check">
+                <input class="form-check-input" type="checkbox" name="enableMobileAccess" {% if row.mobileRequested %}checked{% endif %}>
+                <span class="form-check-label">App movil</span>
+              </label>
               <button class="btn btn-outline-primary btn-sm" type="submit">
                 <i class="bi bi-save"></i> Guardar
               </button>
@@ -128,7 +155,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="7">
+          <td colspan="8">
             <div class="empty-state">
               <i class="bi bi-buildings"></i>
               <strong>Sin empresas registradas</strong>
@@ -204,6 +231,21 @@
               <label class="form-label fw-semibold">Proximo pago</label>
               <input class="form-control" name="nextPaymentAt" type="date">
             </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">Preferencia de acceso</label>
+              <select class="form-select" id="companyAccessPreference" name="desktopAccessPreference">
+                <option value="">Alta completa</option>
+                <option value="desktop_download_started">Panel Windows</option>
+                <option value="mobile_first">App movil prioritaria</option>
+                <option value="mobile_only">Solo app movil</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-6 d-flex align-items-end">
+              <label class="form-check legal-consent w-100 mb-0">
+                <input class="form-check-input" id="companyMobileAccessRequested" type="checkbox" name="mobileAppAccessRequested">
+                <span>Solicitar acceso movil para esta empresa al activar la suscripcion.</span>
+              </label>
+            </div>
             <div class="col-12">
               <label class="form-label fw-semibold">Clave temporal</label>
               <div class="input-group">
@@ -233,6 +275,8 @@
     const taxLabel = document.getElementById("companyTaxLabel");
     const taxInput = document.getElementById("companyTaxInput");
     const phoneInput = document.getElementById("companyPhoneInput");
+    const accessPreference = document.getElementById("companyAccessPreference");
+    const mobileRequested = document.getElementById("companyMobileAccessRequested");
     const formatMoney = (amount, currency, locale) => new Intl.NumberFormat(locale || "es-CL", {
       style: "currency",
       currency,
@@ -248,6 +292,10 @@
     };
     if (select) select.addEventListener("change", applyProfile);
     if (select) applyProfile();
+    accessPreference?.addEventListener("change", () => {
+      if (!mobileRequested) return;
+      mobileRequested.checked = ["mobile_first", "mobile_only", "desktop_download_cancelled"].includes(accessPreference.value);
+    });
   })();
 </script>
 {% endblock %}

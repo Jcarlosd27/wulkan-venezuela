@@ -78,9 +78,7 @@ class ApiMobileOrderService implements MobileOrderService {
 
       final request = await client.postUrl(targetEndpoint);
       request.headers.contentType = ContentType.json;
-      if (session.accessToken.isNotEmpty) {
-        request.headers.set("Authorization", "Bearer ${session.accessToken}");
-      }
+      await attachFventasMobileHeaders(request.headers, session: session);
       request.write(jsonEncode(_toPayload(draft, session)));
 
       final response = await request.close();

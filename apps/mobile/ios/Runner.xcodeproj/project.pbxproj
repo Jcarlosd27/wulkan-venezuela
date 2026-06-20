@@ -249,7 +249,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
+			shellScript = "exec \"$FLUTTER_ROOT/bin/cache/dart-sdk/bin/dart\" \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.dart\" embed_and_thin ios";
 		};
 		9740EEB61CF901F6004384FC /* Run Script */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -264,7 +264,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
+			shellScript = "exec \"$FLUTTER_ROOT/bin/cache/dart-sdk/bin/dart\" \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.dart\" build ios";
 		};
 /* End PBXShellScriptBuildPhase section */
 

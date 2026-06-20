@@ -267,6 +267,10 @@
             <label class="form-label fw-semibold">Productos relacionados por SKU</label>
             <textarea class="form-control" name="relatedSkus" rows="3" placeholder="FVT-REP-CAD18&#10;FVT-ACE-2T" aria-label="Productos relacionados por SKU">{{ (product.relatedSkus | join('\n')) if product else '' }}</textarea>
           </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">Notas de compatibilidad para app movil</label>
+            <textarea class="form-control" name="compatibilityNotes" rows="3" placeholder="Compatible con FVT-MOT-45CC&#10;Validar serie antes de despacho" aria-label="Notas de compatibilidad para app movil">{{ (product.compatibilityNotes | join('\n')) if product and product.compatibilityNotes else '' }}</textarea>
+          </div>
         </div>
       </article>
     </div>

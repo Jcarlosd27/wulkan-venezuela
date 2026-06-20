@@ -86,6 +86,7 @@
 
 <section class="panel client-filter-panel mb-3">
   <form class="row g-2 align-items-end" method="get">
+    <input type="hidden" name="limit" value="{{ pagination.limit if pagination else 24 }}">
     <div class="col-12 col-xl-4">
       <label class="form-label" for="clientSearch">Buscar cliente</label>
       <div class="input-group">
@@ -133,10 +134,10 @@
       <h2>Cartera de clientes B2B</h2>
       <span>Acceso movil, condicion comercial, credito disponible y cobranza.</span>
     </div>
-    <span>{{ clients | length }} registros</span>
+    <span>Mostrando {{ pagination.start if pagination else clients|length }}-{{ pagination.end if pagination else clients|length }} de {{ total_clients or clients|length }} registros</span>
   </div>
   <div class="table-responsive">
-    <table class="table align-middle category-table client-table">
+    <table class="table align-middle category-table client-table" data-admin-paginated="1">
       <thead>
         <tr>
           <th>Cliente</th>
@@ -180,19 +181,25 @@
           </td>
           <td>
             {% if client.creditEnabled %}
-            <strong class="d-block">{{ money_usd(client.creditAvailableUsd) }}</strong>
-            <small class="d-block text-secondary">Limite {{ money_usd(client.creditLimitUsd) }}</small>
+            <strong class="d-block">{{ money_currency(client.creditAvailableUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Limite {{ money_currency(client.creditLimitUsd, sales_currency) }}</small>
             {% elif client.creditRequestStatus == 'pending' %}
-            <span class="badge text-bg-warning">{{ money_usd(client.creditRequestedUsd) }} solicitado</span>
+            <span class="badge text-bg-warning">{{ money_currency(client.creditRequestedUsd, sales_currency) }} solicitado</span>
             {% else %}
             <span class="badge text-bg-secondary">Sin linea</span>
             {% endif %}
+            {% if local_currency != sales_currency and client.creditRequestedUsd %}
+            <small class="d-block text-secondary">Ref. {{ convert_currency(client.creditRequestedUsd, exchange_rate, local_currency) }}</small>
+            {% endif %}
             <small class="d-block text-secondary">{{ client.creditStatus }}</small>
+            {% if client.notes %}
+            <small class="d-block text-secondary">Notas: {{ client.notes|truncate(90, true) }}</small>
+            {% endif %}
           </td>
           <td>
             <span class="badge {{ client.collectionStatus | badge_class }}">{{ client.collectionStatusLabel }}</span>
-            <strong class="d-block mt-1">{{ money_usd(client.openBalanceUsd) }}</strong>
-            <small class="d-block text-secondary">Vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
+            <strong class="d-block mt-1">{{ money_currency(client.openBalanceUsd, sales_currency) }}</strong>
+            <small class="d-block text-secondary">Vencido {{ money_currency(client.overdueBalanceUsd, sales_currency) }}</small>
           </td>
           <td>
             <span class="badge text-bg-light">{{ client.createdViaLabel or client_origin_label(client.createdVia) }}</span>
@@ -244,6 +251,23 @@
       </tbody>
     </table>
   </div>
+  {% if pagination and pagination.pages > 1 %}
+  <div class="table-pagination">
+    <span>Pagina {{ pagination.page }} de {{ pagination.pages }} - {{ pagination.total }} registros</span>
+    <div>
+      {% if pagination.previousPage %}
+      <a class="btn btn-light btn-sm" href="{{ url_for('clients', q=filters.q, status=filters.status, seller=filters.seller, collection=filters.collection, credit=filters.credit, page=pagination.previousPage, limit=pagination.limit) }}" aria-label="Pagina anterior" title="Pagina anterior"><i class="bi bi-chevron-left"></i></a>
+      {% else %}
+      <button class="btn btn-light btn-sm" type="button" disabled aria-label="Pagina anterior" title="Pagina anterior"><i class="bi bi-chevron-left"></i></button>
+      {% endif %}
+      {% if pagination.nextPage %}
+      <a class="btn btn-light btn-sm" href="{{ url_for('clients', q=filters.q, status=filters.status, seller=filters.seller, collection=filters.collection, credit=filters.credit, page=pagination.nextPage, limit=pagination.limit) }}" aria-label="Pagina siguiente" title="Pagina siguiente"><i class="bi bi-chevron-right"></i></a>
+      {% else %}
+      <button class="btn btn-light btn-sm" type="button" disabled aria-label="Pagina siguiente" title="Pagina siguiente"><i class="bi bi-chevron-right"></i></button>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 </section>
 
 {% if can_create_clients %}
@@ -292,13 +316,21 @@
           </article>
           <article class="client-detail-card">
             <span>Credito disponible</span>
-            <strong>{{ money_usd(client.creditAvailableUsd) }}</strong>
-            <small>Limite {{ money_usd(client.creditLimitUsd) }} · {{ client.creditStatus }}</small>
+            <strong>{{ money_currency(client.creditAvailableUsd, sales_currency) }}</strong>
+            <small>Limite {{ money_currency(client.creditLimitUsd, sales_currency) }} · {{ client.creditStatus }}</small>
           </article>
           <article class="client-detail-card">
             <span>Cobranza</span>
             <strong>{{ client.collectionStatusLabel }}</strong>
-            <small>Saldo {{ money_usd(client.openBalanceUsd) }} · vencido {{ money_usd(client.overdueBalanceUsd) }}</small>
+            <small>Saldo {{ money_currency(client.openBalanceUsd, sales_currency) }} · vencido {{ money_currency(client.overdueBalanceUsd, sales_currency) }}</small>
+          </article>
+          <article class="client-detail-card">
+            <span>Solicitud comercial</span>
+            <strong>{{ money_currency(client.creditRequestedUsd, sales_currency) if client.creditRequestedUsd else 'Sin cupo solicitado' }}</strong>
+            {% if local_currency != sales_currency and client.creditRequestedUsd %}
+            <small>Ref. {{ convert_currency(client.creditRequestedUsd, exchange_rate, local_currency) }}</small>
+            {% endif %}
+            <small>{{ client.notes or 'Sin notas comerciales' }}</small>
           </article>
         </div>
         <div class="row g-3 mt-1">
@@ -403,8 +435,9 @@
 {% block scripts %}
 <script>
   (() => {
-    const locations = {{ chile_locations|tojson }};
-    const stateSelects = document.querySelectorAll("[data-chile-region]");
+    const locations = {{ country_locations|default(chile_locations)|tojson }};
+    const locationLabels = {{ country_location_labels|default({})|tojson }};
+    const stateSelects = document.querySelectorAll("[data-country-state]");
 
     const buildOption = (value, selectedValue) => {
       const option = document.createElement("option");
@@ -416,7 +449,7 @@
 
     stateSelects.forEach((stateSelect) => {
       const form = stateSelect.closest("form") || document;
-      const citySelect = form.querySelector("[data-chile-city]");
+      const citySelect = form.querySelector("[data-country-city]");
       if (!citySelect) {
         return;
       }
@@ -426,7 +459,7 @@
         const cities = locations[stateSelect.value] || [];
         citySelect.innerHTML = "";
         citySelect.appendChild(buildOption("", selectedCity));
-        citySelect.options[0].textContent = "Selecciona ciudad/comuna";
+        citySelect.options[0].textContent = locationLabels.cityPlaceholder || "Selecciona ciudad";
         cities.forEach((city) => citySelect.appendChild(buildOption(city, selectedCity)));
         if (!cities.includes(selectedCity)) {
           citySelect.value = "";

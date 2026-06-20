@@ -1,4 +1,4 @@
-name: fventas-chile
+name: fventas-production
 region: nyc
 
 services:
@@ -6,7 +6,7 @@ services:
     source_dir: backend/api
     dockerfile_path: backend/api/Dockerfile
     github:
-      repo: Jcarlosd27/fventas-chile
+      repo: Jcarlosd27/wulkan-venezuela
       branch: main
       deploy_on_push: true
     http_port: 5000
@@ -40,6 +40,48 @@ services:
       - key: FVENTAS_REQUIRE_MOBILE_TOKEN
         scope: RUN_TIME
         value: "1"
+      - key: FVENTAS_REJECT_LEGACY_MOBILE_TOKENS
+        scope: RUN_TIME
+        value: "1"
+      - key: FVENTAS_REQUIRE_MOBILE_DEVICE_HEADER
+        scope: RUN_TIME
+        value: "1"
+      - key: FVENTAS_ALLOW_LEGACY_MOBILE_API
+        scope: RUN_TIME
+        value: "0"
+      - key: FVENTAS_READYZ_PUBLIC_DETAILS
+        scope: RUN_TIME
+        value: "0"
+      - key: FVENTAS_CSP_REPORT_ONLY
+        scope: RUN_TIME
+        value: "0"
+      - key: FVENTAS_TRUST_PROXY_HEADERS
+        scope: RUN_TIME
+        value: "1"
+      - key: FVENTAS_LANDING_ACCESS_PREFERENCE_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "60"
+      - key: FVENTAS_LANDING_ACCESS_PREFERENCE_MAX_EVENTS
+        scope: RUN_TIME
+        value: "12"
+      - key: FVENTAS_SIGNUP_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "300"
+      - key: FVENTAS_SIGNUP_MAX_EVENTS
+        scope: RUN_TIME
+        value: "5"
+      - key: FVENTAS_ACCOUNT_DELETION_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "300"
+      - key: FVENTAS_ACCOUNT_DELETION_MAX_EVENTS
+        scope: RUN_TIME
+        value: "5"
+      - key: FVENTAS_MOBILE_PASSWORD_RECOVERY_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "300"
+      - key: FVENTAS_MOBILE_PASSWORD_RECOVERY_MAX_EVENTS
+        scope: RUN_TIME
+        value: "5"
       - key: FVENTAS_STORAGE_BACKEND
         scope: RUN_TIME
         value: s3
@@ -114,6 +156,12 @@ services:
       - key: FVENTAS_HARDEN_DEFAULT_ACCOUNTS
         scope: RUN_TIME
         value: "1"
+      - key: FVENTAS_BOOTSTRAP_ON_START
+        scope: RUN_TIME
+        value: "0"
+      - key: FVENTAS_BOOTSTRAP_RESET_PASSWORDS
+        scope: RUN_TIME
+        value: "0"
 
 databases:
   - name: fventas-db

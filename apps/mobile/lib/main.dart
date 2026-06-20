@@ -10,6 +10,7 @@ import 'src/bootstrap/mobile_bootstrap.dart';
 import 'src/cart/mobile_cart_service.dart';
 import 'src/config/mobile_environment.dart';
 import 'src/data/mobile_repository.dart';
+import 'src/domain/country_locations.dart';
 import 'src/domain/mobile_models.dart';
 import 'src/domain/chile_locations.dart';
 import 'src/orders/mobile_order_service.dart';
@@ -24,6 +25,131 @@ const _fventasLine = Color(0xFFE6EEF8);
 
 String _newOperationId(String prefix) =>
     '$prefix-${DateTime.now().microsecondsSinceEpoch}';
+
+MobileUserSession? _activeMoneySession;
+
+String _displayCurrency() {
+  final session = _activeMoneySession;
+  if (session == null) {
+    return mobileEnvironment.displayCurrency;
+  }
+  return session.effectiveDisplayCurrency;
+}
+
+String _displayCurrencySymbol() {
+  final session = _activeMoneySession;
+  if (session == null) {
+    return mobileEnvironment.currencySymbolForCurrency(
+      mobileEnvironment.displayCurrency,
+    );
+  }
+  return mobileEnvironment.currencySymbolForMarket(
+    countryCode: session.effectiveCountry,
+    localCurrency: session.localCurrency,
+    primaryCurrency: session.salesCurrency,
+  );
+}
+
+String _displayCurrencyLabel() {
+  final currency = _displayCurrency();
+  final symbol = _displayCurrencySymbol();
+  return symbol.trim() == currency ? currency : '$symbol $currency';
+}
+
+String _marketCountryCode() {
+  return _activeMoneySession?.effectiveCountry ?? mobileEnvironment.countryCode;
+}
+
+bool _usesChileFormat() => _marketCountryCode() == "CL";
+
+String _taxLabel() => mobileEnvironment.taxLabelForMarket(
+      countryCode: _marketCountryCode(),
+    );
+
+String _taxPlaceholder() => mobileEnvironment.taxPlaceholderForMarket(
+      countryCode: _marketCountryCode(),
+    );
+
+String _phonePlaceholder() => mobileEnvironment.phonePlaceholderForMarket(
+      countryCode: _marketCountryCode(),
+    );
+
+bool _displaysPrimaryCurrency() {
+  final session = _activeMoneySession;
+  if (session == null) {
+    return mobileEnvironment.displaysPrimaryCurrency;
+  }
+  return mobileEnvironment.displaysPrimaryCurrencyForMarket(
+    countryCode: session.effectiveCountry,
+    localCurrency: session.localCurrency,
+    primaryCurrency: session.salesCurrency,
+  );
+}
+
+double _exchangeRateUsdLocal() {
+  return _activeMoneySession?.effectiveExchangeRateUsdLocal ??
+      mobileEnvironment.exchangeRateUsdLocal;
+}
+
+String _exchangeRateLabel() {
+  final session = _activeMoneySession;
+  if (session == null) {
+    return mobileEnvironment.exchangeRateLabel;
+  }
+  return mobileEnvironment.exchangeRateLabelForMarket(
+    countryCode: session.effectiveCountry,
+    localCurrency: session.localCurrency,
+    primaryCurrency: session.salesCurrency,
+  );
+}
+
+String _exchangeRateValueLabel() {
+  final value = _exchangeRateUsdLocal();
+  return value == value.roundToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(2);
+}
+
+String _moneyFromUsd(double amount, {int? fractionDigits}) {
+  final session = _activeMoneySession;
+  if (session == null) {
+    return mobileEnvironment.moneyFromUsd(
+      amount,
+      fractionDigits: fractionDigits,
+    );
+  }
+  return mobileEnvironment.moneyFromUsdForMarket(
+    amount,
+    countryCode: session.effectiveCountry,
+    localCurrency: session.localCurrency,
+    primaryCurrency: session.salesCurrency,
+    exchangeRateUsdLocal: session.exchangeRateUsdLocal,
+    fractionDigits: fractionDigits,
+  );
+}
+
+String _parseableAmountText(String raw) {
+  final compact = raw.trim().replaceAll(RegExp(r'\s+'), '');
+  if (_displayCurrency() != "USD") {
+    return compact.replaceAll('.', '').replaceAll(',', '.');
+  }
+  return compact.replaceAll(',', '');
+}
+
+double _visibleMoneyInputToUsd(String raw) {
+  final visibleAmount = double.tryParse(_parseableAmountText(raw)) ?? 0;
+  final session = _activeMoneySession;
+  if (session == null) {
+    return mobileEnvironment.visibleAmountToUsd(visibleAmount);
+  }
+  return mobileEnvironment.visibleAmountToUsdForMarket(
+    visibleAmount,
+    countryCode: session.effectiveCountry,
+    localCurrency: session.localCurrency,
+    primaryCurrency: session.salesCurrency,
+    exchangeRateUsdLocal: session.exchangeRateUsdLocal,
+  );
+}
 
 class _ChileanPhoneInputFormatter extends TextInputFormatter {
   const _ChileanPhoneInputFormatter();
@@ -106,6 +232,7 @@ class _ChileanTaxIdInputFormatter extends TextInputFormatter {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   mobileEnvironment.validateRuntime();
+  await countryLocations.load();
   await configureMobileRuntime();
   await mobileCartController.load();
   runApp(const FVENTASApp());
@@ -192,6 +319,7 @@ class _FVENTASSessionGateState extends State<FVENTASSessionGate> {
 
   void _setSession(MobileUserSession session) {
     setState(() {
+      _activeMoneySession = session;
       _sessionFuture = Future.value(session);
     });
   }
@@ -208,6 +336,7 @@ class _FVENTASSessionGateState extends State<FVENTASSessionGate> {
       return;
     }
     setState(() {
+      _activeMoneySession = null;
       _sessionFuture = mobileAuthRepository.getCurrentSession();
     });
   }
@@ -223,9 +352,11 @@ class _FVENTASSessionGateState extends State<FVENTASSessionGate> {
 
         final session = snapshot.data;
         if (session == null || !session.isAuthenticated) {
+          _activeMoneySession = null;
           return FVENTASLoginScreen(onAuthenticated: _setSession);
         }
 
+        _activeMoneySession = session;
         return FVENTASShell(
           session: session,
           onSessionChanged: _refreshSession,
@@ -341,20 +472,18 @@ class _FVENTASLoginScreenState extends State<FVENTASLoginScreen> {
               child: Container(
                 width: 92,
                 height: 92,
-                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _fventasBlack,
                   borderRadius: BorderRadius.circular(26),
                   boxShadow: [
                     BoxShadow(
-                      color: _fventasBlack.withValues(alpha: 0.18),
+                      color: _fventasBlue.withValues(alpha: 0.22),
                       blurRadius: 26,
                       offset: const Offset(0, 14),
                     ),
                   ],
                 ),
                 child: const Center(
-                  child: FVENTASLogo(compact: true, onDark: true),
+                  child: FVENTASLogo(compact: true, size: 92),
                 ),
               ),
             ),
@@ -646,24 +775,26 @@ class _FVENTASShellState extends State<FVENTASShell> {
           children: [
             const FVENTASLogo(compact: true),
             const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'FVENTAS',
-                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-                Text(
-                  widget.session.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _fventasMuted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'FVENTAS',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                   ),
-                ),
-              ],
+                  Text(
+                    widget.session.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _fventasMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -860,7 +991,7 @@ class _SellerShell extends StatefulWidget {
 }
 
 class _SellerShellState extends State<_SellerShell> {
-  int _index = 0;
+  int _index = 1;
 
   @override
   Widget build(BuildContext context) {
@@ -871,7 +1002,9 @@ class _SellerShellState extends State<_SellerShell> {
         onOpenOrder: () => setState(() => _index = 2),
         onOpenClients: () => setState(() => _index = 3),
       ),
-      const CatalogScreen(),
+      SellerCatalogScreen(
+        onOpenOrder: () => setState(() => _index = 2),
+      ),
       SellerCartScreen(
         session: widget.session,
         onOpenCatalog: () => setState(() => _index = 1),
@@ -891,11 +1024,11 @@ class _SellerShellState extends State<_SellerShell> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Ventas FVENTAS',
+                    'FVENTAS Ventas',
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                   ),
                   Text(
-                    widget.session.name,
+                    widget.session.roleLabel,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -910,9 +1043,8 @@ class _SellerShellState extends State<_SellerShell> {
           ],
         ),
         centerTitle: false,
-        toolbarHeight: 64,
+        toolbarHeight: 60,
         actions: [
-          const _NotificationsButton(),
           ValueListenableBuilder<List<MobileCartItem>>(
             valueListenable: mobileCartController,
             builder: (context, items, _) {
@@ -933,7 +1065,7 @@ class _SellerShellState extends State<_SellerShell> {
           IconButton(
             tooltip: 'Cerrar sesion',
             onPressed: widget.onSignOut,
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout_outlined),
           ),
         ],
       ),
@@ -946,13 +1078,13 @@ class _SellerShellState extends State<_SellerShell> {
           NavigationDestination(
               icon: Icon(Icons.dashboard_outlined), label: 'Inicio'),
           NavigationDestination(
-              icon: Icon(Icons.grid_view_outlined), label: 'Catalogo'),
+              icon: Icon(Icons.point_of_sale_outlined), label: 'Vender'),
           NavigationDestination(
               icon: Icon(Icons.assignment_add), label: 'Pedido'),
           NavigationDestination(
               icon: Icon(Icons.storefront_outlined), label: 'Clientes'),
           NavigationDestination(
-              icon: Icon(Icons.payments_outlined), label: 'Comisiones'),
+              icon: Icon(Icons.payments_outlined), label: 'Comis.'),
         ],
       ),
     );
@@ -1420,8 +1552,6 @@ class HomeScreen extends StatelessWidget {
         const SizedBox(height: 18),
         _HeroPanel(onOpenCatalog: onOpenCatalog),
         const SizedBox(height: 18),
-        _PromoCarousel(onOpenCatalog: onOpenCatalog),
-        const SizedBox(height: 18),
         _SectionTitle(
           title: 'Categorias',
           actionLabel: 'Ver todo',
@@ -1459,23 +1589,18 @@ class SellerHomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
       children: [
-        _SearchBox(
-          labelText: 'Buscar producto para pedido asistido',
-          readOnly: true,
-          onTap: onOpenCatalog,
-        ),
-        const SizedBox(height: 14),
         _SellerSummaryCard(
           session: session,
+          onOpenCatalog: onOpenCatalog,
           onOpenOrder: onOpenOrder,
           onOpenClients: onOpenClients,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         _SectionTitle(
-          title: 'Ordenes de cartera',
-          actionLabel: 'Tomar pedido',
+          title: 'Pedidos recientes',
+          actionLabel: 'Nuevo',
           onAction: onOpenOrder,
         ),
         const _SellerOrdersPreview(),
@@ -1487,11 +1612,13 @@ class SellerHomeScreen extends StatelessWidget {
 class _SellerSummaryCard extends StatelessWidget {
   const _SellerSummaryCard({
     required this.session,
+    required this.onOpenCatalog,
     required this.onOpenOrder,
     required this.onOpenClients,
   });
 
   final MobileUserSession session;
+  final VoidCallback onOpenCatalog;
   final VoidCallback onOpenOrder;
   final VoidCallback onOpenClients;
 
@@ -1510,192 +1637,240 @@ class _SellerSummaryCard extends StatelessWidget {
           summary?.sellerZone ?? '',
         ].where((item) => item.isNotEmpty).join(' - ');
 
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            color: _fventasBlack,
-            boxShadow: [
-              BoxShadow(
-                color: _fventasBlack.withValues(alpha: 0.14),
-                blurRadius: 28,
-                offset: const Offset(0, 16),
-              ),
-            ],
+        return Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: _fventasLine),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const _SoftIcon(
-                    icon: Icons.badge_outlined,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          session.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                        Text(
-                          sellerMeta.isEmpty
-                              ? (summary?.roleLabel ?? session.roleLabel)
-                              : sellerMeta,
-                          style: const TextStyle(
-                            color: Color(0xFFD4D4D4),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _StatusPill(
-                    label: isLoading ? 'Sync' : 'Cartera',
-                    color: Colors.white,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: Colors.white.withValues(alpha: 0.08),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.12),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Meta mensual',
-                          style: TextStyle(
-                            color: Color(0xFFD4D4D4),
-                            fontWeight: FontWeight.w800,
+                    const _SoftIcon(icon: Icons.badge_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            session.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(
+                                  color: _fventasBlack,
+                                  fontWeight: FontWeight.w900,
+                                ),
                           ),
-                        ),
-                        Text(
-                          isLoading
-                              ? 'Sync'
-                              : '${(summary?.goalProgressPercent ?? 0).toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
+                          Text(
+                            sellerMeta.isEmpty
+                                ? (summary?.roleLabel ?? session.roleLabel)
+                                : sellerMeta,
+                            style: const TextStyle(
+                              color: _fventasMuted,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(99),
-                      child: LinearProgressIndicator(
-                        minHeight: 8,
-                        value: isLoading ? null : goalProgress,
-                        backgroundColor: Colors.white24,
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          _fventasBlue,
-                        ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      isLoading
-                          ? 'Sincronizando cartera'
-                          : 'USD ${(summary?.salesMonthUsd ?? 0).toStringAsFixed(0)} de USD ${(summary?.salesGoalUsd ?? 0).toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        color: Color(0xFFD4D4D4),
-                        fontWeight: FontWeight.w700,
+                    _StatusPill(
+                      label: isLoading ? 'Sync' : 'Activo',
+                      color: _fventasBlue,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: _fventasCanvas,
+                    border: Border.all(
+                      color: _fventasLine,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Meta mensual',
+                            style: TextStyle(
+                              color: _fventasInk,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Text(
+                            isLoading
+                                ? 'Sync'
+                                : '${(summary?.goalProgressPercent ?? 0).toStringAsFixed(0)}%',
+                            style: const TextStyle(
+                              color: _fventasBlack,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: LinearProgressIndicator(
+                          minHeight: 8,
+                          value: isLoading ? null : goalProgress,
+                          backgroundColor: const Color(0xFFDCE7F7),
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            _fventasBlue,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        isLoading
+                            ? 'Sincronizando cartera'
+                            : '${_moneyFromUsd(summary?.salesMonthUsd ?? 0, fractionDigits: 0)} de ${_moneyFromUsd(summary?.salesGoalUsd ?? 0, fractionDigits: 0)}',
+                        style: const TextStyle(
+                          color: _fventasMuted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SellerMetricTile(
+                        label: 'Clientes',
+                        value: isLoading
+                            ? '...'
+                            : '${summary?.activeClientsCount ?? summary?.clientsCount ?? 0}/${summary?.clientsCount ?? 0}',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _SellerMetricTile(
+                        label: 'Ticket',
+                        value: isLoading
+                            ? '...'
+                            : _moneyFromUsd(
+                                summary?.ticketAverageUsd ?? 0,
+                                fractionDigits: 0,
+                              ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: _DarkMetric(
-                      label: 'Clientes',
-                      value: isLoading
-                          ? '...'
-                          : '${summary?.activeClientsCount ?? summary?.clientsCount ?? 0}/${summary?.clientsCount ?? 0}',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _DarkMetric(
-                      label: 'Ticket prom.',
-                      value: isLoading
-                          ? '...'
-                          : 'USD ${(summary?.ticketAverageUsd ?? 0).toStringAsFixed(0)}',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: _DarkMetric(
-                      label: 'Comision pend.',
-                      value: isLoading
-                          ? '...'
-                          : 'USD ${(summary?.pendingCommissionUsd ?? 0).toStringAsFixed(2)}',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _DarkMetric(
-                      label: 'Credito por aprobar',
-                      value: isLoading
-                          ? '...'
-                          : '${summary?.pendingCreditRequests ?? 0}',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onOpenOrder,
-                      icon: const Icon(Icons.assignment_add),
-                      label: const Text('Pedido'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: onOpenClients,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SellerMetricTile(
+                        label: 'Comision',
+                        value: isLoading
+                            ? '...'
+                            : _moneyFromUsd(summary?.pendingCommissionUsd ?? 0),
                       ),
-                      icon: const Icon(Icons.storefront_outlined),
-                      label: const Text('Clientes'),
                     ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _SellerMetricTile(
+                        label: 'Cupos',
+                        value: isLoading
+                            ? '...'
+                            : '${summary?.pendingCreditRequests ?? 0}',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: onOpenCatalog,
+                        icon: const Icon(Icons.search),
+                        label: const Text('Vender'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onOpenOrder,
+                        icon: const Icon(Icons.assignment_add),
+                        label: const Text('Pedido'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    onPressed: onOpenClients,
+                    icon: const Icon(Icons.person_add_alt_1),
+                    label: const Text('Nuevo cliente o revisar cartera'),
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+}
+
+class _SellerMetricTile extends StatelessWidget {
+  const _SellerMetricTile({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.white,
+        border: Border.all(color: _fventasLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _fventasMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: _fventasBlack,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1772,6 +1947,495 @@ class _SellerOrdersPreview extends StatelessWidget {
   }
 }
 
+class SellerCatalogScreen extends StatefulWidget {
+  const SellerCatalogScreen({
+    super.key,
+    required this.onOpenOrder,
+  });
+
+  final VoidCallback onOpenOrder;
+
+  @override
+  State<SellerCatalogScreen> createState() => _SellerCatalogScreenState();
+}
+
+class _SellerCatalogScreenState extends State<SellerCatalogScreen> {
+  final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  late Future<MobileProductPage> _future;
+  _CatalogFilter _filter = _CatalogFilter.available;
+  String _searchText = "";
+  String? _selectedCategoryId;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadProducts();
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  MobileProductQuery _query() {
+    return MobileProductQuery(
+      text: _searchText,
+      verticalName: switch (_filter) {
+        _CatalogFilter.machinery => "maquinaria",
+        _CatalogFilter.spareParts => "repuesto",
+        _ => null,
+      },
+      categoryId: _selectedCategoryId,
+      onlyAvailable: _filter == _CatalogFilter.available,
+      onlyNeedsValidation: _filter == _CatalogFilter.validation,
+      limit: 50,
+    );
+  }
+
+  Future<MobileProductPage> _loadProducts() {
+    return mobileRepository.listProductPage(_query());
+  }
+
+  void _refreshProducts() {
+    setState(() {
+      _future = _loadProducts();
+    });
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 220), () {
+      _searchText = value.trim();
+      _refreshProducts();
+    });
+  }
+
+  void _onFilterChanged(_CatalogFilter filter) {
+    if (_filter == filter) {
+      return;
+    }
+    _filter = filter;
+    _refreshProducts();
+  }
+
+  void _onCategoryChanged(MobileCategory? category) {
+    final nextId = category?.id.trim();
+    final normalized = nextId == null || nextId.isEmpty ? null : nextId;
+    if (_selectedCategoryId == normalized) {
+      return;
+    }
+    _selectedCategoryId = normalized;
+    _refreshProducts();
+  }
+
+  bool _addToOrder(MobileProduct product, int quantity) {
+    if (!_canAddProductQuantity(context, product, quantity)) {
+      return false;
+    }
+    mobileCartController.addProduct(product, quantity: quantity);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$quantity uds de ${product.name} agregadas al pedido',
+        ),
+        action: SnackBarAction(
+          label: 'Ver pedido',
+          onPressed: widget.onOpenOrder,
+        ),
+      ),
+    );
+    return true;
+  }
+
+  void _openProduct(MobileProduct product) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => _ProductDetailSheet(
+        product: product,
+        onAddQuantity: (quantity) {
+          if (_addToOrder(product, quantity)) {
+            Navigator.of(context).pop();
+          }
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: () async => _refreshProducts(),
+      child: FutureBuilder<MobileProductPage>(
+        future: _future,
+        builder: (context, snapshot) {
+          final products = snapshot.data?.products ?? const <MobileProduct>[];
+          final isLoading = snapshot.connectionState != ConnectionState.done;
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+            children: [
+              ValueListenableBuilder<List<MobileCartItem>>(
+                valueListenable: mobileCartController,
+                builder: (context, items, _) => _SellerOrderBar(
+                  items: items,
+                  onOpenOrder: widget.onOpenOrder,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SearchBox(
+                controller: _searchController,
+                onChanged: _onSearchChanged,
+                labelText: 'Buscar para vender: SKU, producto o repuesto',
+              ),
+              const SizedBox(height: 10),
+              _CatalogFilterBar(selected: _filter, onChanged: _onFilterChanged),
+              const SizedBox(height: 10),
+              _CategoryFilterStrip(
+                selectedCategoryId: _selectedCategoryId,
+                onChanged: _onCategoryChanged,
+              ),
+              const SizedBox(height: 12),
+              if (snapshot.hasError)
+                _ErrorState(
+                  title: 'No pudimos cargar productos',
+                  message: _friendlyMobileError(snapshot.error),
+                  onRetry: _refreshProducts,
+                )
+              else if (isLoading)
+                const _LoadingState(message: 'Cargando lista de venta')
+              else if (products.isEmpty)
+                _EmptyState(
+                  icon: Icons.inventory_2_outlined,
+                  title: 'Sin productos para vender',
+                  message:
+                      'Ajusta busqueda, familia o disponibilidad para volver a cargar la lista.',
+                  actionLabel: 'Limpiar filtros',
+                  onAction: () {
+                    _searchController.clear();
+                    _searchText = "";
+                    _selectedCategoryId = null;
+                    _filter = _CatalogFilter.available;
+                    _refreshProducts();
+                  },
+                )
+              else ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    '${products.length} productos comerciales',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: _fventasMuted,
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                ),
+                for (final product in products)
+                  _SellerProductLineCard(
+                    product: product,
+                    onTap: () => _openProduct(product),
+                    onAddQuantity: (quantity) => _addToOrder(product, quantity),
+                  ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SellerOrderBar extends StatelessWidget {
+  const _SellerOrderBar({
+    required this.items,
+    required this.onOpenOrder,
+  });
+
+  final List<MobileCartItem> items;
+  final VoidCallback onOpenOrder;
+
+  @override
+  Widget build(BuildContext context) {
+    final quantity = items.fold<int>(0, (total, item) => total + item.quantity);
+    final total = items.fold<double>(
+      0,
+      (sum, item) => sum + item.quantity * item.unitPriceUsd,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: _fventasBlack,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: Colors.white.withValues(alpha: 0.1),
+            ),
+            child:
+                const Icon(Icons.point_of_sale_outlined, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  quantity == 0 ? 'Venta asistida' : '$quantity uds en pedido',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                Text(
+                  quantity == 0
+                      ? 'Busca, agrega y asigna cliente B2B'
+                      : 'Total ${_moneyFromUsd(total)}',
+                  style: const TextStyle(
+                    color: Color(0xFFD4D4D4),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          FilledButton(
+            onPressed: quantity == 0 ? null : onOpenOrder,
+            child: const Text('Pedido'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerProductLineCard extends StatefulWidget {
+  const _SellerProductLineCard({
+    required this.product,
+    required this.onTap,
+    required this.onAddQuantity,
+  });
+
+  final MobileProduct product;
+  final VoidCallback onTap;
+  final ValueChanged<int> onAddQuantity;
+
+  @override
+  State<_SellerProductLineCard> createState() => _SellerProductLineCardState();
+}
+
+class _SellerProductLineCardState extends State<_SellerProductLineCard> {
+  int _quantity = 1;
+
+  Future<void> _editQuantity() async {
+    final selected = await _showQuantityPicker(
+      context,
+      initialQuantity: _quantity,
+      stock: widget.product.availableStock,
+      allowBeyondStock: widget.product.requiresQuote,
+    );
+    if (!mounted || selected == null) {
+      return;
+    }
+    setState(() => _quantity = selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final product = widget.product;
+    final accentColor = _productAccentColor(product.categoryName);
+    final canAdd = product.requiresQuote || product.availableStock > 0;
+    final effectiveImageUrl = _effectiveProductImage(
+      imageUrl: product.primaryImageUrl,
+      title: product.name,
+      category: product.categoryName,
+    );
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: _fventasLine),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: widget.onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SellerProductThumb(
+                imageUrl: effectiveImageUrl,
+                accentColor: accentColor,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            product.sku,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  color: _fventasMuted,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                        _MiniChip(
+                          label: product.requiresTechnicalValidation
+                              ? 'Validar'
+                              : '${product.availableStock} disp.',
+                          color: product.requiresTechnicalValidation
+                              ? const Color(0xFFFF6A1A)
+                              : _fventasBlue,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      product.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: _fventasBlack,
+                            fontWeight: FontWeight.w900,
+                            height: 1.08,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _MiniChip(
+                            label: product.categoryName, color: accentColor),
+                        if (product.b2bDiscountPercent > 0)
+                          _MiniChip(
+                            label:
+                                '-${product.b2bDiscountPercent.toStringAsFixed(0)}%',
+                            color: const Color(0xFF198754),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            product.requiresQuote
+                                ? 'Cotizar'
+                                : _moneyFromUsd(product.effectiveB2bPriceUsd),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  color: _fventasBlack,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 52,
+                          height: 34,
+                          child: OutlinedButton(
+                            onPressed: canAdd ? _editQuantity : null,
+                            style: OutlinedButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              foregroundColor: accentColor,
+                              side: BorderSide(
+                                color: accentColor.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Text(
+                              '$_quantity',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        FilledButton(
+                          onPressed: canAdd
+                              ? () => widget.onAddQuantity(_quantity)
+                              : null,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(82, 34),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            backgroundColor: accentColor,
+                          ),
+                          child: Text(canAdd ? 'Agregar' : 'Sin stock'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SellerProductThumb extends StatelessWidget {
+  const _SellerProductThumb({
+    required this.imageUrl,
+    required this.accentColor,
+  });
+
+  final String? imageUrl;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 78,
+        height: 94,
+        child: ColoredBox(
+          color: accentColor.withValues(alpha: 0.08),
+          child: imageUrl == null || imageUrl!.isEmpty
+              ? _FVENTASProductPlaceholder(accentColor: accentColor)
+              : Padding(
+                  padding: const EdgeInsets.all(7),
+                  child: _catalogImage(
+                    imageUrl: imageUrl!,
+                    fit: BoxFit.contain,
+                    semanticLabel: 'Imagen de producto',
+                    fallbackBuilder: () => _FVENTASProductPlaceholder(
+                      accentColor: accentColor,
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
 class SellerCartScreen extends StatefulWidget {
   const SellerCartScreen({
     super.key,
@@ -1789,7 +2453,83 @@ class SellerCartScreen extends StatefulWidget {
 class _SellerCartScreenState extends State<SellerCartScreen> {
   String _selectedClientId = "";
   String _saleType = "cash";
-  int _paymentTermDays = 10;
+  int _paymentTermDays = 15;
+
+  MobileSellerClient? _selectedClient(List<MobileSellerClient> clients) {
+    if (clients.isEmpty) {
+      _selectedClientId = "";
+      return null;
+    }
+    final existing = clients.where((client) => client.id == _selectedClientId);
+    final selected = existing.isNotEmpty ? existing.first : clients.first;
+    _selectedClientId = selected.id;
+    return selected;
+  }
+
+  Set<String> _availableSaleTypes(
+    MobileSellerClient client,
+    double orderTotalUsd,
+  ) {
+    return {
+      "cash",
+      if (client.canUseTermCredit) "term_credit",
+      if (client.canUseCreditLine && client.creditAvailableUsd >= orderTotalUsd)
+        "credit_line",
+    };
+  }
+
+  String _normalizeSaleType(
+    MobileSellerClient client,
+    double orderTotalUsd,
+  ) {
+    final available = _availableSaleTypes(client, orderTotalUsd);
+    if (available.contains(_saleType)) {
+      return _saleType;
+    }
+    if (available.contains(client.defaultSaleType)) {
+      return client.defaultSaleType;
+    }
+    if (available.contains("term_credit")) {
+      return "term_credit";
+    }
+    return "cash";
+  }
+
+  int _normalizePaymentTerm(MobileSellerClient client) {
+    final terms = _positiveTerms(client.allowedPaymentTermsDays);
+    if (terms.isEmpty) {
+      return 0;
+    }
+    if (terms.contains(_paymentTermDays)) {
+      return _paymentTermDays;
+    }
+    return terms.first;
+  }
+
+  String? _orderBlocker(
+    MobileSellerClient? client,
+    MobileCheckoutPreview preview,
+    int selectedTerm,
+  ) {
+    if (client == null) {
+      return "Selecciona un cliente B2B antes de crear el pedido.";
+    }
+    if (client.status.isNotEmpty && client.status != "active") {
+      return "Cliente no habilitado para comprar desde la app.";
+    }
+    if (_saleType == "term_credit" &&
+        !client.positivePaymentTerms.contains(selectedTerm)) {
+      return "El plazo seleccionado no esta autorizado para este cliente.";
+    }
+    if (_saleType == "credit_line" && !client.creditEnabled) {
+      return "El cliente no tiene linea de credito aprobada.";
+    }
+    if (_saleType == "credit_line" &&
+        client.creditAvailableUsd < preview.totalUsd) {
+      return "Cupo insuficiente: disponible ${_moneyFromUsd(client.creditAvailableUsd)}.";
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1800,31 +2540,41 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const _SectionTitle(title: 'Pedido asistido'),
+              const _SectionTitle(title: 'Pedido'),
               const _EmptyState(
-                message: 'Agrega productos del catalogo para tomar un pedido',
+                title: 'Arma un pedido desde Vender',
+                message:
+                    'Busca productos, define cantidades y asigna el cliente B2B.',
+                icon: Icons.assignment_add,
               ),
               FilledButton.icon(
                 onPressed: widget.onOpenCatalog,
                 icon: const Icon(Icons.search),
-                label: const Text('Explorar catalogo'),
+                label: const Text('Vender productos'),
               ),
             ],
           );
         }
 
-        final preview = mobileCartService.calculatePreview(items);
+        final preview = mobileCartService.calculatePreview(
+          items,
+          exchangeRateUsdLocal: _exchangeRateUsdLocal(),
+        );
 
         return FutureBuilder<List<MobileSellerClient>>(
           future: mobileRepository.listSellerClients(),
           builder: (context, snapshot) {
             final clients = snapshot.data ?? [];
-            if (_selectedClientId.isEmpty && clients.isNotEmpty) {
-              _selectedClientId = clients.first.id;
+            final selectedClient = _selectedClient(clients);
+            if (selectedClient != null) {
+              _saleType = _normalizeSaleType(selectedClient, preview.totalUsd);
+              _paymentTermDays = _normalizePaymentTerm(selectedClient);
             }
 
             final selectedTerm =
                 _saleType == "term_credit" ? _paymentTermDays : 0;
+            final orderBlocker =
+                _orderBlocker(selectedClient, preview, selectedTerm);
             final draft = MobileSecureOrderDraft(
               items: items,
               preview: preview,
@@ -1838,8 +2588,7 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
               children: [
                 Row(
                   children: [
-                    const Expanded(
-                        child: _SectionTitle(title: 'Pedido asistido')),
+                    const Expanded(child: _SectionTitle(title: 'Pedido')),
                     TextButton.icon(
                       onPressed: mobileCartController.clear,
                       icon: const Icon(Icons.delete_outline),
@@ -1886,10 +2635,49 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                                   child: Text(client.businessName),
                                 ),
                             ],
-                            onChanged: (value) => setState(
-                              () => _selectedClientId = value ?? "",
-                            ),
+                            onChanged: (value) => setState(() {
+                              _selectedClientId = value ?? "";
+                              final nextClient = _selectedClient(clients);
+                              if (nextClient == null) {
+                                return;
+                              }
+                              _saleType = _normalizeSaleType(
+                                nextClient,
+                                preview.totalUsd,
+                              );
+                              _paymentTermDays =
+                                  _normalizePaymentTerm(nextClient);
+                            }),
                           ),
+                          if (selectedClient != null) ...[
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _MiniChip(
+                                  label:
+                                      'Cupo ${_moneyFromUsd(selectedClient.creditAvailableUsd)}',
+                                  color: selectedClient.canUseCreditLine
+                                      ? const Color(0xFF198754)
+                                      : _fventasMuted,
+                                ),
+                                if (selectedClient.creditRequestedUsd > 0)
+                                  _MiniChip(
+                                    label:
+                                        'Solicitado ${_moneyFromUsd(selectedClient.creditRequestedUsd)}',
+                                    color: const Color(0xFFFFC107),
+                                  ),
+                                if (selectedClient
+                                    .positivePaymentTerms.isNotEmpty)
+                                  _MiniChip(
+                                    label:
+                                        'Plazos ${selectedClient.positivePaymentTerms.join(", ")} dias',
+                                    color: _fventasBlue,
+                                  ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1931,12 +2719,22 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                             _SaleTypeChip(
                               label: 'Credito dias',
                               selected: _saleType == "term_credit",
-                              onSelected: () =>
-                                  setState(() => _saleType = "term_credit"),
+                              enabled: selectedClient?.canUseTermCredit == true,
+                              onSelected: () => setState(() {
+                                _saleType = "term_credit";
+                                if (selectedClient != null) {
+                                  _paymentTermDays =
+                                      _normalizePaymentTerm(selectedClient);
+                                }
+                              }),
                             ),
                             _SaleTypeChip(
                               label: 'Linea de credito',
                               selected: _saleType == "credit_line",
+                              enabled: selectedClient != null &&
+                                  selectedClient.canUseCreditLine &&
+                                  selectedClient.creditAvailableUsd >=
+                                      preview.totalUsd,
                               onSelected: () =>
                                   setState(() => _saleType = "credit_line"),
                             ),
@@ -1948,7 +2746,9 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              for (final term in const [10, 15, 20, 30, 40])
+                              for (final term
+                                  in selectedClient?.positivePaymentTerms ??
+                                      const <int>[])
                                 _SaleTypeChip(
                                   label: '$term dias',
                                   selected: _paymentTermDays == term,
@@ -1964,15 +2764,18 @@ class _SellerCartScreenState extends State<SellerCartScreen> {
                           title: 'Resumen',
                           compact: true,
                           lines: [
-                            'Total USD ${preview.totalUsd.toStringAsFixed(2)}',
-                            'Referencia ${mobileEnvironment.secondaryCurrency} ${preview.totalLocal.toStringAsFixed(2)}',
+                            'Total ${_moneyFromUsd(preview.totalUsd)}',
                             'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
+                            if (preview.requiresOperatorReview)
+                              'Requiere revision por producto tecnico o cotizable.',
+                            if (orderBlocker != null) orderBlocker,
                           ],
                         ),
                         const SizedBox(height: 10),
                         _CreateOrderButton(
                           draft: draft,
                           session: widget.session,
+                          blocker: orderBlocker,
                         ),
                       ],
                     ),
@@ -2023,7 +2826,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
     String? selectedCity;
     final idempotencyKey = _newOperationId('seller-client');
 
-    Future<void> disposeControllers() async {
+    void disposeControllers() {
       businessNameController.dispose();
       emailController.dispose();
       phoneController.dispose();
@@ -2046,27 +2849,23 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
           if (isSaving || formKey.currentState?.validate() != true) {
             return;
           }
+          FocusScope.of(sheetContext).unfocus();
           setSheetState(() {
             isSaving = true;
             formError = null;
           });
           try {
-            final requestedCredit = double.tryParse(
-                  creditController.text.trim().replaceAll(',', '.'),
-                ) ??
-                0;
+            final requestedCredit =
+                _visibleMoneyInputToUsd(creditController.text);
             final rawPhone = phoneController.text.trim();
             final rawTaxId = taxIdController.text.trim();
-            final normalizedPhone = mobileEnvironment.usesChileFormat
+            final usesChileFormat = _usesChileFormat();
+            final normalizedPhone = usesChileFormat
                 ? normalizeChileanPhone(rawPhone)
                 : rawPhone.replaceAll(RegExp(r'\s+'), ' ').trim();
-            final normalizedTaxId = mobileEnvironment.usesChileFormat
+            final normalizedTaxId = usesChileFormat
                 ? normalizeChileanRut(rawTaxId)
                 : rawTaxId.toUpperCase().trim();
-            setSheetState(() {
-              phoneController.text = normalizedPhone;
-              taxIdController.text = normalizedTaxId;
-            });
             final result = await mobileRepository.createSellerClient(
               MobileSellerClientDraft(
                 businessName: businessNameController.text.trim(),
@@ -2079,13 +2878,13 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                 address: addressController.text.trim(),
                 notes: notesController.text.trim(),
                 creditRequestedUsd: requestedCredit,
-                defaultSaleType: requestedCredit > 0 ? 'term_credit' : 'cash',
-                allowedPaymentTermsDays: requestedCredit > 0
-                    ? const [0, 10, 15, 20, 30, 40]
-                    : const [0],
+                defaultSaleType: requestedCredit > 0 ? 'credit_line' : 'cash',
+                allowedPaymentTermsDays: const [0],
                 idempotencyKey: idempotencyKey,
               ),
             );
+            FocusManager.instance.primaryFocus?.unfocus();
+            await Future<void>.delayed(Duration.zero);
             if (sheetContext.mounted) {
               Navigator.of(sheetContext).pop(result);
             }
@@ -2106,9 +2905,18 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final cityOptions = mobileEnvironment.usesChileFormat
-                ? communesForRegion(selectedState)
-                : const <String>[];
+            final locationProfile =
+                countryLocations.profileFor(_marketCountryCode());
+            final stateOptions = locationProfile.states;
+            final cityOptions = locationProfile.citiesFor(selectedState);
+            final selectedRegion =
+                stateOptions.contains(selectedState) ? selectedState : null;
+            final selectedCommune =
+                cityOptions.contains(selectedCity) ? selectedCity : null;
+            final usesChileFormat = _usesChileFormat();
+            final taxLabel = _taxLabel();
+            final taxPlaceholder = _taxPlaceholder();
+            final phonePlaceholder = _phonePlaceholder();
             return Padding(
               padding: EdgeInsets.only(
                 left: 18,
@@ -2196,7 +3004,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: phoneController,
                               keyboardType: TextInputType.phone,
                               textInputAction: TextInputAction.next,
-                              inputFormatters: mobileEnvironment.usesChileFormat
+                              inputFormatters: usesChileFormat
                                   ? [
                                       FilteringTextInputFormatter.digitsOnly,
                                       const _ChileanPhoneInputFormatter(),
@@ -2209,7 +3017,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                                     ],
                               decoration: InputDecoration(
                                 labelText: 'Telefono',
-                                hintText: mobileEnvironment.phonePlaceholder,
+                                hintText: phonePlaceholder,
                                 border: const OutlineInputBorder(),
                               ),
                               validator: (value) {
@@ -2217,11 +3025,11 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                                 if (phone.isEmpty) {
                                   return 'Ingresa telefono';
                                 }
-                                if (mobileEnvironment.usesChileFormat &&
+                                if (usesChileFormat &&
                                     !isValidChileanPhone(phone)) {
                                   return 'Formato telefonico invalido';
                                 }
-                                if (!mobileEnvironment.usesChileFormat &&
+                                if (!usesChileFormat &&
                                     phone
                                             .replaceAll(RegExp(r'[^0-9]'), '')
                                             .length <
@@ -2238,7 +3046,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               controller: taxIdController,
                               textInputAction: TextInputAction.next,
                               textCapitalization: TextCapitalization.characters,
-                              inputFormatters: mobileEnvironment.usesChileFormat
+                              inputFormatters: usesChileFormat
                                   ? const [
                                       _ChileanTaxIdInputFormatter(),
                                     ]
@@ -2249,18 +3057,18 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                                       LengthLimitingTextInputFormatter(30),
                                     ],
                               decoration: InputDecoration(
-                                labelText: mobileEnvironment.taxLabel,
-                                hintText: mobileEnvironment.taxPlaceholder,
+                                labelText: taxLabel,
+                                hintText: taxPlaceholder,
                                 border: const OutlineInputBorder(),
                               ),
                               validator: (value) {
                                 final rif = value?.trim() ?? '';
                                 if (rif.isEmpty) {
-                                  return 'Ingresa ${mobileEnvironment.taxLabel.toLowerCase()}';
+                                  return 'Ingresa ${taxLabel.toLowerCase()}';
                                 }
-                                if (mobileEnvironment.usesChileFormat &&
+                                if (usesChileFormat &&
                                     !isValidChileanRut(rif)) {
-                                  return '${mobileEnvironment.taxLabel} invalido';
+                                  return '$taxLabel invalido';
                                 }
                                 return null;
                               },
@@ -2279,20 +3087,23 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      if (mobileEnvironment.usesChileFormat)
+                      if (locationProfile.hasLocations)
                         Row(
                           children: [
                             Expanded(
                               child: DropdownButtonFormField<String>(
-                                key: ValueKey(
-                                    'client-state-${selectedState ?? ''}'),
-                                initialValue: selectedState,
+                                initialValue: selectedRegion,
                                 isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Region',
-                                  border: OutlineInputBorder(),
+                                decoration: InputDecoration(
+                                  labelText: locationProfile.stateLabel,
+                                  border: const OutlineInputBorder(),
                                 ),
-                                items: chileRegions
+                                hint: Text(locationProfile.statePlaceholder),
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? locationProfile.statePlaceholder
+                                        : null,
+                                items: stateOptions
                                     .map(
                                       (state) => DropdownMenuItem<String>(
                                         value: state,
@@ -2303,29 +3114,28 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                                       ),
                                     )
                                     .toList(growable: false),
-                                onChanged: (value) {
-                                  setSheetState(() {
-                                    selectedState = value;
-                                    selectedCity = null;
-                                  });
-                                },
-                                validator: (value) =>
-                                    value == null || value.trim().isEmpty
-                                        ? 'Selecciona region'
-                                        : null,
+                                onChanged: isSaving
+                                    ? null
+                                    : (value) => setSheetState(() {
+                                          selectedState = value;
+                                          selectedCity = null;
+                                        }),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: DropdownButtonFormField<String>(
-                                key: ValueKey(
-                                    'client-city-${selectedState ?? ''}'),
-                                initialValue: selectedCity,
+                                initialValue: selectedCommune,
                                 isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Comuna',
-                                  border: OutlineInputBorder(),
+                                decoration: InputDecoration(
+                                  labelText: locationProfile.cityLabel,
+                                  border: const OutlineInputBorder(),
                                 ),
+                                hint: Text(locationProfile.cityPlaceholder),
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? locationProfile.cityPlaceholder
+                                        : null,
                                 items: cityOptions
                                     .map(
                                       (city) => DropdownMenuItem<String>(
@@ -2337,17 +3147,11 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                                       ),
                                     )
                                     .toList(growable: false),
-                                onChanged: cityOptions.isEmpty
+                                onChanged: cityOptions.isEmpty || isSaving
                                     ? null
-                                    : (value) {
-                                        setSheetState(() {
+                                    : (value) => setSheetState(() {
                                           selectedCity = value;
-                                        });
-                                      },
-                                validator: (value) =>
-                                    value == null || value.trim().isEmpty
-                                        ? 'Selecciona comuna'
-                                        : null,
+                                        }),
                               ),
                             ),
                           ],
@@ -2359,16 +3163,16 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               child: TextFormField(
                                 initialValue: selectedState,
                                 textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: 'Region / estado',
-                                  border: OutlineInputBorder(),
+                                decoration: InputDecoration(
+                                  labelText: locationProfile.stateLabel,
+                                  border: const OutlineInputBorder(),
                                 ),
                                 onChanged: (value) {
                                   selectedState = value.trim();
                                 },
                                 validator: (value) =>
                                     value == null || value.trim().isEmpty
-                                        ? 'Ingresa region o estado'
+                                        ? locationProfile.statePlaceholder
                                         : null,
                               ),
                             ),
@@ -2377,16 +3181,16 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                               child: TextFormField(
                                 initialValue: selectedCity,
                                 textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: 'Ciudad',
-                                  border: OutlineInputBorder(),
+                                decoration: InputDecoration(
+                                  labelText: locationProfile.cityLabel,
+                                  border: const OutlineInputBorder(),
                                 ),
                                 onChanged: (value) {
                                   selectedCity = value.trim();
                                 },
                                 validator: (value) =>
                                     value == null || value.trim().isEmpty
-                                        ? 'Ingresa ciudad'
+                                        ? locationProfile.cityPlaceholder
                                         : null,
                               ),
                             ),
@@ -2415,12 +3219,13 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                             RegExp(r'[0-9.,]'),
                           ),
                         ],
-                        decoration: const InputDecoration(
-                          labelText: 'Cupo solicitado USD',
+                        decoration: InputDecoration(
+                          labelText:
+                              'Cupo solicitado (${_displayCurrencySymbol()})',
                           helperText:
                               'Opcional. El gerente lo aprueba en el panel.',
-                          prefixIcon: Icon(Icons.credit_card_outlined),
-                          border: OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.credit_card_outlined),
+                          border: const OutlineInputBorder(),
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -2458,7 +3263,7 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                                 )
                               : const Icon(Icons.person_add_alt_1),
                           label: Text(
-                            isSaving ? 'Creando cliente' : 'Crear cliente',
+                            isSaving ? 'Creando...' : 'Crear cliente',
                           ),
                         ),
                       ),
@@ -2521,6 +3326,11 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
         }
 
         final clients = snapshot.data ?? [];
+        final creditClients =
+            clients.where((client) => client.creditEnabled).length;
+        final pendingCredit = clients
+            .where((client) => client.creditRequestStatus == "pending")
+            .length;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -2530,17 +3340,14 @@ class _SellerClientsScreenState extends State<SellerClientsScreen> {
                 FilledButton.icon(
                   onPressed: _showCreateClientSheet,
                   icon: const Icon(Icons.person_add_alt_1),
-                  label: const Text('Nuevo'),
+                  label: const Text('Nuevo cliente'),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            const _InlineNotice(
-              icon: Icons.assignment_ind_outlined,
-              title: 'Cartera comercial',
-              message:
-                  'Los clientes creados aqui quedan asignados a tu usuario vendedor.',
-              color: _fventasBlue,
+            _SellerClientStatsRow(
+              total: clients.length,
+              withCredit: creditClients,
+              pendingCredit: pendingCredit,
             ),
             const SizedBox(height: 12),
             if (clients.isEmpty)
@@ -2574,6 +3381,46 @@ class _SellerClientsLoadingView extends StatelessWidget {
         _SellerClientSkeletonCard(),
         _SellerClientSkeletonCard(),
         _SellerClientSkeletonCard(),
+      ],
+    );
+  }
+}
+
+class _SellerClientStatsRow extends StatelessWidget {
+  const _SellerClientStatsRow({
+    required this.total,
+    required this.withCredit,
+    required this.pendingCredit,
+  });
+
+  final int total;
+  final int withCredit;
+  final int pendingCredit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _SellerMetricTile(
+            label: 'Cartera',
+            value: '$total',
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _SellerMetricTile(
+            label: 'Con cupo',
+            value: '$withCredit',
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _SellerMetricTile(
+            label: 'Por aprobar',
+            value: '$pendingCredit',
+          ),
+        ),
       ],
     );
   }
@@ -2722,6 +3569,10 @@ class _SellerClientCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = _sellerCreditStatus(client);
+    final creditChipLabel =
+        client.creditRequestStatus == "pending" && client.creditRequestedUsd > 0
+            ? 'Solicitado ${_moneyFromUsd(client.creditRequestedUsd)}'
+            : 'Cupo ${_moneyFromUsd(client.creditAvailableUsd)}';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -2752,12 +3603,23 @@ class _SellerClientCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    'Disponible USD ${client.creditAvailableUsd.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _MiniChip(
+                        label: creditChipLabel,
+                        color: status.color,
+                      ),
+                      if (client.phone.isNotEmpty)
+                        _MiniChip(label: client.phone, color: _fventasMuted),
+                    ],
                   ),
+                  const SizedBox(height: 6),
                   Text(
                     client.email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: _fventasMuted),
                   ),
                 ],
@@ -2886,8 +3748,6 @@ class _SellerCommissionsScreenState extends State<SellerCommissionsScreen> {
                 orders: orders,
                 onChanged: (value) => setState(() => _filter = value),
               ),
-              const SizedBox(height: 12),
-              const _CommissionPolicyNotice(),
               const SizedBox(height: 12),
               if (orders.isEmpty)
                 const _EmptyState(
@@ -3232,7 +4092,7 @@ class _SellerCommissionHero extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'USD ${totalCommission.toStringAsFixed(2)}',
+            _moneyFromUsd(totalCommission),
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
@@ -3251,23 +4111,21 @@ class _SellerCommissionHero extends StatelessWidget {
               Expanded(
                 child: _DarkMetric(
                   label: 'Pendiente',
-                  value:
-                      'USD ${summary.pendingCommissionUsd.toStringAsFixed(2)}',
+                  value: _moneyFromUsd(summary.pendingCommissionUsd),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _DarkMetric(
                   label: 'Aprobada',
-                  value:
-                      'USD ${summary.approvedCommissionUsd.toStringAsFixed(2)}',
+                  value: _moneyFromUsd(summary.approvedCommissionUsd),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _DarkMetric(
                   label: 'Pagada',
-                  value: 'USD ${summary.paidCommissionUsd.toStringAsFixed(2)}',
+                  value: _moneyFromUsd(summary.paidCommissionUsd),
                 ),
               ),
             ],
@@ -3320,39 +4178,6 @@ class _CommissionFilterBar extends StatelessWidget {
                 onSelected: (_) => onChanged(filter),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CommissionPolicyNotice extends StatelessWidget {
-  const _CommissionPolicyNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF3CD),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFFFE69C)),
-      ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.verified_user_outlined, color: Color(0xFF996404)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'La comision queda trazada por orden y se libera segun validacion comercial, entrega o cobro definido por FVENTAS.',
-              style: TextStyle(
-                color: Color(0xFF664D03),
-                fontWeight: FontWeight.w800,
-                height: 1.35,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -3420,7 +4245,7 @@ class _SellerCommissionCard extends StatelessWidget {
                 Expanded(
                   child: _CommissionAmountTile(
                     label: 'Comision',
-                    value: 'USD ${order.commissionUsd.toStringAsFixed(2)}',
+                    value: _moneyFromUsd(order.commissionUsd),
                     color: commission.color,
                   ),
                 ),
@@ -3428,7 +4253,7 @@ class _SellerCommissionCard extends StatelessWidget {
                 Expanded(
                   child: _CommissionAmountTile(
                     label: 'Venta',
-                    value: 'USD ${order.totalUsd.toStringAsFixed(2)}',
+                    value: _moneyFromUsd(order.totalUsd),
                     color: _fventasInk,
                   ),
                 ),
@@ -3645,7 +4470,7 @@ String _commissionReleaseReason(
     case _CommissionFilter.pending:
     case _CommissionFilter.all:
       if (order.balanceUsd > 0) {
-        return 'Pendiente por saldo de cliente: USD ${order.balanceUsd.toStringAsFixed(2)}.';
+        return 'Pendiente por saldo de cliente: ${_moneyFromUsd(order.balanceUsd)}.';
       }
       if (order.stockStatus.toLowerCase().contains('reserved')) {
         return 'Pedido con stock reservado. Falta validacion de entrega o cierre comercial.';
@@ -3695,12 +4520,12 @@ class _SellerOrderCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Total USD ${order.totalUsd.toStringAsFixed(2)}',
+                    'Total ${_moneyFromUsd(order.totalUsd)}',
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   if (showCommission)
                     Text(
-                      'Comision USD ${order.commissionUsd.toStringAsFixed(2)} - ${order.commissionStatusLabel}',
+                      'Comision ${_moneyFromUsd(order.commissionUsd)} - ${order.commissionStatusLabel}',
                       style: const TextStyle(
                         color: _fventasMuted,
                         fontWeight: FontWeight.w700,
@@ -3708,7 +4533,7 @@ class _SellerOrderCard extends StatelessWidget {
                     )
                   else
                     Text(
-                      'Saldo USD ${order.balanceUsd.toStringAsFixed(2)}',
+                      'Saldo ${_moneyFromUsd(order.balanceUsd)}',
                       style: const TextStyle(color: _fventasMuted),
                     ),
                 ],
@@ -3744,13 +4569,13 @@ class _CategoryRail extends StatelessWidget {
 
         if (snapshot.connectionState != ConnectionState.done) {
           return const SizedBox(
-            height: 104,
+            height: 122,
             child: Center(child: CircularProgressIndicator()),
           );
         }
 
         return SizedBox(
-          height: 104,
+          height: 122,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: categories.length,
@@ -3872,18 +4697,14 @@ class _CustomerCommerceCard extends StatelessWidget {
                   Expanded(
                     child: _CommerceMetric(
                       label: 'Disponible',
-                      value: isLoading
-                          ? '...'
-                          : 'USD ${available.toStringAsFixed(2)}',
+                      value: isLoading ? '...' : _moneyFromUsd(available),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _CommerceMetric(
                       label: 'Comprometido',
-                      value: isLoading
-                          ? '...'
-                          : 'USD ${exposure.toStringAsFixed(2)}',
+                      value: isLoading ? '...' : _moneyFromUsd(exposure),
                     ),
                   ),
                 ],
@@ -3905,7 +4726,7 @@ class _CustomerCommerceCard extends StatelessWidget {
                     child: Text(
                       session.mustChangePassword
                           ? 'Clave temporal pendiente'
-                          : 'Catalogo sincronizado desde Admin',
+                          : 'Catalogo y cupo sincronizados',
                       style: const TextStyle(
                         color: _fventasMuted,
                         fontWeight: FontWeight.w700,
@@ -3994,7 +4815,7 @@ class _CategoryPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             color: Colors.white,
@@ -4026,7 +4847,7 @@ class _CategoryPill extends StatelessWidget {
                   foregroundColor: _fventasBlue,
                   child: Icon(icon, size: 20),
                 ),
-              const Spacer(),
+              const SizedBox(height: 10),
               Text(
                 title,
                 maxLines: 1,
@@ -4042,247 +4863,6 @@ class _CategoryPill extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _PromoCarousel extends StatefulWidget {
-  const _PromoCarousel({required this.onOpenCatalog});
-
-  final VoidCallback onOpenCatalog;
-
-  @override
-  State<_PromoCarousel> createState() => _PromoCarouselState();
-}
-
-class _PromoCarouselState extends State<_PromoCarousel> {
-  int _index = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<MobileAnnouncement>>(
-      future: mobileRepository.listAnnouncements('home'),
-      builder: (context, snapshot) {
-        final announcements = snapshot.data ?? [];
-
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const SizedBox(
-            height: 180,
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        if (announcements.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        final activeIndex = _index.clamp(0, announcements.length - 1).toInt();
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 184,
-              child: PageView.builder(
-                itemCount: announcements.length,
-                onPageChanged: (value) => setState(() => _index = value),
-                itemBuilder: (context, index) {
-                  final announcement = announcements[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: _PromoSlide(
-                      announcement: announcement,
-                      onTap: widget.onOpenCatalog,
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var i = 0; i < announcements.length; i++)
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    width: i == activeIndex ? 22 : 7,
-                    height: 7,
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(99),
-                      color: i == activeIndex
-                          ? _fventasBlue
-                          : _fventasBlue.withValues(alpha: 0.18),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _PromoSlide extends StatelessWidget {
-  const _PromoSlide({required this.announcement, required this.onTap});
-
-  final MobileAnnouncement announcement;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final imageUrl = announcement.imageUrl?.trim();
-    final ctaLabel = announcement.ctaLabel?.trim().isNotEmpty == true
-        ? announcement.ctaLabel!.trim()
-        : 'Ver catalogo';
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(26),
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: _fventasBlue.withValues(alpha: 0.2),
-              blurRadius: 22,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (imageUrl != null && imageUrl.isNotEmpty)
-              Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const _PromoFallbackArt(),
-              )
-            else
-              const _PromoFallbackArt(),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Color(0xEE101010),
-                    Color(0xAA101010),
-                    Color(0x33101010),
-                  ],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(18),
-              child: SizedBox(
-                width: MediaQuery.sizeOf(context).width * 0.62,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _StatusPill(label: ctaLabel, color: Colors.white),
-                    const SizedBox(height: 12),
-                    Text(
-                      announcement.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            height: 1.02,
-                          ),
-                    ),
-                    if (announcement.body.trim().isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        announcement.body,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFFE7E7E7),
-                          fontSize: 13,
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          ctaLabel,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            decoration: TextDecoration.underline,
-                            decorationColor: Colors.white,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const Icon(
-                          Icons.arrow_forward,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PromoFallbackArt extends StatelessWidget {
-  const _PromoFallbackArt();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_fventasBlack, Color(0xFF102A43)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -14,
-            bottom: -18,
-            child: Icon(
-              Icons.local_offer_outlined,
-              color: Colors.white.withValues(alpha: 0.08),
-              size: 152,
-            ),
-          ),
-          Positioned(
-            right: 22,
-            top: 22,
-            child: Container(
-              width: 62,
-              height: 62,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                color: _fventasBlue,
-              ),
-              child: const Icon(
-                Icons.campaign_outlined,
-                color: Colors.white,
-                size: 34,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -4355,9 +4935,9 @@ class _FeaturedProductGrid extends StatelessWidget {
           itemCount: products.length,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            mainAxisSpacing: 14,
-            crossAxisSpacing: 14,
-            childAspectRatio: 0.46,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 0.5,
           ),
           itemBuilder: (context, index) {
             final product = products[index];
@@ -4588,21 +5168,14 @@ class _CatalogScreenState extends State<CatalogScreen> {
       onRefresh: _loadFirstPage,
       child: ListView(
         controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
         children: [
           _SearchBox(
             controller: _searchController,
             onChanged: _onSearchChanged,
             labelText: 'Buscar producto, SKU o repuesto',
           ),
-          const SizedBox(height: 14),
-          _CatalogSummary(
-            loadedCount: _products.length,
-            hasMore: _hasMore,
-            isLoading: _isLoading,
-            categoryLabel: _selectedCategoryLabel,
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _CatalogFilterBar(
             selected: _filter,
             onChanged: _onFilterChanged,
@@ -4612,10 +5185,22 @@ class _CatalogScreenState extends State<CatalogScreen> {
             selectedCategoryId: _selectedCategoryId,
             onChanged: _onCategoryChanged,
           ),
-          const SizedBox(height: 14),
-          const _AnnouncementsStrip(placement: 'catalog'),
-          const SizedBox(height: 16),
-          const _SectionTitle(title: 'Catalogo FVENTAS'),
+          const SizedBox(height: 12),
+          if (!_isLoading && _errorMessage == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                _products.isEmpty
+                    ? 'Sin productos para esta busqueda'
+                    : _selectedCategoryLabel == "Todas"
+                        ? '${_products.length} productos disponibles para compra'
+                        : '${_products.length} productos en $_selectedCategoryLabel',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: _fventasMuted,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            ),
           if (_errorMessage != null)
             _ErrorState(
               title: 'No pudimos cargar el catalogo',
@@ -4629,7 +5214,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
               icon: Icons.inventory_2_outlined,
               title: 'Sin productos visibles',
               message:
-                  'No hay productos para esta busqueda o categoria. Revisa stock, estado y publicacion desde el admin.',
+                  'No hay productos disponibles para esta busqueda o categoria. Ajusta los filtros o consulta con tu vendedor.',
               actionLabel: 'Limpiar filtros',
               onAction: () {
                 _searchController.clear();
@@ -4649,9 +5234,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
               itemCount: _products.length,
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                mainAxisSpacing: 14,
-                crossAxisSpacing: 14,
-                childAspectRatio: 0.46,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.5,
               ),
               itemBuilder: (context, index) {
                 final product = _products[index];
@@ -4688,83 +5273,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
               icon: const Icon(Icons.expand_more),
               label: const Text('Cargar mas productos'),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CatalogSummary extends StatelessWidget {
-  const _CatalogSummary({
-    required this.loadedCount,
-    required this.hasMore,
-    required this.isLoading,
-    required this.categoryLabel,
-  });
-
-  final int loadedCount;
-  final bool hasMore;
-  final bool isLoading;
-  final String categoryLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: Colors.white,
-        border: Border.all(color: _fventasLine),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              color: _fventasBlue.withValues(alpha: 0.1),
-            ),
-            child: const Icon(
-              Icons.inventory_2_outlined,
-              color: _fventasBlue,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  isLoading
-                      ? 'Cargando catalogo'
-                      : '$loadedCount productos disponibles',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w900),
-                ),
-                Text(
-                  hasMore ? 'Stock sincronizado' : 'Catalogo al dia',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: _fventasMuted),
-                ),
-                if (categoryLabel != "Todas")
-                  Text(
-                    'Categoria: $categoryLabel',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: _fventasBlue,
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-              ],
-            ),
-          ),
-          const _InfoChip(icon: Icons.storefront_outlined, label: 'B2B'),
         ],
       ),
     );
@@ -4842,7 +5350,7 @@ class _CategoryFilterStrip extends StatelessWidget {
             icon: Icons.cloud_off_outlined,
             title: 'Categorias no disponibles',
             message:
-                'El catalogo sigue operativo, pero no pudimos leer las familias desde el admin.',
+                'El catalogo sigue operativo, pero no pudimos leer las familias disponibles.',
             color: _fventasBlue,
           );
         }
@@ -5034,7 +5542,7 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
             children: [
               _InfoChip(
                 icon: Icons.payments_outlined,
-                label: 'B2B USD ${b2bPrice.toStringAsFixed(2)}',
+                label: 'B2B ${_moneyFromUsd(b2bPrice)}',
               ),
               if (product.b2bDiscountPercent > 0)
                 _InfoChip(
@@ -5043,14 +5551,10 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                       ? '${product.b2bDiscountPercent.toStringAsFixed(0)}% ahorro'
                       : 'Oferta',
                 ),
-              _InfoChip(
-                icon: Icons.currency_exchange,
-                label: mobileEnvironment.localMoney(b2bPrice),
-              ),
               if (referencePrice != null)
                 _InfoChip(
                   icon: Icons.storefront_outlined,
-                  label: 'PVP USD ${referencePrice.toStringAsFixed(2)}',
+                  label: 'PVP ${_moneyFromUsd(referencePrice)}',
                 ),
               _StockBadge(stock: product.availableStock),
               if (product.requiresTechnicalValidation)
@@ -5226,7 +5730,10 @@ class CartScreen extends StatelessWidget {
           );
         }
 
-        final preview = mobileCartService.calculatePreview(items);
+        final preview = mobileCartService.calculatePreview(
+          items,
+          exchangeRateUsdLocal: _exchangeRateUsdLocal(),
+        );
 
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -5424,7 +5931,7 @@ class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
                     icon: Icons.cloud_off_outlined,
                     title: 'Credito no sincronizado',
                     message:
-                        'Puedes enviar la solicitud como efectivo o revision. FVENTAS validara credito, saldo y condiciones en el admin.',
+                        'Puedes enviar la solicitud como efectivo o revision. FVENTAS validara credito, saldo y condiciones.',
                     color: _fventasBlue,
                   ),
                 ],
@@ -5449,11 +5956,11 @@ class _CheckoutCommercePanelState extends State<_CheckoutCommercePanel> {
                   title: 'Resumen de compra',
                   compact: true,
                   lines: [
-                    'Subtotal: USD ${widget.preview.subtotalUsd.toStringAsFixed(2)}',
-                    'Total referencial: ${widget.preview.totalLocal.toStringAsFixed(2)} ${mobileEnvironment.secondaryCurrency}',
+                    'Subtotal: ${_moneyFromUsd(widget.preview.subtotalUsd)}',
+                    'Total: ${_moneyFromUsd(widget.preview.totalUsd)}',
                     'Condicion: ${_saleTypeLabel(_saleType, selectedTerm)}',
                     if (credit != null && _saleType == "credit_line")
-                      'Credito disponible: USD ${credit.creditAvailableUsd.toStringAsFixed(2)}',
+                      'Credito disponible: ${_moneyFromUsd(credit.creditAvailableUsd)}',
                     widget.preview.requiresOperatorReview
                         ? 'Requiere revision operativa antes de confirmar.'
                         : 'Validacion operativa FVENTAS antes del despacho.',
@@ -5518,10 +6025,15 @@ String _saleTypeLabel(String saleType, int paymentTermDays) {
 }
 
 class _CreateOrderButton extends StatefulWidget {
-  const _CreateOrderButton({required this.draft, required this.session});
+  const _CreateOrderButton({
+    required this.draft,
+    required this.session,
+    this.blocker,
+  });
 
   final MobileSecureOrderDraft draft;
   final MobileUserSession session;
+  final String? blocker;
 
   @override
   State<_CreateOrderButton> createState() => _CreateOrderButtonState();
@@ -5546,7 +6058,7 @@ class _CreateOrderButtonState extends State<_CreateOrderButton> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Orden $orderId registrada en FVENTAS Admin')),
+        SnackBar(content: Text('Orden $orderId registrada para revision')),
       );
     } catch (error) {
       if (!mounted) {
@@ -5565,8 +6077,15 @@ class _CreateOrderButtonState extends State<_CreateOrderButton> {
 
   @override
   Widget build(BuildContext context) {
+    final isBlocked =
+        widget.blocker != null && widget.blocker!.trim().isNotEmpty;
+    final label = widget.session.mustChangePassword
+        ? 'Actualiza tu clave'
+        : isBlocked
+            ? 'Revisa condicion comercial'
+            : (_isSubmitting ? 'Registrando orden' : 'Crear orden segura');
     return FilledButton.icon(
-      onPressed: _isSubmitting || widget.session.mustChangePassword
+      onPressed: _isSubmitting || widget.session.mustChangePassword || isBlocked
           ? null
           : _createOrder,
       icon: _isSubmitting
@@ -5576,11 +6095,7 @@ class _CreateOrderButtonState extends State<_CreateOrderButton> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : const Icon(Icons.lock_outline),
-      label: Text(
-        widget.session.mustChangePassword
-            ? 'Actualiza tu clave'
-            : (_isSubmitting ? 'Registrando orden' : 'Crear orden segura'),
-      ),
+      label: Text(label),
     );
   }
 }
@@ -5627,7 +6142,7 @@ String _productSubtitle(MobileProduct product) {
     return "${product.availableStock} disp. - validar FVENTAS";
   }
 
-  return "${product.availableStock} disp. - B2B USD ${product.effectiveB2bPriceUsd.toStringAsFixed(0)}";
+  return "${product.availableStock} disp. - precio B2B";
 }
 
 int _cartQuantityForProduct(String productId) {
@@ -5706,9 +6221,10 @@ class OrderHistoryScreen extends StatelessWidget {
           }
 
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              const _SectionTitle(title: 'Historial de ordenes'),
+              _OrderHistoryHeader(orders: orders),
+              const SizedBox(height: 12),
               for (final order in orders) _CustomerOrderHistoryCard(order),
             ],
           );
@@ -5726,53 +6242,196 @@ class _CustomerOrderHistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = _customerOrderStatus(order.status, order.paymentStatus);
+    final stock = _customerStockStatus(order.stockStatus);
     final dueLabel = order.dueDate == null
         ? 'Sin vencimiento'
         : 'Vence ${_formatCustomerDate(order.dueDate!)}';
+    final statusLabel = _compactCustomerStatusLabel(status.label);
+    final balanceIsOpen = order.balanceUsd > 0;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: _fventasLine),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SoftIcon(icon: status.icon, color: status.color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    order.id,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SoftIcon(icon: status.icon, color: status.color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        order.id,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: _fventasBlack,
+                              height: 1,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${order.saleTypeLabel} - ${_formatCustomerDate(order.createdAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _fventasMuted,
+                          fontWeight: FontWeight.w800,
                         ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${order.saleTypeLabel} - ${status.label}',
-                    style: const TextStyle(
-                      color: _fventasMuted,
-                      fontWeight: FontWeight.w700,
+                ),
+                const SizedBox(width: 8),
+                _StatusPill(label: statusLabel, color: status.color),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: _fventasCanvas,
+                border: Border.all(color: _fventasLine),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _OrderHistoryMetric(
+                      label: 'Total',
+                      value: _moneyFromUsd(order.totalUsd),
+                      color: _fventasBlack,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Total USD ${order.totalUsd.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                  Text(
-                    'Saldo USD ${order.balanceUsd.toStringAsFixed(2)} - $dueLabel',
-                    style: const TextStyle(color: _fventasMuted),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _OrderHistoryMetric(
+                      label: balanceIsOpen ? 'Saldo' : 'Pagado',
+                      value: _moneyFromUsd(order.balanceUsd),
+                      color: balanceIsOpen
+                          ? status.color
+                          : const Color(0xFF198754),
+                    ),
                   ),
                 ],
               ),
             ),
-            _StatusPill(label: status.label, color: status.color),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MiniChip(label: dueLabel, color: _fventasMuted),
+                _MiniChip(
+                    label: '${order.itemsCount} items', color: _fventasBlue),
+                _MiniChip(label: stock, color: status.color),
+              ],
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _OrderHistoryHeader extends StatelessWidget {
+  const _OrderHistoryHeader({required this.orders});
+
+  final List<MobileOrderSummary> orders;
+
+  @override
+  Widget build(BuildContext context) {
+    final openBalance =
+        orders.fold<double>(0, (total, order) => total + order.balanceUsd);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: _fventasBlack,
+      ),
+      child: Row(
+        children: [
+          const _SoftIcon(
+            icon: Icons.receipt_long_outlined,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Historial de ordenes',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                Text(
+                  '${orders.length} ordenes - saldo ${_moneyFromUsd(openBalance)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFD4D4D4),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrderHistoryMetric extends StatelessWidget {
+  const _OrderHistoryMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _fventasMuted,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w900,
+              ),
+        ),
+      ],
     );
   }
 }
@@ -5973,9 +6632,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final session = widget.session;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: [
-        const _SectionTitle(title: 'Cuenta'),
         _AccountHeaderCard(
           session: session,
           onOpenPasswordChange:
@@ -5983,56 +6641,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         _CreditSnapshotPanel(customerId: session.id),
         _OrderSummaryPanel(customerId: session.id),
-        OutlinedButton.icon(
-          onPressed: () => Navigator.of(context).push(
+        _ClientCommercePreferencesCard(session: session),
+        _AccountActionPanel(
+          isRequestingDeletion: _isRequestingDeletion,
+          onOpenHistory: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => OrderHistoryScreen(customerId: session.id),
             ),
           ),
-          icon: const Icon(Icons.receipt_long_outlined),
-          label: const Text('Ver historial completo'),
-        ),
-        const SizedBox(height: 12),
-        _InfoPanel(
-          title: 'Preferencias de ecommerce',
-          lines: [
-            'Moneda principal: ${mobileEnvironment.primaryCurrency}',
-            'Referencia: ${mobileEnvironment.secondaryCurrency}',
-            'Tasa referencial: ${mobileEnvironment.exchangeRateUsdLocal} ${mobileEnvironment.exchangeRateLabel}',
-            'Soporte: validacion operativa FVENTAS',
-          ],
-        ),
-        OutlinedButton.icon(
-          onPressed: _isRequestingDeletion ? null : _requestAccountDeletion,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.error,
-            side: BorderSide(
-              color: Theme.of(context).colorScheme.error.withValues(
-                    alpha: 0.45,
-                  ),
-            ),
-          ),
-          icon: _isRequestingDeletion
-              ? SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                )
-              : const Icon(Icons.delete_outline),
-          label: Text(
-            _isRequestingDeletion
-                ? 'Solicitando...'
-                : 'Solicitar eliminacion de cuenta',
-          ),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: widget.onSignOut,
-          icon: const Icon(Icons.logout_outlined),
-          label: const Text('Cerrar sesion'),
+          onRequestDeletion: _requestAccountDeletion,
+          onSignOut: widget.onSignOut,
         ),
       ],
     );
@@ -6050,8 +6668,19 @@ class _AccountHeaderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final terms = _positiveTerms(
+      session.purchaseConditions.allowedPaymentTermsDays.isNotEmpty
+          ? session.purchaseConditions.allowedPaymentTermsDays
+          : session.allowedPaymentTermsDays,
+    );
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: _fventasLine),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -6059,12 +6688,20 @@ class _AccountHeaderCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const _SoftIcon(icon: Icons.storefront_outlined),
+                const FVENTASLogo(compact: true, size: 54),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const Text(
+                        'Cuenta comercial',
+                        style: TextStyle(
+                          color: _fventasMuted,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
                       Text(
                         session.name,
                         maxLines: 1,
@@ -6086,6 +6723,12 @@ class _AccountHeaderCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                _StatusPill(
+                  label: session.mustChangePassword ? 'Clave' : 'Activa',
+                  color: session.mustChangePassword
+                      ? _fventasBlue
+                      : const Color(0xFF198754),
+                ),
               ],
             ),
             const SizedBox(height: 14),
@@ -6098,62 +6741,133 @@ class _AccountHeaderCard extends StatelessWidget {
                   color: _fventasBlack,
                 ),
                 _StatusPill(
-                  label: mobileEnvironment.defaultCountry,
+                  label: _displayCurrencyLabel(),
+                  color: _fventasBlue,
+                ),
+                _StatusPill(
+                  label: 'Pais ${_marketCountryCode()}',
                   color: const Color(0xFF6C757D),
                 ),
-                if (session.mustChangePassword)
-                  const _StatusPill(
-                    label: 'Clave temporal',
-                    color: _fventasBlue,
-                  )
-                else
-                  const _StatusPill(
-                    label: 'Acceso activo',
-                    color: Color(0xFF198754),
-                  ),
               ],
             ),
-            const SizedBox(height: 12),
-            if (session.assignedSeller.name.isNotEmpty) ...[
-              _AccountMetaLine(
-                icon: Icons.support_agent_outlined,
-                label: 'Vendedor',
-                value: session.assignedSeller.name,
-              ),
-              const SizedBox(height: 8),
-            ],
-            if (_positiveTerms(session.allowedPaymentTermsDays).isNotEmpty) ...[
-              _AccountMetaLine(
-                icon: Icons.event_available_outlined,
-                label: 'Plazos',
-                value:
-                    '${_positiveTerms(session.allowedPaymentTermsDays).join(", ")} dias',
-              ),
-              const SizedBox(height: 8),
-            ],
-            Row(
-              children: [
-                const Icon(Icons.sync_outlined, color: _fventasMuted, size: 18),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Cuenta sincronizada con FVENTAS Admin.',
-                    style: TextStyle(
-                      color: _fventasMuted,
-                      fontWeight: FontWeight.w700,
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final itemWidth = (constraints.maxWidth - 10) / 2;
+                return Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    SizedBox(
+                      width: itemWidth,
+                      child: _AccountSignalTile(
+                        icon: Icons.support_agent_outlined,
+                        label: 'Ejecutivo',
+                        value: session.assignedSeller.name.isEmpty
+                            ? 'Por asignar'
+                            : session.assignedSeller.name,
+                      ),
                     ),
-                  ),
-                ),
-                if (onOpenPasswordChange != null)
-                  TextButton.icon(
-                    onPressed: onOpenPasswordChange,
-                    icon: const Icon(Icons.lock_reset_outlined, size: 18),
-                    label: const Text('Cambiar clave'),
-                  ),
-              ],
+                    SizedBox(
+                      width: itemWidth,
+                      child: _AccountSignalTile(
+                        icon: Icons.event_available_outlined,
+                        label: 'Plazos',
+                        value: terms.isEmpty
+                            ? 'Contado'
+                            : '${terms.join(", ")} dias',
+                      ),
+                    ),
+                    SizedBox(
+                      width: itemWidth,
+                      child: const _AccountSignalTile(
+                        icon: Icons.verified_user_outlined,
+                        label: 'Validacion',
+                        value: 'FVENTAS',
+                      ),
+                    ),
+                    SizedBox(
+                      width: itemWidth,
+                      child: const _AccountSignalTile(
+                        icon: Icons.business_outlined,
+                        label: 'Empresa',
+                        value: 'Aislada',
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
+            if (onOpenPasswordChange != null) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: onOpenPasswordChange,
+                icon: const Icon(Icons.lock_reset_outlined),
+                label: const Text('Actualizar clave temporal'),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AccountSignalTile extends StatelessWidget {
+  const _AccountSignalTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 76),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: _fventasCanvas,
+        border: Border.all(color: _fventasLine),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: _fventasBlue, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _fventasMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _fventasBlack,
+                    fontWeight: FontWeight.w900,
+                    height: 1.05,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -6195,6 +6909,253 @@ class _AccountMetaLine extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ClientCommercePreferencesCard extends StatelessWidget {
+  const _ClientCommercePreferencesCard({required this.session});
+
+  final MobileUserSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final conditions = session.purchaseConditions;
+    final terms = _positiveTerms(
+      conditions.allowedPaymentTermsDays.isNotEmpty
+          ? conditions.allowedPaymentTermsDays
+          : session.allowedPaymentTermsDays,
+    );
+    final paymentLabel = conditions.paymentTermsLabel.isNotEmpty
+        ? conditions.paymentTermsLabel
+        : terms.isEmpty
+            ? 'Contado'
+            : 'Contado / ${terms.join(", ")} dias';
+    final exchangeLabel = conditions.exchangeRateLabel.isNotEmpty
+        ? conditions.exchangeRateLabel
+        : !_displaysPrimaryCurrency()
+            ? '${_exchangeRateValueLabel()} ${_exchangeRateLabel()}'
+            : '';
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: _fventasLine),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const _SoftIcon(icon: Icons.tune_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    conditions.title.isEmpty
+                        ? 'Condiciones de compra'
+                        : conditions.title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: _fventasBlack,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _PreferenceLine(
+              icon: Icons.payments_outlined,
+              label: 'Moneda',
+              value: conditions.currencyLabel.isEmpty
+                  ? _displayCurrencyLabel()
+                  : conditions.currencyLabel,
+            ),
+            if (exchangeLabel.isNotEmpty)
+              _PreferenceLine(
+                icon: Icons.currency_exchange_outlined,
+                label: 'Tasa referencial',
+                value: exchangeLabel,
+              ),
+            _PreferenceLine(
+              icon: Icons.event_available_outlined,
+              label: 'Pago',
+              value: paymentLabel,
+            ),
+            _PreferenceLine(
+              icon: Icons.verified_user_outlined,
+              label: 'Tipo base',
+              value: conditions.defaultSaleTypeLabel.isEmpty
+                  ? _saleTypeLabel(
+                      session.defaultSaleType,
+                      terms.isNotEmpty ? terms.first : 0,
+                    )
+                  : conditions.defaultSaleTypeLabel,
+            ),
+            _PreferenceLine(
+              icon: Icons.lock_outline,
+              label: 'Alcance',
+              value: conditions.scopeLabel.isEmpty
+                  ? 'Solo datos de tu empresa'
+                  : conditions.scopeLabel,
+            ),
+            if (conditions.note.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _fventasCanvas,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _fventasLine),
+                ),
+                child: Text(
+                  conditions.note.trim(),
+                  style: const TextStyle(
+                    color: _fventasMuted,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PreferenceLine extends StatelessWidget {
+  const _PreferenceLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: _fventasMuted, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _fventasMuted,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _fventasBlack,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountActionPanel extends StatelessWidget {
+  const _AccountActionPanel({
+    required this.isRequestingDeletion,
+    required this.onOpenHistory,
+    required this.onRequestDeletion,
+    required this.onSignOut,
+  });
+
+  final bool isRequestingDeletion;
+  final VoidCallback onOpenHistory;
+  final VoidCallback onRequestDeletion;
+  final Future<void> Function() onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final dangerColor = Theme.of(context).colorScheme.error;
+
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: _fventasLine),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Acceso y seguridad',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: _fventasBlack,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: onOpenHistory,
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('Ver historial de ordenes'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: onSignOut,
+              icon: const Icon(Icons.logout_outlined),
+              label: const Text('Cerrar sesion'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: isRequestingDeletion ? null : onRequestDeletion,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: dangerColor,
+                side: BorderSide(color: dangerColor.withValues(alpha: 0.45)),
+              ),
+              icon: isRequestingDeletion
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: dangerColor,
+                      ),
+                    )
+                  : const Icon(Icons.delete_outline),
+              label: Text(
+                isRequestingDeletion
+                    ? 'Solicitando...'
+                    : 'Solicitar eliminacion de cuenta',
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -6395,6 +7356,11 @@ class _CreditDashboardCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: _fventasLine),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -6409,7 +7375,7 @@ class _CreditDashboardCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Linea de credito',
+                        'Cupo comercial',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -6417,8 +7383,10 @@ class _CreditDashboardCard extends StatelessWidget {
                       ),
                       Text(
                         enabled
-                            ? 'Aprobada por FVENTAS'
-                            : 'Compra bajo revision',
+                            ? 'Linea aprobada para compras B2B'
+                            : 'Compra bajo revision comercial',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: _fventasMuted,
                           fontWeight: FontWeight.w700,
@@ -6428,7 +7396,7 @@ class _CreditDashboardCard extends StatelessWidget {
                   ),
                 ),
                 _StatusPill(
-                  label: enabled ? 'Activa' : 'Revision',
+                  label: enabled ? 'Aprobado' : 'Revision',
                   color: statusColor,
                 ),
               ],
@@ -6439,15 +7407,32 @@ class _CreditDashboardCard extends StatelessWidget {
                 Expanded(
                   child: _CommerceMetric(
                     label: 'Disponible',
-                    value:
-                        'USD ${credit.creditAvailableUsd.toStringAsFixed(2)}',
+                    value: _moneyFromUsd(credit.creditAvailableUsd),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _CommerceMetric(
                     label: 'Limite',
-                    value: 'USD ${credit.creditLimitUsd.toStringAsFixed(2)}',
+                    value: _moneyFromUsd(credit.creditLimitUsd),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _CommerceMetric(
+                    label: 'Usado',
+                    value: _moneyFromUsd(credit.creditUsedUsd),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _CommerceMetric(
+                    label: 'En ordenes',
+                    value: _moneyFromUsd(credit.creditOrdersUsd),
                   ),
                 ),
               ],
@@ -6459,14 +7444,16 @@ class _CreditDashboardCard extends StatelessWidget {
                 minHeight: 8,
                 value: usedRatio,
                 backgroundColor: const Color(0xFFE9ECEF),
-                color: _fventasBlue,
+                color: statusColor,
               ),
             ),
             const SizedBox(height: 10),
             Text(
               terms.isEmpty
-                  ? 'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)}'
-                  : 'Comprometido USD ${credit.creditExposureUsd.toStringAsFixed(2)} - plazos ${terms.join(", ")} dias',
+                  ? 'Total comprometido ${_moneyFromUsd(credit.creditExposureUsd)}'
+                  : 'Total comprometido ${_moneyFromUsd(credit.creditExposureUsd)} - plazos ${terms.join(", ")} dias',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _fventasMuted,
                 fontWeight: FontWeight.w700,
@@ -6475,7 +7462,9 @@ class _CreditDashboardCard extends StatelessWidget {
             if (credit.assignedSeller.name.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(
-                'Vendedor: ${credit.assignedSeller.name}',
+                'Ejecutivo asignado: ${credit.assignedSeller.name}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: _fventasMuted,
                   fontWeight: FontWeight.w700,
@@ -6517,17 +7506,34 @@ class _OrderSummaryPanel extends StatelessWidget {
         return Card(
           elevation: 0,
           margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: _fventasLine),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Ordenes recientes',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: _fventasBlack,
+                Row(
+                  children: [
+                    const _SoftIcon(icon: Icons.receipt_long_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Ordenes recientes',
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  color: _fventasBlack,
+                                ),
                       ),
+                    ),
+                    _StatusPill(
+                      label: '${orders.length}',
+                      color: _fventasBlue,
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 for (final order in orders.take(3)) _CustomerOrderRow(order),
@@ -6556,34 +7562,61 @@ class _CustomerOrderRow extends StatelessWidget {
         ? order.totalUsd
         : order.balanceUsd;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _fventasCanvas,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _fventasLine),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SoftIcon(icon: status.icon, color: status.color),
-          const SizedBox(width: 12),
+          Icon(status.icon, color: status.color, size: 24),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Orden del ${_formatCustomerDate(order.createdAt)}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        order.id,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: _fventasBlack,
+                            ),
                       ),
+                    ),
+                    Text(
+                      _formatCustomerDate(order.createdAt),
+                      style: const TextStyle(
+                        color: _fventasMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   '${status.label} - $stock',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: _fventasMuted,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 5),
                 Text(
-                  '$amountLabel USD ${amount.toStringAsFixed(2)}',
+                  '$amountLabel ${_moneyFromUsd(amount)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: status.color,
                         fontWeight: FontWeight.w900,
@@ -6638,6 +7671,14 @@ class _CustomerOrderRow extends StatelessWidget {
     icon: Icons.schedule_outlined,
     color: _fventasBlue
   );
+}
+
+String _compactCustomerStatusLabel(String label) {
+  return switch (label) {
+    'Aprobada con credito' => 'Aprobada',
+    'En revision FVENTAS' => 'Revision',
+    _ => label,
+  };
 }
 
 String _customerStockStatus(String stockStatus) {
@@ -7192,7 +8233,7 @@ class _CartItemTile extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  'USD ${lineTotal.toStringAsFixed(2)}',
+                  _moneyFromUsd(lineTotal),
                   style: Theme.of(context)
                       .textTheme
                       .titleSmall
@@ -7256,7 +8297,7 @@ class _HeroPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 320,
+      height: 352,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
@@ -7290,7 +8331,7 @@ class _HeroPanel extends StatelessWidget {
                 color: _fventasBlue,
               ),
               child: Text(
-                mobileEnvironment.currencyPairLabel,
+                _displayCurrencySymbol(),
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
@@ -7306,7 +8347,7 @@ class _HeroPanel extends StatelessWidget {
                 icon: Icons.local_fire_department,
                 label: 'FVENTAS ecommerce',
               ),
-              const SizedBox(height: 34),
+              const SizedBox(height: 24),
               Text(
                 'Maquinaria lista para trabajar',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -7319,7 +8360,7 @@ class _HeroPanel extends StatelessWidget {
               const SizedBox(
                 width: 260,
                 child: Text(
-                  'Compra equipos, repuestos y accesorios con stock actualizado desde el admin.',
+                  'Compra equipos, repuestos y accesorios con precio B2B y stock vigente.',
                   style: TextStyle(color: Color(0xFFD9D9D9), height: 1.35),
                 ),
               ),
@@ -7612,7 +8653,7 @@ class _LoadingState extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Leyendo datos publicados desde el admin.',
+                    'Sincronizando catalogo comercial.',
                     style: TextStyle(
                       color: _fventasMuted,
                       fontWeight: FontWeight.w700,
@@ -8068,11 +9109,11 @@ class _ProductDetailMedia extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(18),
                   child: hasImage
-                      ? Image.network(
-                          imageUrl!,
+                      ? _catalogImage(
+                          imageUrl: imageUrl!,
                           fit: BoxFit.contain,
                           semanticLabel: title,
-                          errorBuilder: (_, __, ___) =>
+                          fallbackBuilder: () =>
                               _ProductFallbackMark(accentColor: accentColor),
                         )
                       : _ProductFallbackMark(accentColor: accentColor),
@@ -8188,20 +9229,25 @@ class _ProductTile extends StatelessWidget {
     final hasDiscount =
         discountPercent > 0 || ((originalPriceUsd ?? 0) > (priceUsd ?? 0));
     final accentColor = _productAccentColor(category);
+    final effectiveImageUrl = _effectiveProductImage(
+      imageUrl: imageUrl,
+      title: title,
+      category: category,
+    );
 
     return InkWell(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(18),
           color: Colors.white,
-          border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+          border: Border.all(color: _fventasLine),
           boxShadow: [
             BoxShadow(
-              color: accentColor.withValues(alpha: 0.14),
-              blurRadius: 18,
-              offset: const Offset(0, 10),
+              color: _fventasBlack.withValues(alpha: 0.05),
+              blurRadius: 14,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
@@ -8212,52 +9258,40 @@ class _ProductTile extends StatelessWidget {
             Stack(
               children: [
                 _ProductImageFrame(
-                  imageUrl: imageUrl,
+                  imageUrl: effectiveImageUrl,
                   accentColor: accentColor,
-                ),
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: CircleAvatar(
-                    radius: 17,
-                    backgroundColor: Colors.white,
-                    foregroundColor: _fventasBlack,
-                    child: IconButton(
-                      tooltip: 'Ver detalle',
-                      padding: EdgeInsets.zero,
-                      iconSize: 17,
-                      onPressed: onTap,
-                      icon: const Icon(Icons.visibility_outlined),
-                    ),
-                  ),
                 ),
                 if (hasDiscount)
                   Positioned(
-                    top: 10,
-                    left: 10,
+                    top: 8,
+                    left: 8,
                     child: _SaleBadge(discountPercent: discountPercent),
                   ),
                 Positioned(
-                  top: 10,
-                  left: hasDiscount ? 78 : 10,
+                  top: 8,
+                  right: 8,
                   child: _StockBadge(stock: stock ?? 0),
                 ),
               ],
             ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      category,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: accentColor,
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: 4),
+                    if (category.isNotEmpty) ...[
+                      Text(
+                        category,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: accentColor,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                      const SizedBox(height: 3),
+                    ],
                     Text(
                       title,
                       maxLines: 2,
@@ -8265,10 +9299,10 @@ class _ProductTile extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: _fventasBlack,
                             fontWeight: FontWeight.w900,
-                            height: 1.08,
+                            height: 1.04,
                           ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
                       maxLines: 1,
@@ -8277,44 +9311,25 @@ class _ProductTile extends StatelessWidget {
                             color: _fventasMuted,
                           ),
                     ),
-                    const SizedBox(height: 8),
+                    const Spacer(),
                     if (hasDiscount && originalPriceUsd != null)
                       Text(
-                        'USD ${originalPriceUsd!.toStringAsFixed(2)}',
+                        _moneyFromUsd(originalPriceUsd!),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               decoration: TextDecoration.lineThrough,
                               color: _fventasMuted,
                             ),
                       ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            priceUsd == null
-                                ? 'Cotizar'
-                                : 'USD ${priceUsd!.toStringAsFixed(2)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  color: _fventasBlack,
-                                  fontWeight: FontWeight.w900,
-                                ),
+                    Text(
+                      priceUsd == null ? 'Cotizar' : _moneyFromUsd(priceUsd!),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: _fventasBlack,
+                            fontWeight: FontWeight.w900,
                           ),
-                        ),
-                        Text(
-                          'USD',
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: accentColor,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                      ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 7),
                     _ProductCardActions(
                       stock: stock ?? 0,
                       requiresQuote: requiresQuote,
@@ -8370,43 +9385,59 @@ class _ProductCardActionsState extends State<_ProductCardActions> {
   @override
   Widget build(BuildContext context) {
     final canAdd = widget.requiresQuote || widget.stock > 0;
-    final quantityLabel = canAdd ? 'Cant. $_quantity' : 'Sin stock';
 
     return Row(
       children: [
-        Expanded(
+        SizedBox(
+          width: 54,
           child: OutlinedButton.icon(
             onPressed: canAdd ? _editQuantity : null,
-            icon: const Icon(Icons.format_list_numbered, size: 16),
-            label: Text(quantityLabel),
+            icon: const Icon(Icons.format_list_numbered, size: 15),
+            label: Text('$_quantity'),
             style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
               foregroundColor: widget.accentColor,
               side:
                   BorderSide(color: widget.accentColor.withValues(alpha: 0.4)),
               textStyle: const TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: FontWeight.w900,
               ),
             ),
           ),
         ),
-        const SizedBox(width: 7),
-        SizedBox(
-          width: 38,
-          height: 34,
-          child: IconButton.filled(
-            tooltip: 'Agregar cantidad',
+        const SizedBox(width: 6),
+        Expanded(
+          child: FilledButton(
             onPressed: canAdd && widget.onAddQuantity != null
                 ? () => widget.onAddQuantity!(_quantity)
                 : null,
-            icon: const Icon(Icons.add_shopping_cart, size: 17),
-            style: IconButton.styleFrom(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               backgroundColor: widget.accentColor,
               foregroundColor: Colors.white,
               disabledBackgroundColor: _fventasLine,
               disabledForegroundColor: _fventasMuted,
+              textStyle: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add_shopping_cart, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    canAdd ? 'Agregar' : 'Sin stock',
+                    maxLines: 1,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -8574,6 +9605,56 @@ Color _productAccentColor(String value) {
   return _fventasBlue;
 }
 
+bool _isAssetImage(String imageUrl) => imageUrl.startsWith('asset:');
+
+String _assetImagePath(String imageUrl) => imageUrl.replaceFirst('asset:', '');
+
+String? _effectiveProductImage({
+  required String? imageUrl,
+  required String title,
+  required String category,
+}) {
+  final explicit = imageUrl?.trim() ?? '';
+  if (explicit.isNotEmpty) {
+    return explicit;
+  }
+
+  final normalized = '$title $category'.toLowerCase();
+  if (normalized.contains('motosierra')) {
+    return 'asset:assets/products/motosierra-45cc.png';
+  }
+  if (normalized.contains('cadena')) {
+    return 'asset:assets/products/cadena-18.png';
+  }
+  if (normalized.contains('motobomba') || normalized.contains('bomba')) {
+    return 'asset:assets/products/motobomba-3x3.png';
+  }
+  return null;
+}
+
+Widget _catalogImage({
+  required String imageUrl,
+  required BoxFit fit,
+  String? semanticLabel,
+  required Widget Function() fallbackBuilder,
+}) {
+  if (_isAssetImage(imageUrl)) {
+    return Image.asset(
+      _assetImagePath(imageUrl),
+      fit: fit,
+      semanticLabel: semanticLabel,
+      errorBuilder: (_, __, ___) => fallbackBuilder(),
+    );
+  }
+
+  return Image.network(
+    imageUrl,
+    fit: fit,
+    semanticLabel: semanticLabel,
+    errorBuilder: (_, __, ___) => fallbackBuilder(),
+  );
+}
+
 class _ProductImageFrame extends StatelessWidget {
   const _ProductImageFrame({
     this.imageUrl,
@@ -8586,7 +9667,7 @@ class _ProductImageFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AspectRatio(
-      aspectRatio: 1.12,
+      aspectRatio: 1.45,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(0),
         child: imageUrl == null || imageUrl!.isEmpty
@@ -8594,11 +9675,11 @@ class _ProductImageFrame extends StatelessWidget {
             : ColoredBox(
                 color: accentColor.withValues(alpha: 0.08),
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Image.network(
-                    imageUrl!,
+                  padding: const EdgeInsets.all(8),
+                  child: _catalogImage(
+                    imageUrl: imageUrl!,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Center(
+                    fallbackBuilder: () => const Center(
                       child: Icon(Icons.image_not_supported_outlined),
                     ),
                   ),
@@ -8735,10 +9816,10 @@ class _ProductThumb extends StatelessWidget {
                   color: const Color(0xFFF8FAFD),
                   child: Padding(
                     padding: const EdgeInsets.all(6),
-                    child: Image.network(
-                      imageUrl!,
+                    child: _catalogImage(
+                      imageUrl: imageUrl!,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => const Center(
+                      fallbackBuilder: () => const Center(
                         child: Icon(Icons.image_not_supported_outlined),
                       ),
                     ),
