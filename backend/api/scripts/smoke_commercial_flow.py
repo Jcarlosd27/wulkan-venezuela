@@ -1538,6 +1538,14 @@ def main() -> int:
     assert term_order["creditStatus"] == "approved"
     assert term_order["inventoryStatus"] == "reserved"
 
+    orders_export_csv = client.get("/orders/export?limit=1")
+    assert orders_export_csv.status_code == 200, "exportacion ordenes gerente"
+    orders_export_text = orders_export_csv.get_data(as_text=True)
+    assert created_order["orderId"] in orders_export_text
+    assert cash_order["orderId"] in orders_export_text
+    assert term_order["orderId"] in orders_export_text
+    assert "order-ajeno-flow" not in orders_export_text
+
     audit_events = state["audit_events"]
     assert any(event["action"] == "bulk_import" and event["entityType"] == "product" for event in audit_events)
     assert any(event["action"] == "credit_decision" for event in audit_events)

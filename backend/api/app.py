@@ -13143,6 +13143,7 @@ def orders_page_context(store: dict, error: str = "") -> dict:
             2,
         ),
     }
+    all_filtered_orders = orders_list
     page_orders, pagination = api_list_pagination(orders_list, default_limit=24)
     total_pages = max(1, math.ceil((pagination.get("total") or 0) / max(1, pagination.get("limit") or 1)))
     pagination.update({
@@ -13155,6 +13156,7 @@ def orders_page_context(store: dict, error: str = "") -> dict:
     return {
         "orders": page_orders,
         "all_orders": all_orders,
+        "all_filtered_orders": all_filtered_orders,
         "metrics": metrics,
         "filters": filters,
         "pagination": pagination,
@@ -15113,7 +15115,7 @@ def client_status_update(client_id: str):
 def client_account_deletion_complete(client_id: str):
     store = load_store()
     client = find_company_record(store, "clients", client_id)
-    if not client:
+    if not client or not can_access_client_record(client, store):
         push_admin_toast("No se encontro el cliente solicitado.", "warning", "Cliente no encontrado")
         return redirect(url_for("clients"))
 
@@ -15192,7 +15194,7 @@ def client_account_deletion_complete(client_id: str):
 def client_delete(client_id: str):
     store = load_store()
     client = find_company_record(store, "clients", client_id)
-    if not client:
+    if not client or not can_access_client_record(client, store):
         return redirect(url_for("clients"))
     before = copy.deepcopy(client)
     audit_events_start = len(store.get("audit_events", []))
@@ -18487,7 +18489,7 @@ def orders_export():
     ]
     writer = safe_csv_dict_writer(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
-    for order in context["orders"]:
+    for order in context.get("all_filtered_orders", context["orders"]):
         writer.writerow(
             {
                 "orden": order.get("orderId", ""),
