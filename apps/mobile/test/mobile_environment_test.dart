@@ -109,9 +109,6 @@ void main() {
     expect(countryLocations.profileFor('VE').states.length, 25);
     expect(countryLocations.profileFor('VE').citiesFor('Miranda'),
         contains('Baruta'));
-    expect(countryLocations.profileFor('PE').hasLocations, isFalse);
-    expect(countryLocations.profileFor('AR').hasLocations, isFalse);
-    expect(countryLocations.profileFor('CO').hasLocations, isFalse);
-    expect(countryLocations.profileFor('EC').hasLocations, isFalse);
+    expect(countryLocations.profileFor('XX').hasLocations, isFalse);
   });
 }

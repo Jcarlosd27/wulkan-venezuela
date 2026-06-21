@@ -23,6 +23,7 @@ from store import DEFAULT_COMPANY_ID, SAAS_PLAN_ID, SAAS_PLAN_NAME, SAAS_PLAN_PR
 LEGAL_TERMS_VERSION = "2026-06-17"
 LEGAL_PRIVACY_VERSION = "2026-06-17"
 PASSWORD_MIN_LENGTH = 10
+ALLOWED_MARKET_COUNTRIES = {"CL", "VE"}
 
 STARTER_CATEGORY_IMAGES = {
     "machinery-garden": "/static/uploads/catalog/fventas-product.svg",
@@ -156,6 +157,11 @@ def active_company_id(store: dict[str, Any]) -> str:
     return company_id
 
 
+def normalize_bootstrap_country(value: str | None, default: str = "CL") -> str:
+    code = str(value or "").strip().upper()
+    return code if code in ALLOWED_MARKET_COUNTRIES else default
+
+
 def ensure_company(store: dict[str, Any]) -> str:
     now = utc_now()
     company_id = active_company_id(store)
@@ -167,13 +173,16 @@ def ensure_company(store: dict[str, Any]) -> str:
     company_name = env_value("FVENTAS_BOOTSTRAP_COMPANY_NAME", company.get("name") or "FVENTAS")
     legal_name = env_value("FVENTAS_BOOTSTRAP_COMPANY_LEGAL_NAME", company.get("legalName") or company_name)
     owner_email = env_value("FVENTAS_BOOTSTRAP_OWNER_EMAIL", company.get("ownerEmail") or "")
+    company_country = normalize_bootstrap_country(
+        env_value("FVENTAS_BOOTSTRAP_COUNTRY", company.get("country") or "CL")
+    )
     company.update(
         {
             "name": company_name,
             "slug": company.get("slug") or slugify(company_name),
             "legalName": legal_name,
             "taxId": env_value("FVENTAS_BOOTSTRAP_COMPANY_TAX_ID", company.get("taxId") or ""),
-            "country": env_value("FVENTAS_BOOTSTRAP_COUNTRY", company.get("country") or "CL").upper(),
+            "country": company_country,
             "status": env_value("FVENTAS_BOOTSTRAP_COMPANY_STATUS", company.get("status") or "active"),
             "ownerName": env_value("FVENTAS_BOOTSTRAP_OWNER_NAME", company.get("ownerName") or ""),
             "ownerEmail": owner_email,
@@ -418,6 +427,10 @@ def upsert_client(
     )
     business_name = env_value("FVENTAS_BOOTSTRAP_CLIENT_BUSINESS_NAME", client.get("businessName") or "Cliente B2B FVENTAS")
     requested_credit = float(env_value("FVENTAS_BOOTSTRAP_CLIENT_CREDIT_REQUESTED_USD", "0") or 0)
+    client_country = normalize_bootstrap_country(
+        env_value("FVENTAS_BOOTSTRAP_COUNTRY", client.get("country") or company.get("country") or "CL"),
+        company.get("country") or "CL",
+    )
     client.update(
         {
             "companyId": company_id,
@@ -438,7 +451,7 @@ def upsert_client(
             "address": env_value("FVENTAS_BOOTSTRAP_CLIENT_ADDRESS", client.get("address") or ""),
             "fiscalAddress": env_value("FVENTAS_BOOTSTRAP_CLIENT_ADDRESS", client.get("fiscalAddress") or ""),
             "shippingAddress": env_value("FVENTAS_BOOTSTRAP_CLIENT_ADDRESS", client.get("shippingAddress") or ""),
-            "country": env_value("FVENTAS_BOOTSTRAP_COUNTRY", client.get("country") or "CL").upper(),
+            "country": client_country,
             "state": env_value("FVENTAS_BOOTSTRAP_CLIENT_STATE", client.get("state") or ""),
             "city": env_value("FVENTAS_BOOTSTRAP_CLIENT_CITY", client.get("city") or ""),
             "deliveryZone": env_value("FVENTAS_BOOTSTRAP_CLIENT_DELIVERY_ZONE", client.get("deliveryZone") or ""),

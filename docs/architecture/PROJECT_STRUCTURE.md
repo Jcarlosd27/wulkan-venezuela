@@ -20,7 +20,8 @@ Este proyecto queda ordenado para crecer como plataforma SaaS B2B con panel admi
   - `storage.py`: storage local/S3-compatible.
   - `uix.py`: helpers visuales y formato monetario.
   - `insights.py`: indicadores compactos de negocio para el panel.
-  - `chile_locations.py`: normalizacion territorial y telefonica de Chile.
+  - `chile_locations.py`: wrapper de compatibilidad para ubicaciones de Chile.
+  - `country_locations.py`: biblioteca territorial permitida para Chile y Venezuela.
 - `backend/api/models.py`: modelos SQLAlchemy.
 - `backend/api/store.py`: interfaz de persistencia historica JSON/SQL.
 - `backend/api/sql_store.py`: implementacion SQL de persistencia.
@@ -62,4 +63,4 @@ Cada dominio deberia tener rutas, servicios, validadores y pruebas. Esto evita q
 - Toda accion sensible debe dejar evento de auditoria.
 - Los datos creados desde mobile y web deben usar la misma capa de persistencia.
 - Las importaciones masivas deben validar antes de guardar.
-- Las monedas, paises, documentos fiscales, telefonos y ciudades deben depender de la configuracion de la empresa.
+- Las monedas, paises, documentos fiscales, telefonos y ciudades deben depender de la configuracion de la empresa, pero solo dentro del alcance Chile/Venezuela.

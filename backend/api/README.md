@@ -1,6 +1,6 @@
 # FVENTAS Flask Admin
 
-Admin panel y API movil para FVENTAS multiempresa y multipais.
+Admin panel y API movil para FVENTAS multiempresa, limitado comercialmente a Chile y Venezuela.
 
 ## Stack
 

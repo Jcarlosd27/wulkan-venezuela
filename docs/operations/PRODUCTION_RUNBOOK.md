@@ -34,7 +34,7 @@ El alcance geografico comercial de esta version queda limitado a Chile y Venezue
 
 - Chile: RUT, regiones/comunas, precios visibles en CLP con simbolo `$`.
 - Venezuela: RIF, estados/municipios, precios visibles en USD con simbolo `$`.
-- Otros paises no deben aparecer en landing, signup, configuracion, panel plataforma ni app movil hasta que se active un nuevo mercado con su biblioteca territorial, moneda, textos legales y smokes.
+- El alcance comercial queda fijo en Chile y Venezuela para landing, signup, configuracion, panel plataforma y app movil.
 
 ## Estado actual
 

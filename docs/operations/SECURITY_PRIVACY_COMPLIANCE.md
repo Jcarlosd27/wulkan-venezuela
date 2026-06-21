@@ -23,8 +23,8 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
   2026-12-01.
   - https://www.leychile.cl/leychile/Navegar/imprimir?idNorma=1209272&idParte=10527468&idVersion=2026-12-01
   - https://digital.gob.cl/biblioteca/regulacion/ley-n-19628-sobre-proteccion-de-la-vida-privada/
-- Venezuela: validar con asesoria local por no existir un regimen unico equivalente a las leyes modernas
-  de proteccion de datos de otros paises. El proyecto debe aplicar controles equivalentes de transparencia,
+- Venezuela: validar con asesoria local por no existir un regimen unico equivalente a leyes modernas
+  de proteccion de datos. El proyecto debe aplicar controles equivalentes de transparencia,
   minimizacion, acceso, rectificacion, eliminacion, confidencialidad y seguridad.
 - Apple App Store: las apps con creacion de cuenta deben permitir iniciar eliminacion de cuenta dentro de
   la app.
@@ -84,7 +84,7 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
 7. Publicar enlaces de politica de privacidad, terminos y eliminacion en landing, App Store Connect y Play Console.
 8. Revisar la declaracion de datos de Google Play y App Privacy de Apple con la conducta real de la app.
 9. Mantener contratos/DPA con proveedores de hosting, almacenamiento, analitica, correo, pagos y soporte.
-10. Documentar plazos de retencion por pais para facturacion, impuestos, auditoria, fraude y soporte.
+10. Documentar plazos de retencion para Chile y Venezuela en facturacion, impuestos, auditoria, fraude y soporte.
 11. Mantener rate limits activos para login, recuperacion, preferencias anonimas de landing y solicitudes publicas de eliminacion.
 12. Confirmar que documentos internos no queden publicados por URL directa de storage; deben abrirse con enlace firmado y auditoria.
 13. Confirmar que las empresas suscriptoras solo vean modulos de lanzamiento movil y reciban 403 al intentar abrir modulos archivados por URL.
@@ -108,13 +108,13 @@ Modulos archivados para empresas suscriptoras:
 
 - Chile: documento fiscal RUT, regiones/comunas completas, moneda visible CLP con simbolo `$`.
 - Venezuela: documento fiscal RIF, estados/municipios completos, moneda visible USD con simbolo `$`.
-- Otros paises no forman parte del lanzamiento comercial. No deben aparecer como opcion de alta, configuracion, panel plataforma ni biblioteca movil.
+- El lanzamiento comercial solo incluye Chile y Venezuela. No deben aparecer mercados adicionales como opcion de alta, configuracion, panel plataforma ni biblioteca movil.
 - El valor que ve la app movil debe venir de la empresa suscriptora autenticada; no se debe mezclar moneda, catalogo, vendedores, clientes ni condiciones de compra entre empresas.
 
 ## Riesgos residuales que requieren decision operativa/legal
 
-- Redaccion final de politica de privacidad por pais y razon social controladora/procesadora.
-- Plazos exactos de retencion y eliminacion segun documentos tributarios y comerciales de cada pais.
+- Redaccion final de politica de privacidad para Chile/Venezuela y razon social controladora/procesadora.
+- Plazos exactos de retencion y eliminacion segun documentos tributarios y comerciales de Chile/Venezuela.
 - Transferencias internacionales y subencargados de tratamiento.
 - Procedimiento formal de incidentes de seguridad, notificacion y bitacora.
 - Registro de bases de datos o designacion de responsable/oficial cuando la ley local lo exija.

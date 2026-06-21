@@ -1,6 +1,6 @@
 # FVENTAS
 
-FVENTAS es una plataforma comercial B2B multi-pais con panel administrativo Flask, app movil Android/Flutter y configuracion comercial por mercado. Chile queda como mercado inicial por defecto, pero cada empresa puede configurar pais, moneda local, documento fiscal, telefono, regiones/ciudades y condiciones comerciales antes de activar su suscripcion.
+FVENTAS es una plataforma comercial B2B para Chile y Venezuela, con panel administrativo Flask, app movil Android/iOS en Flutter y configuracion comercial por empresa. En esta version solo se habilitan esos dos mercados: Chile opera con CLP, RUT, regiones y comunas; Venezuela opera con USD, RIF, estados y municipios. Ningun otro pais debe aparecer como opcion de alta, configuracion, mocks, app movil ni panel administrativo.
 
 ## Componentes
 

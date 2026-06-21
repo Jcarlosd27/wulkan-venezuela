@@ -110,7 +110,7 @@ def badge_class(status: str) -> str:
     return STATUS_BADGES.get(status, "text-bg-light")
 
 
-ZERO_DECIMAL_CURRENCIES = {"CLP", "COP", "PYG"}
+ZERO_DECIMAL_CURRENCIES = {"CLP"}
 
 
 def currency_decimals(currency: str | None) -> int:

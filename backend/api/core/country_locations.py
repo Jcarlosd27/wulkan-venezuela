@@ -61,11 +61,11 @@ def country_location_labels(country_code: str | None) -> dict:
 
 def country_location_payload(country_code: str | None) -> dict:
     requested_code = str(country_code or "").strip().upper() or "CL"
-    code = normalize_location_country(requested_code)
+    code = normalize_location_country(requested_code) or "CL"
     labels = country_location_labels(code)
     locations = country_location_options(code)
     return {
-        "country": code or requested_code,
+        "country": code,
         **labels,
         "locations": locations,
         "items": [

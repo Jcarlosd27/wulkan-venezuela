@@ -114,7 +114,7 @@ def assert_market_scope_is_cl_ve_only() -> None:
     assert [code for code, _label in FVENTAS_app.CURRENCY_OPTIONS] == ["USD", "CLP"]
     assert FVENTAS_app.normalize_market_country("CL") == "CL"
     assert FVENTAS_app.normalize_market_country("VE") == "VE"
-    assert FVENTAS_app.normalize_market_country("PE") == "CL"
+    assert FVENTAS_app.normalize_market_country("XX") == "CL"
     assert FVENTAS_app.market_profile("CL")["salesCurrency"] == "CLP"
     assert FVENTAS_app.market_profile("CL")["localCurrency"] == "CLP"
     assert FVENTAS_app.market_profile("VE")["salesCurrency"] == "USD"
