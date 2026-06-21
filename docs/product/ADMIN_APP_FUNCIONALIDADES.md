@@ -110,7 +110,7 @@ El lanzamiento comercial queda acotado a Chile y Venezuela. Chile opera con RUT,
 ### Usuarios admin
 
 - Crear usuarios administrativos de empresa.
-- Roles vigentes: super admin, gerente general, gerente comercial, operador, inventario, auditor y solo lectura.
+- Roles vigentes: administrador de empresa, gerente general, gerente comercial, operador, inventario, auditor y solo lectura.
 - El rol platform admin queda reservado para el dueno de la plataforma.
 
 ### Documentos
@@ -184,9 +184,9 @@ El vendedor no puede:
 - Cambiar precios base, stock o reglas comerciales.
 - Acceder al panel web si su rol es solo vendedor movil.
 
-## App movil: super admin / gerente comercial
+## App movil: administrador de empresa / gerente comercial
 
-Cuando la empresa lo permita, un super admin o gerente comercial puede entrar a la app para probar flujos comerciales o asistir ventas. Este acceso no convierte al usuario en dueno de plataforma y no debe exponer datos de otras empresas.
+Cuando la empresa lo permita, un administrador de empresa o gerente comercial puede entrar a la app para probar flujos comerciales o asistir ventas. Este acceso no convierte al usuario en dueno de plataforma y no debe exponer datos de otras empresas.
 
 ## Flujo comercial principal
 

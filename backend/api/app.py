@@ -1204,7 +1204,7 @@ AUDIT_SECURITY_ACTIONS = {
 }
 ROLE_LABELS = {
     "platform_admin": "Administrador plataforma",
-    "super_admin": "Super admin",
+    "super_admin": "Administrador empresa",
     "general_manager": "Gerente general",
     "commercial_manager": "Gerente comercial",
     "operator": "Operador",
@@ -1722,7 +1722,7 @@ IMPORT_TEMPLATE_GROUPS = [
                     {"name": "deuda_manual", "required": False, "example": "0", "help": "Deuda externa anterior a la plataforma en moneda de venta."},
                     {"name": "tipo_venta_default", "required": False, "example": "credit_line", "help": "cash, term_credit o credit_line."},
                     {"name": "cupo", "required": False, "example": "1000000", "help": "Linea aprobada en moneda de venta si el rol puede aprobar."},
-                    {"name": "credito_aprobado", "required": False, "example": "si", "help": "si/no. Solo gerente o super admin aprueba."},
+                    {"name": "credito_aprobado", "required": False, "example": "si", "help": "si/no. Solo gerente o administrador de empresa aprueba."},
                     {"name": "dias_credito", "required": False, "example": "15", "help": "Plazo aprobado por defecto."},
                     {"name": "plazos", "required": False, "example": "0,15,30", "help": "Dias permitidos separados por coma."},
                     {"name": "clave", "required": False, "example": "Temporal2026", "help": "Si viene vacia se genera clave temporal."},
@@ -4236,7 +4236,61 @@ def account_profile_alias():
 def business_settings(store: dict | None = None) -> dict:
     try:
         active_store = store if store is not None else load_store()
-        return dict(active_store.get("business_settings") or {})
+        settings = dict(active_store.get("business_settings") or {})
+        market_code = str(settings.get("marketCountry") or settings.get("country") or "CL").strip().upper()
+        if market_code not in ACTIVE_MARKET_COUNTRIES:
+            market_code = "CL"
+        profile = MARKET_PROFILES[market_code]
+        settings.update(
+            {
+                "marketCountry": profile["code"],
+                "marketCountryName": profile["label"],
+                "country": profile["code"],
+                "taxLabel": profile["taxLabel"],
+                "taxPlaceholder": profile["taxPlaceholder"],
+                "phonePrefix": profile["phonePrefix"],
+                "phonePlaceholder": profile["phonePlaceholder"],
+                "locale": profile["locale"],
+                "timezone": profile["timezone"],
+                "salesCurrency": profile["salesCurrency"],
+                "localCurrency": profile["localCurrency"],
+                "primaryCurrency": profile["salesCurrency"],
+                "referenceCurrency": profile["localCurrency"],
+                "exchangeRateBaseToLocal": profile["exchangeRateBaseToLocal"],
+                "planCurrency": profile["planCurrency"],
+                "planPrice": profile["planPrice"],
+                "planPriceClp": profile["planPrice"] if profile["planCurrency"] == "CLP" else 0,
+            }
+        )
+        for company in settings.get("companies", []):
+            if not isinstance(company, dict):
+                continue
+            company_code = str(company.get("marketCountry") or company.get("country") or market_code).strip().upper()
+            if company_code not in ACTIVE_MARKET_COUNTRIES:
+                company_code = market_code
+            company_profile = MARKET_PROFILES[company_code]
+            company.update(
+                {
+                    "country": company_profile["code"],
+                    "marketCountry": company_profile["code"],
+                    "currency": company_profile["localCurrency"],
+                    "baseCurrency": company_profile["salesCurrency"],
+                    "exchangeRateBaseToLocal": company_profile["exchangeRateBaseToLocal"],
+                    "marketProfile": copy.deepcopy(company_profile),
+                    "taxLabel": company_profile["taxLabel"],
+                    "planCurrency": company_profile["planCurrency"],
+                    "planPrice": company_profile["planPrice"],
+                    "planPriceClp": company_profile["planPrice"] if company_profile["planCurrency"] == "CLP" else 0,
+                }
+            )
+        for subscription in settings.get("subscriptions", []):
+            if not isinstance(subscription, dict):
+                continue
+            subscription_code = str(subscription.get("country") or market_code).strip().upper()
+            if subscription_code not in ACTIVE_MARKET_COUNTRIES:
+                subscription_code = market_code
+            subscription["country"] = subscription_code
+        return settings
     except Exception:
         return {}
 
@@ -7768,7 +7822,7 @@ def import_clients_rows(store: dict, rows: list[dict]) -> dict:
         if credit_limit > 0 and can_approve and credit_enabled:
             credit_status = "approved"
         elif credit_limit > 0 and not can_approve:
-            bulk_error(result, row_number, "solo gerente comercial o super admin puede importar cupos de credito aprobados.")
+            bulk_error(result, row_number, "solo gerente comercial o administrador de empresa puede importar cupos de credito aprobados.")
             continue
         terms = [
             int(term)
@@ -17121,7 +17175,7 @@ def business_rules_page_context(store: dict) -> dict:
         code="credit.approval.role",
         title="Credito aprobado por rol autorizado",
         module="Credito B2B",
-        description="Las decisiones de credito solo pueden ser ejecutadas por super admin, gerente general o gerente comercial.",
+        description="Las decisiones de credito solo pueden ser ejecutadas por administrador de empresa, gerente general o gerente comercial.",
         count=len(unauthorized_credit),
         examples=[f"{event.get('actorName', 'Actor')} -> {event.get('entityId', '')}" for event in unauthorized_credit],
         href=business_rule_href("audit", "audit", action="credit_decision"),

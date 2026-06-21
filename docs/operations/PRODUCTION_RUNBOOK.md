@@ -44,7 +44,7 @@ El ultimo readiness local marco bloqueos que requieren datos o credenciales prod
 
 - Configurar PostgreSQL real; SQLite no es valido para produccion.
 - Configurar storage S3/Spaces y `FVENTAS_STORAGE_PUBLIC_BASE_URL`.
-- Crear al menos un super administrador real activo.
+- Crear al menos un administrador de plataforma real activo.
 - Ejecutar bootstrap productivo para empresa base, aceptacion legal y catalogo inicial.
 - Cargar vendedores y clientes B2B reales antes del smoke comercial.
 
@@ -93,7 +93,7 @@ Para S3/Spaces, `FVENTAS_S3_ACL=public-read` puede usarse solo para imagenes y r
 
 ## Bootstrap inicial sin datos demo
 
-Antes de publicar trafico real, crear el super admin y sembrar datos base usando valores reales en `.env.production`.
+Antes de publicar trafico real, crear el administrador de plataforma y sembrar datos base usando valores reales en `.env.production`.
 
 Variables minimas:
 
@@ -125,7 +125,7 @@ cd infra/docker
 docker compose -f docker-compose.production.yml --env-file .env.production exec api python scripts/bootstrap_production.py
 ```
 
-El bootstrap es idempotente: actualiza la empresa base, registra aceptacion legal vigente, crea/actualiza el super admin real, crea vendedor/cliente solo si entregaste variables y siembra categorias/productos base con imagen para que la app movil no quede vacia.
+El bootstrap es idempotente: actualiza la empresa base, registra aceptacion legal vigente, crea/actualiza el administrador de plataforma real, crea vendedor/cliente solo si entregaste variables y siembra categorias/productos base con imagen para que la app movil no quede vacia.
 
 Por seguridad, si el usuario, vendedor o cliente ya existe, el bootstrap no resetea su password salvo que ejecutes con `--reset-passwords` o configures `FVENTAS_BOOTSTRAP_RESET_PASSWORDS=1`. Para correrlo automaticamente durante el arranque del contenedor, configura `FVENTAS_BOOTSTRAP_ON_START=1`; el arranque usa modo no interactivo y fallara si falta una password necesaria para crear una cuenta nueva.
 
@@ -195,7 +195,7 @@ Condiciones obligatorias para publicar:
 - `/healthz`, `/readyz` y `/api/v1/mobile/meta` responden 200.
 - Readiness estricto sin errores.
 - Smoke movil con cliente real sin 401 inesperado.
-- Super admin real creado y cuentas demo desactivadas.
+- Administrador de plataforma real creado y cuentas demo desactivadas.
 - Empresas suscriptoras tienen pais, moneda, condiciones de compra y aceptacion legal.
 - Productos, categorias, vendedores y clientes estan asociados a su empresa.
 - Backups de PostgreSQL y bucket S3 configurados.

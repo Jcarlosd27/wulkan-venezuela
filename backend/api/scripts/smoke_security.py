@@ -119,6 +119,27 @@ def assert_market_scope_is_cl_ve_only() -> None:
     assert FVENTAS_app.market_profile("CL")["localCurrency"] == "CLP"
     assert FVENTAS_app.market_profile("VE")["salesCurrency"] == "USD"
     assert FVENTAS_app.market_profile("VE")["localCurrency"] == "USD"
+    stale_settings = {
+        "business_settings": {
+            "marketCountry": "XX",
+            "country": "XX",
+            "localCurrency": "XXX",
+            "salesCurrency": "XXX",
+            "companies": [
+                {
+                    "id": "company-stale-market",
+                    "country": "XX",
+                    "marketCountry": "XX",
+                    "marketProfile": {"code": "XX", "label": "Mercado no permitido"},
+                }
+            ],
+        }
+    }
+    sanitized_settings = FVENTAS_app.business_settings(stale_settings)
+    assert sanitized_settings["marketCountry"] == "CL"
+    assert sanitized_settings["localCurrency"] == "CLP"
+    assert sanitized_settings["companies"][0]["country"] == "CL"
+    assert sanitized_settings["companies"][0]["marketProfile"]["code"] == "CL"
     legacy_store = {
         "companies": [
             {
@@ -1639,7 +1660,7 @@ def main() -> int:
                 },
             ),
             302,
-            "login super admin",
+            "login administrador empresa",
         )
         state["clients"][0]["status"] = "active"
         state["clients"][0]["mobileAccessEnabled"] = True

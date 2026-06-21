@@ -63,7 +63,7 @@
         <div class="section-title">Empresa</div>
         <div class="row g-3">
           <div class="col-12">
-            <label class="form-label" for="settingsMarketCountry">Pais de operacion</label>
+            <label class="form-label" for="settingsMarketCountry">Mercado habilitado</label>
             <select class="form-select" id="settingsMarketCountry" name="marketCountry">
               {% for code, label in market_country_options %}
               <option value="{{ code }}" {% if settings.marketCountry == code %}selected{% endif %}>{{ label }}</option>

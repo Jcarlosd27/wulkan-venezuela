@@ -177,14 +177,14 @@
         <div class="modal-header">
           <div>
             <h2 class="modal-title fs-4" id="companyCreateModalLabel">Nueva empresa SaaS</h2>
-            <p class="text-secondary mb-0">Crea la empresa, suscripcion y super admin inicial.</p>
+            <p class="text-secondary mb-0">Crea la empresa, suscripcion y administrador inicial.</p>
           </div>
           <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
         <div class="modal-body">
           <div class="row g-3">
             <div class="col-12">
-              <label class="form-label fw-semibold" for="companyMarketCountry">Pais de operacion</label>
+              <label class="form-label fw-semibold" for="companyMarketCountry">Mercado habilitado</label>
               <select class="form-select" id="companyMarketCountry" name="marketCountry" required>
                 {% for code, label in market_country_options %}
                 <option value="{{ code }}" {% if code == "CL" %}selected{% endif %}>{{ label }}</option>
@@ -192,7 +192,7 @@
               </select>
               <div class="alert alert-primary-subtle border-0 mt-3 mb-0">
                 <strong id="companyPlanSummary">{{ default_plan.display }}/mes</strong>
-                <div class="small text-secondary" id="companyMarketDetail">El pais define moneda local, documento fiscal, telefono y zona horaria.</div>
+                <div class="small text-secondary" id="companyMarketDetail">Solo Chile y Venezuela estan habilitados. El mercado define moneda local, documento fiscal, telefono y zona horaria.</div>
               </div>
             </div>
             <div class="col-12 col-md-7">

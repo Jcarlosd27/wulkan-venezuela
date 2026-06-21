@@ -33,7 +33,7 @@
       {% if session.get('admin_role') == 'platform_admin' or selected_role == 'platform_admin' %}
       <option value="platform_admin" {% if selected_role == 'platform_admin' %}selected{% endif %}>Administrador plataforma</option>
       {% endif %}
-      <option value="super_admin" {% if selected_role == 'super_admin' %}selected{% endif %}>Super admin</option>
+      <option value="super_admin" {% if selected_role == 'super_admin' %}selected{% endif %}>Administrador empresa</option>
       <option value="general_manager" {% if selected_role == 'general_manager' %}selected{% endif %}>Gerente general</option>
       <option value="commercial_manager" {% if selected_role == 'commercial_manager' %}selected{% endif %}>Gerente comercial</option>
       <option value="operator" {% if selected_role == 'operator' %}selected{% endif %}>Operador comercial</option>

@@ -8,7 +8,7 @@ auditable para FVENTAS/Wulkan en admin panel, landing, API movil, app iOS y app 
 ## Alcance
 
 - Mercados objetivo de esta version: Chile y Venezuela.
-- Perfiles cubiertos: super administrador de plataforma, administradores de empresa suscriptora,
+- Perfiles cubiertos: administrador de plataforma, administradores de empresa suscriptora,
   vendedores, clientes B2B y usuarios moviles.
 - Datos protegidos: credenciales, datos de contacto, empresa, RUT/documentos locales, direcciones,
   pedidos, credito solicitado/aprobado, comisiones, auditoria, tokens moviles y solicitudes de eliminacion.
