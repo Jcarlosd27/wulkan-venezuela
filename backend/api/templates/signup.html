@@ -20,8 +20,8 @@
         <span class="landing-kicker"><i class="bi bi-building-add"></i> Alta de empresa</span>
         <h1>Comienza con tu panel comercial y app movil B2B.</h1>
         <p>
-          Elige el pais de operacion antes del pago. FVENTAS configurara moneda, documento fiscal,
-          telefono, zona horaria y plan mensual segun ese mercado.
+          Elige Chile o Venezuela antes del pago. FVENTAS configurara moneda, documento fiscal,
+          telefono, zona horaria y plan mensual segun ese mercado habilitado.
         </p>
         <div class="signup-price">
           <span>{{ plan_name }}</span>
@@ -75,13 +75,13 @@
             </div>
           </div>
           <div class="col-12">
-            <label class="form-label fw-semibold" for="signupMarketCountry">Pais donde usara FVENTAS</label>
+            <label class="form-label fw-semibold" for="signupMarketCountry">Mercado habilitado</label>
             <select class="form-select" id="signupMarketCountry" name="marketCountry" required>
               {% for code, label in market_country_options %}
               <option value="{{ code }}" {% if selected_market_country == code %}selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
-            <div class="form-text">Esta seleccion define moneda local, documento fiscal, telefono, zona horaria y precio del plan.</div>
+            <div class="form-text">Solo Chile y Venezuela estan habilitados. Esta seleccion define moneda local, documento fiscal, telefono, zona horaria y precio del plan.</div>
           </div>
           <div class="col-12">
             <div class="alert alert-primary-subtle border-0 d-flex align-items-start gap-2 mb-0">
