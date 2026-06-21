@@ -1071,6 +1071,13 @@ def main() -> int:
         302,
         "aprobar credito",
     )
+    credit_export_csv = client.get("/credit/export?limit=1")
+    assert credit_export_csv.status_code == 200, "exportacion credito gerente"
+    credit_export_text = credit_export_csv.get_data(as_text=True)
+    assert "Cliente Password Generada" in credit_export_text
+    assert "Cliente Campos Comerciales" in credit_export_text
+    assert "Cliente Flow Santiago" in credit_export_text
+    assert "Cliente Competidor Flow" not in credit_export_text
 
     customer_login = assert_status(
         client.post(

@@ -10185,6 +10185,131 @@ def dashboard_client_summaries(clients: list[dict], orders: list[dict]) -> list[
     return summaries
 
 
+def credit_client_summaries(
+    clients: list[dict],
+    enriched_orders: list[dict],
+    movements: list[dict] | None = None,
+) -> list[dict]:
+    orders_by_client: dict[str, list[dict]] = {}
+    for order in enriched_orders:
+        orders_by_client.setdefault(order.get("customerId", ""), []).append(order)
+
+    payments_by_client: dict[str, list[dict]] = {}
+    for movement in movements or []:
+        if movement.get("movementType") == "payment" and movement.get("clientId"):
+            payments_by_client.setdefault(movement.get("clientId", ""), []).append(movement)
+
+    summaries: list[dict] = []
+    for client in clients:
+        summary = dict(client)
+        client_id = summary.get("id", "")
+        client_orders = orders_by_client.get(client_id, [])
+        open_orders = [
+            order
+            for order in client_orders
+            if float(order.get("balanceUsd") or 0) > 0 and order.get("status") != "cancelled"
+        ]
+        overdue_balance = round(
+            sum(float(order.get("balanceUsd") or 0) for order in open_orders if order.get("dueStatus") == "overdue"),
+            2,
+        )
+        open_balance = round(sum(float(order.get("balanceUsd") or 0) for order in open_orders), 2)
+        credit_orders = round(
+            sum(
+                float(order.get("balanceUsd") or 0)
+                for order in client_orders
+                if order.get("saleType") == "credit_line"
+                and order.get("status") in ORDER_CREDIT_RESERVING_STATUSES
+            ),
+            2,
+        )
+
+        summary["businessName"] = summary.get("businessName") or summary.get("commercialName") or summary.get("legalName") or "Cliente FVENTAS"
+        summary["legalName"] = summary.get("legalName") or summary["businessName"]
+        summary["commercialName"] = summary.get("commercialName") or summary["businessName"]
+        summary["status"] = summary.get("status") or "inactive"
+        summary["creditLimitUsd"] = float(summary.get("creditLimitUsd") or 0)
+        summary["creditUsedUsd"] = float(summary.get("creditUsedUsd") or 0)
+        summary["creditRequestedUsd"] = float(summary.get("creditRequestedUsd") or 0)
+        summary["creditEnabled"] = bool(summary.get("creditEnabled"))
+        summary["creditRiskLevel"] = summary.get("creditRiskLevel") or "low"
+        summary["creditManagerNote"] = summary.get("creditManagerNote", "")
+        summary["creditScore"] = int(float(summary.get("creditScore") or 0))
+        summary["paymentTermsDays"] = int(summary.get("paymentTermsDays") or 0)
+        if summary.get("creditRequestStatus") not in dict(CREDIT_REQUEST_STATUS_OPTIONS):
+            summary["creditRequestStatus"] = "none"
+        summary["creditOrdersUsd"] = credit_orders
+        summary["creditExposureUsd"] = round(summary["creditUsedUsd"] + credit_orders, 2)
+        summary["creditAvailableUsd"] = (
+            max(0.0, round(summary["creditLimitUsd"] - summary["creditExposureUsd"], 2))
+            if summary["creditEnabled"]
+            else 0.0
+        )
+        summary["openBalanceUsd"] = open_balance
+        summary["overdueBalanceUsd"] = overdue_balance
+        summary["currentDebtUsd"] = max(0.0, round(open_balance - overdue_balance, 2))
+        summary["openOrdersCount"] = len(open_orders)
+        summary["overdueOrdersCount"] = sum(1 for order in open_orders if order.get("dueStatus") == "overdue")
+
+        payments = sorted(payments_by_client.get(client_id, []), key=lambda item: item.get("createdAt", ""), reverse=True)
+        latest_payment = payments[0] if payments else {}
+        summary["lastPaymentAt"] = latest_payment.get("createdAt", "")
+        summary["lastPaymentUsd"] = float(latest_payment.get("amountUsd") or 0)
+
+        payment_days: list[int] = []
+        for order in client_orders:
+            payments_for_order = order.get("payments") or []
+            if not payments_for_order:
+                continue
+            latest_order_payment = max(payments_for_order, key=lambda item: item.get("createdAt", ""))
+            paid_at = parse_utc_datetime(latest_order_payment.get("createdAt"))
+            created_at = parse_utc_datetime(order.get("createdAt"))
+            payment_days.append(max(0, (paid_at.date() - created_at.date()).days))
+        summary["averagePaymentDays"] = round(sum(payment_days) / len(payment_days), 1) if payment_days else 0
+
+        explicit_collection = summary.get("collectionStatus", "")
+        if summary["status"] == "blocked_debt":
+            summary["collectionStatus"] = "blocked"
+        elif overdue_balance > 0:
+            summary["collectionStatus"] = "overdue"
+        elif any(order.get("dueStatus") == "due_soon" for order in open_orders):
+            summary["collectionStatus"] = "due_soon"
+        elif open_balance > 0:
+            summary["collectionStatus"] = explicit_collection if explicit_collection in {"promise", "current"} else "current"
+        else:
+            summary["collectionStatus"] = explicit_collection if explicit_collection == "promise" else "without_debt"
+
+        request_status = summary.get("creditRequestStatus") or "none"
+        summary["creditStatus"] = "without_credit"
+        if request_status in {"suspended", "blocked_debt", "blocked_limit", "rejected", "review"}:
+            summary["creditStatus"] = request_status
+        elif request_status == "pending":
+            summary["creditStatus"] = "credit_requested"
+        elif summary["creditEnabled"]:
+            if summary["creditExposureUsd"] > summary["creditLimitUsd"] > 0:
+                summary["creditStatus"] = "blocked_limit"
+            elif overdue_balance > 0 and summary.get("collectionStatus") == "blocked":
+                summary["creditStatus"] = "blocked_debt"
+            elif summary["creditAvailableUsd"] <= 0:
+                summary["creditStatus"] = "exhausted"
+            elif summary["creditExposureUsd"] > 0:
+                summary["creditStatus"] = "in_use"
+            else:
+                summary["creditStatus"] = "available"
+        if not summary["creditScore"]:
+            risk_penalty = {"low": 0, "medium": 12, "high": 25, "critical": 40}.get(summary["creditRiskLevel"], 10)
+            exposure_penalty = 10 if summary["creditStatus"] in {"exhausted", "blocked_limit"} else 0
+            overdue_penalty = 25 if overdue_balance > 0 else 0
+            status_penalty = 15 if summary["creditStatus"] in {"suspended", "blocked_debt", "rejected"} else 0
+            summary["creditScore"] = max(0, min(100, 85 - risk_penalty - exposure_penalty - overdue_penalty - status_penalty))
+        summary["creditStatusLabel"] = credit_status_label(summary.get("creditStatus", ""))
+        summary["creditRequestStatusLabel"] = credit_status_label(summary.get("creditRequestStatus", ""))
+        summary["creditRiskLabel"] = credit_risk_label(summary.get("creditRiskLevel", ""))
+        summary["collectionStatusLabel"] = collection_status_label(summary.get("collectionStatus", ""))
+        summaries.append(summary)
+    return summaries
+
+
 def enrich_order(order: dict, movements: list[dict] | None = None) -> dict:
     enriched = dict(order)
     order_id = enriched.get("orderId") or enriched.get("id", "")
@@ -16272,6 +16397,7 @@ def credit_dashboard_context(store: dict) -> dict:
     movements = visible_records_for_current_company(store, "credit_movements")
     visible_clients = visible_clients_for_current_user(store)
     visible_orders = visible_orders_for_current_user(store)
+    enriched_orders = enrich_orders(visible_orders, movements)
     filters = {
         "q": request.args.get("q", "").strip(),
         "status": request.args.get("status", "").strip(),
@@ -16280,7 +16406,7 @@ def credit_dashboard_context(store: dict) -> dict:
         "collection": request.args.get("collection", "").strip(),
         "due": request.args.get("due", "").strip(),
     }
-    clients_list = enrich_clients(visible_clients, visible_orders, movements)
+    clients_list = credit_client_summaries(visible_clients, enriched_orders, movements)
     if filters["q"]:
         query = filters["q"].lower()
         clients_list = [
@@ -16324,7 +16450,7 @@ def credit_dashboard_context(store: dict) -> dict:
         payments.append(enriched_movement)
     due_orders = [
         order
-        for order in enrich_orders(visible_orders, movements)
+        for order in enriched_orders
         if order.get("balanceUsd", 0) > 0
         and order.get("saleType") in {"term_credit", "credit_line"}
         and order.get("status") != "cancelled"
@@ -16332,20 +16458,32 @@ def credit_dashboard_context(store: dict) -> dict:
     ]
     if filters["due"]:
         due_orders = [order for order in due_orders if order.get("dueStatus") == filters["due"]]
+    status_counts: dict[str, int] = {}
+    risk_counts: dict[str, int] = {}
+    for client in clients_list:
+        credit_status = client.get("creditStatus", "")
+        request_status = client.get("creditRequestStatus", "")
+        if credit_status:
+            status_counts[credit_status] = status_counts.get(credit_status, 0) + 1
+        if request_status and request_status != credit_status:
+            status_counts[request_status] = status_counts.get(request_status, 0) + 1
+        risk = client.get("creditRiskLevel", "")
+        if risk:
+            risk_counts[risk] = risk_counts.get(risk, 0) + 1
     status_graph = {
         "title": "Estado crediticio",
         "items": [
-            {"label": label, "value": sum(1 for client in clients_list if client.get("creditStatus") == status or client.get("creditRequestStatus") == status)}
+            {"label": label, "value": status_counts.get(status, 0)}
             for status, label in CREDIT_REQUEST_STATUS_OPTIONS
-            if sum(1 for client in clients_list if client.get("creditStatus") == status or client.get("creditRequestStatus") == status)
+            if status_counts.get(status, 0)
         ],
     }
     risk_graph = {
         "title": "Riesgo comercial",
         "items": [
-            {"label": label, "value": sum(1 for client in clients_list if client.get("creditRiskLevel") == risk)}
+            {"label": label, "value": risk_counts.get(risk, 0)}
             for risk, label in CREDIT_RISK_OPTIONS
-            if sum(1 for client in clients_list if client.get("creditRiskLevel") == risk)
+            if risk_counts.get(risk, 0)
         ],
     }
     status_graph["max"] = max([item["value"] for item in status_graph["items"]] or [1])
@@ -16362,6 +16500,7 @@ def credit_dashboard_context(store: dict) -> dict:
         "average_score": round(sum(int(client.get("creditScore") or 0) for client in clients_list) / len(clients_list), 1) if clients_list else 0,
     }
     clients_list = sorted(clients_list, key=lambda item: item.get("businessName", ""))
+    all_clients = clients_list
     page_clients, pagination = api_list_pagination(clients_list, default_limit=24)
     total_pages = max(1, math.ceil((pagination.get("total") or 0) / max(1, pagination.get("limit") or 1)))
     pagination.update({
@@ -16373,6 +16512,7 @@ def credit_dashboard_context(store: dict) -> dict:
     })
     return {
         "clients": page_clients,
+        "all_clients": all_clients,
         "payments": sorted(payments, key=lambda item: item.get("createdAt", ""), reverse=True),
         "due_orders": sorted(due_orders, key=lambda item: item.get("dueDate", "")),
         "metrics": metrics,
@@ -16479,7 +16619,7 @@ def credit_export():
         lineterminator="\n",
     )
     writer.writeheader()
-    for client in context["clients"]:
+    for client in context.get("all_clients", context["clients"]):
         writer.writerow(
             {
                 "cliente": client.get("businessName", ""),
@@ -19488,10 +19628,22 @@ def api_mobile_seller_summary():
     clients = seller_scope_clients(store, user)
     movements = mobile_company_records(store, "credit_movements", user)
     orders = [enrich_order(order, movements) for order in seller_scope_orders(store, user)]
-    seller_snapshot = enrich_seller(store, user)
     pending_credit = [
         client for client in clients if client.get("creditRequestStatus") == "pending"
     ]
+    now = datetime.now(timezone.utc)
+
+    def is_current_month(value: str | None) -> bool:
+        if not value:
+            return False
+        parsed = parse_utc_datetime(value)
+        return parsed.year == now.year and parsed.month == now.month
+
+    closed_orders = [order for order in orders if order.get("status") not in {"cancelled", "rejected"}]
+    month_orders = [order for order in closed_orders if is_current_month(order.get("createdAt"))]
+    sales_total = round(sum(float(order.get("totalUsd") or 0) for order in closed_orders), 2)
+    sales_month = round(sum(float(order.get("totalUsd") or 0) for order in month_orders), 2)
+    sales_goal = safe_float(user.get("salesGoalUsd"), 0)
     return jsonify(
         {
             "summary": {
@@ -19503,16 +19655,16 @@ def api_mobile_seller_summary():
                 "sellerZone": user.get("sellerZone", ""),
                 "sellerTerritory": user.get("sellerTerritory", ""),
                 "commissionRatePercent": safe_float(user.get("commissionRatePercent"), 0),
-                "salesGoalUsd": seller_snapshot.get("salesGoalUsd", 0.0),
-                "salesMonthUsd": seller_snapshot.get("salesMonthUsd", 0.0),
-                "goalProgressPercent": seller_snapshot.get("goalProgressPercent", 0.0),
-                "ticketAverageUsd": seller_snapshot.get("ticketAverageUsd", 0.0),
-                "activeClientsCount": seller_snapshot.get("activeClientsCount", 0),
-                "newClientsMonth": seller_snapshot.get("newClientsMonth", 0),
+                "salesGoalUsd": sales_goal,
+                "salesMonthUsd": sales_month,
+                "goalProgressPercent": round((sales_month / sales_goal) * 100, 1) if sales_goal > 0 else 0,
+                "ticketAverageUsd": round(sales_total / len(closed_orders), 2) if closed_orders else 0.0,
+                "activeClientsCount": sum(1 for client in clients if client.get("status") == "active"),
+                "newClientsMonth": sum(1 for client in clients if is_current_month(client.get("createdAt"))),
                 "clientsCount": len(clients),
                 "ordersCount": len(orders),
                 "pendingCreditRequests": len(pending_credit),
-                "salesUsd": round(sum(float(order.get("totalUsd") or 0) for order in orders), 2),
+                "salesUsd": sales_total,
                 "openBalanceUsd": round(sum(float(order.get("balanceUsd") or 0) for order in orders), 2),
                 "pendingCommissionUsd": round(
                     sum(
