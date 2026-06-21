@@ -5894,6 +5894,27 @@ def filter_mobile_products(products: list[dict]) -> tuple[list[dict], dict]:
     return [product for product in products if matches(product)], filters
 
 
+def mobile_product_filters_from_request() -> dict:
+    return {
+        "q": request.args.get("q", request.args.get("text", "")).strip().lower(),
+        "category": request.args.get("category", request.args.get("categoryId", "")).strip(),
+        "vertical": request.args.get("vertical", request.args.get("verticalName", "")).strip().lower(),
+        "brand": request.args.get("brand", "").strip().lower(),
+        "stockStatus": request.args.get("stockStatus", "").strip(),
+        "onlyAvailable": api_bool_arg("onlyAvailable") or api_bool_arg("available"),
+        "onlyDiscount": api_bool_arg("onlyDiscount") or api_bool_arg("discount"),
+        "onlyNeedsValidation": api_bool_arg("onlyNeedsValidation") or api_bool_arg("validation"),
+        "minPriceUsd": request.args.get("minPriceUsd", "").strip(),
+        "maxPriceUsd": request.args.get("maxPriceUsd", "").strip(),
+    }
+
+
+def mobile_products_default_list_request() -> bool:
+    filters = mobile_product_filters_from_request()
+    sort = request.args.get("sort", "newest").strip() or "newest"
+    return sort == "newest" and not any(filters.values())
+
+
 def sort_mobile_products(products: list[dict]) -> tuple[list[dict], str]:
     sort = request.args.get("sort", "newest").strip() or "newest"
     sorters = {
@@ -6238,6 +6259,7 @@ def mobile_catalog_company_id(store: dict, profile: dict | None = None) -> str:
 
 def mobile_visible_products(store: dict, company_id: str | None = None) -> list[dict]:
     company_id = company_id or current_company_id(store)
+    rate = currency_context(store).get("exchange_rate", 950)
     orders = [
         order
         for order in store.get("orders", [])
@@ -6249,7 +6271,18 @@ def mobile_visible_products(store: dict, company_id: str | None = None) -> list[
         if item.get("status") == "active" and item.get("visibleInApp")
         and mobile_record_matches_company(item, company_id)
     ]
-    return enrich_inventory_products(products, orders)
+    return enrich_inventory_products(products, orders, exchange_rate=rate)
+
+
+def mobile_visible_product_records(store: dict, company_id: str | None = None) -> list[dict]:
+    company_id = company_id or current_company_id(store)
+    return [
+        item
+        for item in store.get("products", [])
+        if item.get("status") == "active"
+        and item.get("visibleInApp")
+        and mobile_record_matches_company(item, company_id)
+    ]
 
 
 def mobile_product_catalog_price(product: dict | None) -> float:
@@ -6563,8 +6596,9 @@ def mobile_seller_order_payload(order: dict, store: dict) -> dict:
     }
 
 
-def enrich_product(product: dict) -> dict:
-    rate = safe_float(product.get("exchangeRateUsdClp"), current_rate())
+def enrich_product(product: dict, exchange_rate: float | None = None) -> dict:
+    default_rate = current_rate() if exchange_rate is None else exchange_rate
+    rate = safe_float(product.get("exchangeRateUsdClp"), default_rate)
     price = safe_float(product.get("publicPriceUsd"), 0)
     original_price = safe_float(product.get("originalPriceUsd"), price)
     discount = safe_float(product.get("discountPercent"), 0)
@@ -10574,10 +10608,11 @@ def enrich_inventory_product(
     movements: list[dict] | None = None,
     reserved_by_product: dict[str, int] | None = None,
     latest_movement_by_product: dict[str, dict] | None = None,
+    exchange_rate: float | None = None,
 ) -> dict:
     if reserved_by_product is None:
         reserved_by_product = stock_reserved_quantities(orders)
-    enriched = enrich_product(product)
+    enriched = enrich_product(product, exchange_rate=exchange_rate)
     physical_stock = int(enriched.get("stock") or 0)
     committed = int(reserved_by_product.get(enriched["id"], 0))
     available = max(0, physical_stock - committed)
@@ -10622,9 +10657,11 @@ def enrich_inventory_products(
     products: list[dict],
     orders: list[dict],
     movements: list[dict] | None = None,
+    exchange_rate: float | None = None,
 ) -> list[dict]:
     reserved_by_product = stock_reserved_quantities(orders)
     latest_movement_by_product = latest_stock_movements_by_product(movements)
+    rate = current_rate() if exchange_rate is None else exchange_rate
     return [
         enrich_inventory_product(
             product,
@@ -10632,6 +10669,7 @@ def enrich_inventory_products(
             movements,
             reserved_by_product=reserved_by_product,
             latest_movement_by_product=latest_movement_by_product,
+            exchange_rate=rate,
         )
         for product in products
     ]
@@ -19627,7 +19665,15 @@ def api_mobile_seller_summary():
 
     clients = seller_scope_clients(store, user)
     movements = mobile_company_records(store, "credit_movements", user)
-    orders = [enrich_order(order, movements) for order in seller_scope_orders(store, user)]
+    client_ids = {client.get("id", "") for client in clients}
+    seller_id = user.get("id", "")
+    orders = [
+        enrich_order(order, movements)
+        for order in mobile_company_records(store, "orders", user)
+        if user.get("role") != "sales"
+        or order.get("sellerId") == seller_id
+        or order.get("customerId") in client_ids
+    ]
     pending_credit = [
         client for client in clients if client.get("creditRequestStatus") == "pending"
     ]
@@ -21301,6 +21347,26 @@ def api_products():
     if auth_error:
         return auth_error, 401
     company_id = mobile_catalog_company_id(store, profile)
+    if mobile_products_default_list_request():
+        product_records = sorted(
+            mobile_visible_product_records(store, company_id),
+            key=lambda item: str(item.get("createdAt", item.get("id", ""))),
+            reverse=True,
+        )
+        page_records, pagination = api_list_pagination(product_records)
+        company_orders = [
+            order
+            for order in store.get("orders", [])
+            if mobile_record_matches_company(order, company_id)
+        ]
+        rate = currency_context(store).get("exchange_rate", 950)
+        page_products = enrich_inventory_products(page_records, company_orders, exchange_rate=rate)
+        return mobile_api_response(
+            items=[mobile_product_payload(product) for product in page_products],
+            pagination=pagination,
+            filters=mobile_product_filters_from_request(),
+            sort="newest",
+        )
     products = [
         mobile_product_payload(product)
         for product in mobile_visible_products(store, company_id)
